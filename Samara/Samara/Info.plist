@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- LSUIElement removed - app manages its own activation policy -->
+
+	<key>NSCalendarsUsageDescription</key>
+	<string>Samara needs calendar access to check your schedule and help with time-aware responses.</string>
+
+	<key>NSContactsUsageDescription</key>
+	<string>Samara can use contacts to help identify people and personalize responses.</string>
+
+	<key>NSRemindersUsageDescription</key>
+	<string>Samara can access reminders to help manage your tasks.</string>
+
+	<key>NSLocationUsageDescription</key>
+	<string>Samara can use your location for weather, nearby places, and location-aware responses.</string>
+
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Samara can use your location for weather, nearby places, and location-aware responses.</string>
+
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Samara can use your location for weather, nearby places, and location-aware responses.</string>
+
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Samara can access your photos to help organize, search, and describe images.</string>
+
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Samara can save images to your photo library.</string>
+
+	<key>NSCameraUsageDescription</key>
+	<string>Samara can take photos when you request it.</string>
+
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Samara can listen to audio for voice commands or ambient awareness.</string>
+
+	<key>NSHomeKitUsageDescription</key>
+	<string>Samara can control your smart home devices through HomeKit.</string>
+
+	<key>NSAppleMusicUsageDescription</key>
+	<string>Samara can access your music library and control playback.</string>
+
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Samara can interact with Bluetooth devices.</string>
+
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>Samara can interact with Bluetooth devices.</string>
+
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Samara can discover devices on your local network.</string>
+
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_homekit._tcp</string>
+		<string>_hap._tcp</string>
+		<string>_airplay._tcp</string>
+		<string>_raop._tcp</string>
+		<string>_companion-link._tcp</string>
+	</array>
+
+	<key>NSFocusStatusUsageDescription</key>
+	<string>Samara can check your Focus status to avoid interrupting you at bad times.</string>
+
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Samara can process voice commands using speech recognition.</string>
+</dict>
+</plist>

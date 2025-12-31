@@ -1,10 +1,10 @@
 #!/bin/bash
-# screenshot-e: Take screenshot and send to collaborator
+# screenshot: Take screenshot and send to collaborator
 #
 # Uses Pictures folder workaround (discovered 2025-12-21).
 # No UI automation - purely programmatic.
 #
-# Usage: screenshot-e
+# Usage: screenshot
 
 # Load config (with fallbacks)
 source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {

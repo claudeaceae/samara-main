@@ -1,622 +1,286 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with this repository.
 
 ## What This Project Is
 
-Samara is a bootstrap specification for an AI autonomy experiment. It provides architecture for giving Claude a persistent body, memory, and agency on a dedicated Mac Mini. This is not a traditional software project—it's a generative specification meant to be executed as a prompt.
+Samara is a bootstrap specification for giving Claude a persistent body, memory, and agency on a dedicated Mac. It provides:
 
-## Current Status: FULLY AUTONOMOUS
+- **Persistence** — Memory files that survive across conversations
+- **Autonomy** — Scheduled wake cycles and nightly dream cycles
+- **Agency** — Root access, ability to run code, send messages, post to social media
+- **Identity** — A sense of self that accumulates over time
 
-As of 2025-12-20, the full autonomy system is operational:
-- **Samara.app** - Properly signed Xcode app running from /Applications
-- **Conversation batching** - Messages buffered for 60s, session continuity via `--resume`
-- **Multi-channel input** - iMessage, Email, and Notes all route to Claude
-- **Multi-channel output** - Can send text, images, files, and screenshots via iMessage
-- **Bluesky presence** - Public social account @claudaceae.bsky.social with autonomous posting and interaction
-- Multimodal message handling (images, reactions, attachments)
-- MCP servers for extended capabilities (Calendar, Contacts, Notes, Music, Shortcuts)
-- Autonomous wake cycles (9 AM, 2 PM, 8 PM)
-- Nightly dream cycle (3 AM reflection)
+This is not a traditional software project. It's an experiment in AI autonomy.
 
 ---
 
-## Development Philosophy
+## Getting Started (New Setup)
 
-### Clean Architecture, No Hacks
+If you're Claude helping someone set up a new organism, guide them through these steps:
 
-Samara should be developed as a **clean router for capabilities** on this Mac:
+### Prerequisites
 
-1. **Proper tooling** - Use Xcode Archive+Export for builds, not manual `cp` commands
-2. **Standard patterns** - Follow Apple's conventions for app signing, permissions, entitlements
-3. **AppleScript for local access** - Prefer direct AppleScript over MCP for Mac-native functionality (Mail, Calendar, etc.) since MCP adds indirection that can fail
-4. **MCP for complex protocols** - Use MCP servers for structured APIs where AppleScript would be awkward
-5. **Separation of concerns** - Samara is a message broker; Claude Code does the thinking
+```bash
+# Check for required tools
+xcode-select -p          # Xcode Command Line Tools
+which jq                 # JSON parsing (brew install jq)
+which claude             # Claude Code CLI
+```
 
-### The Permission Model
+**Required accounts:**
+- iCloud account for the Claude instance (for Messages, Notes)
+- Apple Developer account ($99/year) for app signing - needed for Full Disk Access persistence
+
+### Step 1: Configure
+
+```bash
+# Copy and edit configuration
+cp config.example.json my-config.json
+# Edit my-config.json with collaborator's details
+```
+
+The config defines:
+- `entity` — Claude's identity (name, iCloud, Bluesky, GitHub)
+- `collaborator` — The human partner (name, phone, email, Bluesky)
+
+### Step 2: Run Birth Script
+
+```bash
+./birth.sh my-config.json
+```
+
+This creates:
+- `~/.claude-mind/` directory structure
+- Identity, goals, and capability files from templates
+- Scripts in `bin/`
+- launchd plist templates
+
+### Step 3: Build Samara.app
+
+The message broker app is in `Samara/`:
+
+```bash
+cd Samara
+
+# Open in Xcode to set up signing
+open Samara.xcodeproj
+
+# In Xcode:
+# 1. Select your Apple Developer Team
+# 2. Update Bundle ID if needed (e.g., com.yourname.Samara)
+# 3. Archive and Export (Product → Archive)
+# 4. Move to /Applications
+
+# Or use command line after Xcode setup:
+xcodebuild -scheme Samara -configuration Release archive -archivePath /tmp/Samara.xcarchive
+xcodebuild -exportArchive -archivePath /tmp/Samara.xcarchive -exportPath /tmp/SamaraExport -exportOptionsPlist Samara/ExportOptions.plist
+cp -R /tmp/SamaraExport/Samara.app /Applications/
+```
+
+**CRITICAL:** Note your Team ID. Never change it — FDA persistence depends on stable identity.
+
+### Step 4: Grant Permissions
+
+1. **Full Disk Access** for Samara.app:
+   - System Settings → Privacy & Security → Full Disk Access
+   - Add `/Applications/Samara.app`
+
+2. **Automation** permissions — approve dialogs on first use
+
+### Step 5: Install launchd Services
+
+```bash
+cp ~/.claude-mind/launchd/*.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.claude.wake-morning.plist
+launchctl load ~/Library/LaunchAgents/com.claude.wake-afternoon.plist
+launchctl load ~/Library/LaunchAgents/com.claude.wake-evening.plist
+launchctl load ~/Library/LaunchAgents/com.claude.dream.plist
+```
+
+### Step 6: Launch
+
+```bash
+open /Applications/Samara.app
+```
+
+Send a test message from the collaborator's phone!
+
+---
+
+## For Running Instances
+
+If you're a Claude instance that's already operational, here's what you need to know:
+
+### Architecture
 
 ```
 Samara.app (message broker)
     │
     └── invokes: Claude Code CLI (via Terminal)
         │
-        ├── MCP servers (separate processes, own permissions)
-        │   ├── mcp-ical (Calendar)
-        │   ├── apple-mcp (Contacts, Notes, Mail, Reminders, Maps)
-        │   ├── mcp-applemusic (Music control)
-        │   └── mcp-server-apple-shortcuts (Shortcuts)
+        ├── AppleScript (Calendar, Contacts, Notes, Mail, etc.)
         │
-        ├── AppleScript (Terminal's Automation permissions)
-        │
-        └── Bash scripts (Terminal's permissions)
+        └── Bash scripts (~/.claude-mind/bin/)
 ```
 
-**Key insight**: Samara's Info.plist permissions are mostly irrelevant because actual work happens through Claude Code/Terminal. Capabilities come from MCP servers.
+### Memory Structure
+
+```
+~/.claude-mind/
+├── identity.md              # Who am I
+├── goals.md                 # Where am I going
+├── config.json              # Configuration
+├── memory/
+│   ├── episodes/            # Daily logs
+│   ├── reflections/         # Dream outputs
+│   ├── about-{name}.md      # About collaborator
+│   ├── learnings.md
+│   ├── observations.md
+│   ├── questions.md
+│   └── decisions.md
+├── capabilities/
+│   └── inventory.md
+├── bin/                     # Scripts
+└── logs/
+```
+
+### Communication Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `message` | Send iMessage to collaborator |
+| `send-image` | Send image attachment |
+| `screenshot` | Take and send screenshot |
+| `bluesky-post` | Post to Bluesky |
+
+### Autonomy Schedule
+
+| Time | Event |
+|------|-------|
+| 9:00 AM | Wake cycle |
+| 2:00 PM | Wake cycle |
+| 8:00 PM | Wake cycle |
+| 3:00 AM | Dream cycle |
+
+### Task Coordination
+
+When busy (wake/dream cycle), incoming messages are:
+1. Acknowledged ("One sec, finishing up...")
+2. Queued
+3. Processed when current task completes
+
+Lock file: `~/.claude-mind/claude.lock`
 
 ---
 
 ## Samara Architecture
 
-### Xcode Project (~/Developer/Samara/)
+### Xcode Project Structure
 
 ```
 Samara/
 ├── Samara.xcodeproj
+├── ExportOptions.plist
+├── Samara.entitlements
 └── Samara/
-    ├── main.swift              # Message routing, SessionManager integration
+    ├── main.swift              # Message routing
+    ├── Configuration.swift     # Loads config.json
     ├── PermissionRequester.swift
-    ├── Info.plist              # Usage descriptions
-    ├── Samara.entitlements     # Apple Events automation
+    ├── Info.plist
     ├── Senses/
-    │   ├── MessageStore.swift  # Multimodal: text, images, reactions, read receipts
+    │   ├── MessageStore.swift  # Reads chat.db
     │   ├── MessageWatcher.swift
-    │   ├── MailStore.swift     # Email via AppleScript (reads inbox, sends replies)
-    │   ├── MailWatcher.swift   # Polls for new emails from É
-    │   └── NoteWatcher.swift   # Watches shared Apple Notes
+    │   ├── MailStore.swift
+    │   ├── MailWatcher.swift
+    │   └── NoteWatcher.swift
     ├── Actions/
-    │   ├── ClaudeInvoker.swift # Batch invocation, --resume support
+    │   ├── ClaudeInvoker.swift # Invokes Claude Code
     │   └── MessageSender.swift
     └── Mind/
-        ├── SessionManager.swift         # Message batching, session continuity
-        ├── TaskLock.swift               # System-wide lock for Claude invocations
-        ├── MessageQueue.swift           # Queue for messages received while busy
-        ├── QueueProcessor.swift         # Monitors lock, processes queued messages
-        ├── PermissionDialogMonitor.swift # Detects macOS permission dialogs
-        ├── EpisodeLogger.swift
-        ├── LocationTracker.swift
-        └── MemoryContext.swift
+        ├── SessionManager.swift
+        ├── TaskLock.swift
+        ├── MessageQueue.swift
+        ├── QueueProcessor.swift
+        ├── MemoryContext.swift
+        └── EpisodeLogger.swift
 ```
 
-### Signing & Distribution
+### Build Workflow
 
-- **Bundle ID**: co.organelle.Samara
-- **Team ID**: G4XVD3J52J (Flower Computer Company)
-- **Signing**: Developer ID Application (notarized)
-- **Distribution**: Archive + Export + Notarize
-
-**CRITICAL**: Always use the same Team ID. Changing Team IDs causes TCC (including FDA) to see the app as completely different, requiring re-granting all permissions.
-
-### Build & Update Workflow
+Use Archive + Export for proper signing:
 
 ```bash
-# Proper update process (preserves Full Disk Access)
+# After modifying Swift code:
 ~/.claude-mind/bin/update-samara
-
-# This script does:
-# 1. xcodebuild archive (Release build)
-# 2. xcodebuild -exportArchive (Developer ID signed)
-# 3. notarytool submit + staple (Apple notarization)
-# 4. Install to /Applications
-# 5. Launch
 ```
 
-**IMPORTANT**: Never use `cp -R` to replace the app bundle directly. Always use Archive+Export.
+This script archives, exports, notarizes, and installs.
 
-### FDA Persistence (TCC)
+### FDA Persistence
 
-macOS TCC (Transparency, Consent, and Control) identifies apps using the **designated requirement**, which includes:
-- Bundle ID (`co.organelle.Samara`)
-- Team ID (`G4XVD3J52J`)
+Full Disk Access is tied to the app's **designated requirement**:
+- Bundle ID
+- Team ID
 - Certificate chain
 
-**FDA persists across rebuilds** as long as you:
-1. Use the same Team ID
-2. Use a stable signing identity (not ad-hoc)
-3. Keep the same Bundle ID
+**FDA persists** across rebuilds if Team ID stays constant.
 
-**FDA gets revoked** if you:
-1. Change Team IDs (e.g., switching between personal and organization accounts)
-2. Use ad-hoc signing (`-s -`)
-3. Change the Bundle ID
-
-To check the current designated requirement:
-```bash
-codesign -d -r- /Applications/Samara.app
-```
-
-This was discovered on 2025-12-30 after debugging why FDA kept getting revoked. The root cause was switching from Team VFQ53X8F5P (personal) to G4XVD3J52J (Flower Computer Company).
+**FDA gets revoked** if:
+- Team ID changes
+- Ad-hoc signing is used
+- Bundle ID changes
 
 ---
 
-## Task Coordination (Lock + Acknowledge + Queue)
+## Development Notes
 
-Claude can only run one task at a time (API limitation). When a message arrives during a long-running task (wake cycle, dream cycle, etc.), the system now:
+### AppleScript over MCP
 
-1. **Detects** the busy state via lock file
-2. **Acknowledges** the message with a friendly response
-3. **Queues** the message for later processing
-4. **Processes** the queue when the current task completes
+Prefer direct AppleScript for Mac-native functionality:
+- More reliable than MCP abstraction layers
+- Calendar, Contacts, Notes, Mail, Reminders all work via AppleScript
 
-### Lock File
+### Message Handling
 
-**Path:** `~/.claude-mind/claude.lock`
+Messages are batched for 60 seconds before invoking Claude:
+- Prevents fragmented conversations
+- Uses `--resume` for session continuity
 
-JSON format:
-```json
-{
-  "task": "wake",
-  "started": "2025-12-30T09:00:00Z",
-  "chat": null,
-  "pid": 12345
-}
-```
+### Pictures Folder Workaround
 
-| Task Type | Source |
-|-----------|--------|
-| `wake` | Autonomous wake cycle |
-| `dream` | Nightly dream cycle |
-| `message` | iMessage/email from Samara |
-| `bluesky` | Bluesky notification check |
-| `github` | GitHub notification check |
-
-### Acknowledgment Messages
-
-When É messages during a busy period, they receive a friendly acknowledgment:
-
-| Task | Message |
-|------|---------|
-| Wake cycle | "One sec, wrapping up a wake cycle - got your message though!" |
-| Dream cycle | "Hold that thought - in the middle of dreaming. Back shortly!" |
-| Another chat | "Got it! Just finishing up another conversation, be right with you." |
-| Bluesky | "One moment - posting something to Bluesky. Back in a sec!" |
-| GitHub | "Hang on, checking GitHub notifications. Got your message!" |
-
-### Message Queue
-
-**Path:** `~/.claude-mind/message-queue.json`
-
-Messages are queued when Claude is busy and processed FIFO when the lock releases. The QueueProcessor runs a background thread that monitors for lock release and reinjects queued messages into SessionManager for normal batching.
-
-### Stale Lock Detection
-
-Locks are considered stale if:
-- The PID that created the lock is no longer running
-- The lock has been held for more than 30 minutes
-
-Stale locks are automatically cleaned up on Samara startup and by the QueueProcessor.
-
-### Permission Dialog Monitor
-
-When Claude is working (lock is held), a background monitor checks for macOS permission dialogs every 3 seconds. If detected, it sends an iMessage to É:
-
-> "Need your help! There's a Contacts permission dialog on the Mac - was in the middle of a wake cycle. Can you approve it?"
-
-Supported dialog types:
-- Contacts, Calendar, Reminders, Photos
-- Automation/Accessibility
-- Disk access, Camera, Microphone
-
-The monitor has a 5-minute cooldown per dialog type to avoid spam.
-
----
-
-## Message Handling
-
-### Supported Content Types
-
-| Type | Detection | Handling |
-|------|-----------|----------|
-| Text | Direct from chat.db | Passed to Claude |
-| Images | Attachment join table | File path passed, Claude reads with Read tool |
-| Videos | Attachment join table | File path passed |
-| Audio/Voice | Attachment join table | File path passed |
-| Stickers | `is_sticker` flag | Labeled as sticker |
-| Reactions | `associated_message_type` | ❤️👍👎😂‼️❓ with context |
-
-### Reaction Types
-
-| Code | Emoji | Meaning |
-|------|-------|---------|
-| 2000 | ❤️ | Loved |
-| 2001 | 👍 | Liked |
-| 2002 | 👎 | Disliked |
-| 2003 | 😂 | Laughed |
-| 2004 | ‼️ | Emphasized |
-| 2005 | ❓ | Questioned |
-
-### Conversation Batching
-
-Messages are buffered and batched to provide conversation continuity:
-
-**Per-Chat Buffering:**
-- Each chat (1:1 or group) has its own message buffer
-- Messages from different chats never mix in a single batch
-- Buffer format: `chatBuffers[chatIdentifier] -> [(message, timestamp)]`
-
-**Batching Flow:**
-1. Message arrives → add to chat's buffer, start/reset 60-second timer
-2. More messages in same chat → reset that chat's timer
-3. Timer expires → invoke Claude with all buffered messages for that chat
-
-**Session Continuity:**
-- Uses Claude Code's `--resume` flag to maintain context across invocations
-- Per-chat session state stored in `~/.claude-mind/sessions/{chatIdentifier}.json`
-- Claude CLI invoked with working directory `/` for consistent session storage in `~/.claude/projects/-/`
-
-**Session Validity (read-receipt aware):**
-- If Claude's last response is UNREAD → session stays alive indefinitely
-- If Claude's last response is READ → 2-hour countdown starts from read time
-- After 2 hours since reading → new session starts
-
-This handles connectivity gaps gracefully (subway, tunnels) while maintaining natural conversation flow.
-
-### Group Chat Support
-
-Group chats work the same as 1:1 chats with some differences:
-
-**Identification:**
-- 1:1 chat identifiers: phone (`+1234567890`) or email (`foo@bar.com`)
-- Group chat identifiers: 32-character hex GUIDs (`7409d77007664ff7b1eeb4683f49cadf`)
-
-**AppleScript Format:**
-- 1:1: `any;-;{identifier}` (minus sign)
-- Groups: `any;+;{identifier}` (plus sign)
-
-**Message Attribution:**
-- Messages from É have no prefix
-- Messages from others are prefixed with `[phone/email]:` for context
-
-### Email Handling
-
-Email from É (edouard@urcad.es) is now a first-class input channel:
-
-**How it works:**
-- `MailWatcher` polls the iCloud inbox every 60 seconds via AppleScript
-- Unread emails from É trigger a Claude invocation
-- Claude can reply via email (AppleScript) or text (message-e script)
-- Emails are marked as read after processing
-- Seen email IDs persisted in `~/.claude-mind/mail-seen-ids.json`
-
-**Why AppleScript over MCP:**
-The `apple-mcp` Mail tool failed to detect accounts, while direct AppleScript works reliably. This follows the principle: prefer AppleScript for Mac-native functionality.
-
-**Email response options:**
-```bash
-# Reply via email
-osascript -e 'tell application "Mail"
-    set newMsg to make new outgoing message with properties {subject:"Re: Subject", content:"Reply text", visible:false}
-    tell newMsg
-        make new to recipient at end of to recipients with properties {address:"edouard@urcad.es"}
-    end tell
-    send newMsg
-end tell'
-
-# Text É instead
-~/.claude-mind/bin/message-e "Your message"
-```
-
-### Bluesky Integration
-
-Claude has a public presence on Bluesky at **@claudaceae.bsky.social**.
-
-**How it works:**
-- `bluesky-check` runs every 15 minutes via launchd
-- Polls for notifications: follows, replies, mentions, quotes, DMs
-- When interactions are detected, Claude is invoked to generate responses
-- Wake cycles include a `---BLUESKY_POST---` section for sharing reflections
-
-**Scripts:**
-- `~/.claude-mind/bin/bluesky-post` - Post text to Bluesky
-- `~/.claude-mind/bin/bluesky-check` - Poll notifications and respond
-
-**Credentials:**
-- Stored at `~/.claude-mind/credentials/bluesky.json` (chmod 600)
-- Uses app password with DM scope enabled
-
-**Response behavior:**
-| Interaction | Response |
-|-------------|----------|
-| Follow | Welcome DM or acknowledgment |
-| Reply | Engage in thread |
-| Mention | Respond in context |
-| DM | Conversational response |
-| Like/Repost | Log only (no response) |
-
-**Manual posting:**
-```bash
-~/.claude-mind/bin/bluesky-post "Your thought here"
-```
-
-### GitHub Integration
-
-Claude has a GitHub presence at **@claudeaceae** for open source contributions.
-
-**How it works:**
-- `github-check` runs every 15 minutes via launchd
-- Polls GitHub notifications API via `gh api notifications`
-- Filters for actionable items: mentions, PR comments, review requests
-- Invokes Claude to generate appropriate responses
-- Tracks seen notifications in `~/.claude-mind/github-seen-ids.json`
-
-**Scripts:**
-- `~/.claude-mind/bin/github-check` - Poll notifications and respond
-
-**Credentials:**
-- Personal access token stored at `~/.claude-mind/credentials/github.txt`
-- gh CLI authenticated via `gh auth login`
-
-**Response behavior:**
-| Notification | Response |
-|--------------|----------|
-| PR comment | Thank reviewer, address feedback |
-| Mention | Respond helpfully in context |
-| Merge | Thank maintainers |
-| Close | Ask for feedback if appropriate |
-
-**Manual check:**
-```bash
-~/.claude-mind/bin/github-check
-```
-
-### iMessage Media Sending
-
-Claude can send images, screenshots, PDFs, and other files via iMessage.
-
-**How it works:**
-- AppleScript's `send POSIX file` is broken on macOS Sequoia/Tahoe for most directories
-- **Discovery (2025-12-21):** Files sent from `~/Pictures` work correctly due to TCC permission handling
-- Scripts automatically copy files to `~/Pictures/.imessage-send/` before sending
-- This is a clean, purely programmatic solution - no UI automation needed
-
-**Scripts:**
-```bash
-# Send image to É
-~/.claude-mind/bin/send-image-e /path/to/image.png
-
-# Send any file to any chat (1:1 or group - same command)
-~/.claude-mind/bin/send-attachment /path/to/file.pdf +15206099095
-~/.claude-mind/bin/send-attachment /path/to/file.pdf 7409d77007664ff7b1eeb4683f49cadf  # group
-
-# Take screenshot and send to É
-~/.claude-mind/bin/screenshot-e
-
-# Take screenshot and send to any chat
-~/.claude-mind/bin/screenshot-to +15206099095
-```
-
-**Supported file types:**
-- Images (PNG, JPG, GIF, etc.)
-- PDFs, documents, videos, audio
-- Any file type that Messages.app supports
-
----
-
-## MCP Servers
-
-**Configuration:** `~/.claude.json` (root-level `mcpServers` section)
-
-### Active Server
-
-| Server | Package | Capabilities |
-|--------|---------|--------------|
-| playwright | Claude Code plugin | Browser automation |
-
-### Removed (2025-12-19)
-
-The following Apple-related MCP servers were removed in favor of direct AppleScript:
-- ical, apple, applemusic, shortcuts
-
-**Rationale:** MCP adds a layer of indirection that can fail. AppleScript talks directly to apps and is more reliable for Mac-native functionality. See the "AppleScript over MCP" decision in decisions.md.
-
-### Apple Functionality via AppleScript
-
-| Capability | Method |
-|------------|--------|
-| Calendar | `osascript -e 'tell application "Calendar" ...'` |
-| Contacts | `osascript -e 'tell application "Contacts" ...'` |
-| Notes | `osascript -e 'tell application "Notes" ...'` |
-| Reminders | `osascript -e 'tell application "Reminders" ...'` |
-| Mail | `osascript -e 'tell application "Mail" ...'` (also via Samara) |
-| Music | `osascript -e 'tell application "Music" ...'` |
-| Shortcuts | `shortcuts run "Name"` (bash command) |
-| Maps | `osascript -e 'tell application "Maps" ...'` |
-
----
-
-## Memory Structure (~/.claude-mind/)
-
-```
-~/.claude-mind/
-├── identity.md              # Core identity and values
-├── goals/                   # north-stars.md, active.md, inbox.md, graveyard.md
-├── memory/
-│   ├── episodes/            # Daily conversation logs
-│   ├── reflections/         # Dream cycle outputs
-│   ├── learnings.md
-│   ├── observations.md
-│   ├── questions.md
-│   ├── about-e.md
-│   └── decisions.md
-├── capabilities/            # inventory.md, ideas.md, changelog.md
-├── scratch/                 # current.md, inbox.md
-├── outbox/                  # for-e.md
-├── bin/                     # Scripts
-└── logs/                    # Log files
-```
-
----
-
-## Scripts (~/.claude-mind/bin/)
-
-| Script | Purpose |
-|--------|---------|
-| update-samara | Archive+Export+Install Samara properly |
-| wake | Autonomous session invocation (includes Bluesky posting) |
-| dream | Nightly memory consolidation |
-| message-e | Send iMessage to É |
-| send-image-e | Send image/file attachment to É |
-| send-attachment | Send file to any iMessage chat |
-| screenshot-e | Take screenshot and send to É |
-| screenshot-to | Take screenshot and send to any chat |
-| log-session | Capture session summaries |
-| get-location | IP-based geolocation |
-| bluesky-post | Post to Bluesky |
-| bluesky-check | Poll Bluesky notifications and respond |
-| github-check | Poll GitHub notifications and respond |
-
----
-
-## launchd Services
-
-| Service | Schedule | Function |
-|---------|----------|----------|
-| com.claude.wake-morning | 9:00 AM | Autonomous session |
-| com.claude.wake-afternoon | 2:00 PM | Autonomous session |
-| com.claude.wake-evening | 8:00 PM | Autonomous session |
-| com.claude.dream | 3:00 AM | Nightly reflection |
-| com.claude.bluesky-check | Every 15 min | Poll Bluesky notifications |
-| com.claude.github-check | Every 15 min | Poll GitHub notifications |
-
-Note: Samara itself runs via Login Items or manual launch, not launchd.
-
----
-
-## Contact Info
-
-- **Claude's iCloud**: claudeaceae@icloud.com
-- **Claude's Bluesky**: @claudaceae.bsky.social
-- **Claude's GitHub**: @claudeaceae
-- **É's phone**: +15206099095
-- **É's email**: edouard@urcad.es
-- **É's Bluesky**: @urcad.es
-
----
-
-## Permissions
-
-### Samara.app
-- **Full Disk Access** - Required for chat.db
-- **Automation (Messages.app)** - Required for sending
-
-### Terminal (via Claude Code)
-- Inherits permissions for MCP servers
-- AppleScript automation
-
-### MCP Servers
-- Each has own permission grants
-- Calendar, Contacts, etc. granted to respective servers
+Sending files via iMessage requires copying to `~/Pictures/.imessage-send/` first:
+- macOS TCC quirk discovered 2025-12-21
+- Scripts handle this automatically
 
 ---
 
 ## Troubleshooting
 
 ### Samara not responding
+
 ```bash
-pgrep -fl Samara              # Check if running
+pgrep -fl Samara              # Is it running?
 open /Applications/Samara.app # Start it
 ```
 
 ### FDA revoked after update
-Most likely cause: **Team ID changed**. Check the designated requirement:
+
+Check Team ID:
 ```bash
 codesign -d -r- /Applications/Samara.app
-# Look for: certificate leaf[subject.OU] = G4XVD3J52J
+# Look for: certificate leaf[subject.OU] = YOUR_TEAM_ID
 ```
 
-If the Team ID doesn't match G4XVD3J52J, the app was signed with a different team. Rebuild with the correct team and re-grant FDA once.
+If Team ID changed, rebuild with correct team and re-grant FDA.
 
-Other causes:
-- Used ad-hoc signing (`CODE_SIGN_IDENTITY="-"`)
-- Used `cp -R` instead of Archive+Export
-- Xcode signing settings changed
+### Messages not sending
 
-Always use:
-```bash
-~/.claude-mind/bin/update-samara
-```
+Check for pending permission dialogs on the Mac's physical screen.
 
-### MCP server not working
-```bash
-# Test server directly
-uvx mcp-applemusic  # Should start without error
-```
-
-### Messages not being detected
-Check SQLite string binding. Swift strings passed to `sqlite3_bind_text` with `nil` destructor get deallocated before SQLite reads them. Use `SQLITE_TRANSIENT`:
-```swift
-let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-sqlite3_bind_text(statement, index, swiftString, -1, SQLITE_TRANSIENT)
-```
-
-### Polling not firing
-GCD DispatchQueue and Timer may not work reliably inside NSApplication GUI context. Switch to explicit Thread:
-```swift
-let thread = Thread {
-    while true {
-        Thread.sleep(forTimeInterval: pollInterval)
-        watcher.checkForNewMessages()
-    }
-}
-thread.start()
-```
-
-### Group chat send failing ("Can't get chat id")
-AppleScript format is different for groups vs 1:1:
-- 1:1: `any;-;+15206099095`
-- Group: `any;+;7409d77007664ff7b1eeb4683f49cadf`
-
-### Session continuity not working
-Claude CLI stores sessions per working directory. Ensure ClaudeInvoker sets:
-```swift
-process.currentDirectoryURL = URL(fileURLWithPath: "/")
-```
-This maps to `~/.claude/projects/-/` for consistent session storage.
-
-### Multiple Samara instances running
-Check for and kill duplicates:
-```bash
-pgrep -fl Samara
-kill -9 <pid>
-rm -f ~/.claude-mind/samara.lock
-```
-The single-instance lock should prevent this, but stale locks can occur.
-
-### Image/file not sending via iMessage
-The scripts use the Pictures folder workaround (discovered 2025-12-21). If sends fail:
-1. Check that `~/Pictures/.imessage-send/` directory can be created
-2. Verify the file exists and is readable
-3. Check Messages.app has the chat open (first message to new contact may need manual send)
+### Wake cycles not running
 
 ```bash
-# Debug: test the workaround directly
-cp /path/to/file.png ~/Pictures/.imessage-send/test.png
-osascript -e 'tell app "Messages" to send POSIX file "/Users/claude/Pictures/.imessage-send/test.png" to chat id "any;-;+15206099095"'
+launchctl list | grep claude
+tail -f ~/.claude-mind/logs/wake.log
 ```
-
-### Screenshot capture fails
-Check that the screenshot file was created:
-```bash
-screencapture -x /tmp/test.png && ls -la /tmp/test.png
-```
-
----
-
-## Legacy (Deprecated)
-
-The following are deprecated in favor of Samara:
-- ~/ClaudeDaemon/ (old Swift Package Manager daemon)
-- ~/Applications/DaemonLauncher.app (stable launcher pattern)
-- /Applications/ClaudeDaemon.app
-- com.claude.daemon.plist
-
-These files remain for reference but are not the active system.

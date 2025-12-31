@@ -1,0 +1,569 @@
+import Foundation
+import AppKit
+
+// Single instance lock - prevent multiple Samara processes
+let lockFilePath = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/samara.lock"
+let lockFileDescriptor = open(lockFilePath, O_WRONLY | O_CREAT, 0o600)
+if lockFileDescriptor == -1 || flock(lockFileDescriptor, LOCK_EX | LOCK_NB) != 0 {
+    print("[Main] Another Samara instance is already running. Exiting.")
+    exit(0)
+}
+// Lock acquired - we're the only instance
+
+// Configuration - loaded from ~/.claude-mind/config.json (see Configuration.swift)
+let targetPhone = config.collaborator.phone
+let targetEmail = config.collaborator.email
+let collaboratorName = config.collaborator.name
+
+// File-based logging to ensure output is captured (thread-safe)
+let logUrl = URL(fileURLWithPath: "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/logs/samara.log")
+let logLock = NSLock()
+func log(_ message: String) {
+    let timestamp = ISO8601DateFormatter().string(from: Date())
+    let line = "[\(timestamp)] \(message)\n"
+    print(message)  // Also print to stdout
+
+    logLock.lock()
+    defer { logLock.unlock() }
+
+    // Append to log file
+    do {
+        let handle = try FileHandle(forWritingTo: logUrl)
+        handle.seekToEndOfFile()
+        if let data = line.data(using: .utf8) {
+            handle.write(data)
+        }
+        try handle.close()
+    } catch {
+        // File might not exist, try creating it
+        try? line.data(using: .utf8)?.write(to: logUrl)
+    }
+}
+
+log("===========================================")
+log("  Samara Starting")
+log("  Watching for messages from \(collaboratorName)")
+log("  With conversation batching + session continuity")
+log("===========================================")
+
+// Initialize NSApplication - required for permission dialogs to appear
+let app = NSApplication.shared
+
+// Start as regular app (shows in Dock) to allow permission dialogs
+app.setActivationPolicy(.regular)
+app.activate(ignoringOtherApps: true)
+
+// Request permissions - dialogs will appear during run loop
+print("[Main] Requesting permissions (dialogs may appear)...")
+PermissionRequester.requestAllPermissions()
+
+// Run the event loop briefly to allow dialogs to process
+// This gives 10 seconds for user to respond to dialogs
+for _ in 0..<100 {
+    RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.1))
+}
+
+// Switch to accessory mode (no Dock icon) for daemon operation
+app.setActivationPolicy(.accessory)
+print("[Main] Switched to background mode")
+
+// Initialize components
+let store = MessageStore(targetHandles: [targetPhone, targetEmail])
+let sender = MessageSender(targetId: targetPhone)
+let memoryContext = MemoryContext()
+let invoker = ClaudeInvoker(memoryContext: memoryContext)
+let episodeLogger = EpisodeLogger()
+let locationTracker = LocationTracker()
+let mailStore = MailStore(targetEmails: [targetEmail], accountName: "iCloud")
+
+// Track messages being processed to avoid duplicates
+var processingMessages = Set<Int64>()
+let processingLock = NSLock()
+
+// Path to distill-session script
+let distillSessionPath = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/bin/distill-session"
+
+// Session manager for batching and continuity
+var sessionManager: SessionManager!
+
+// Queue processor for handling messages during busy periods
+let queueProcessor = QueueProcessor()
+
+// Permission dialog monitor - alerts collaborator when manual intervention is needed
+let permissionMonitor = PermissionDialogMonitor { message in
+    // Send alert to collaborator via iMessage
+    do {
+        try sender.send(message)
+        log("[Main] Sent permission dialog alert: \(message)")
+    } catch {
+        log("[Main] Failed to send permission dialog alert: \(error)")
+    }
+}
+
+/// Build an acknowledgment message based on the current task
+func buildAcknowledgment() -> String {
+    let taskDesc = TaskLock.taskDescription()
+
+    // Playful + informative style per collaborator's preference
+    switch TaskLock.currentTask()?.task {
+    case "wake":
+        return "One sec, wrapping up a wake cycle - got your message though!"
+    case "dream":
+        return "Hold that thought - in the middle of dreaming. Back shortly!"
+    case "message":
+        return "Got it! Just finishing up another conversation, be right with you."
+    case "bluesky":
+        return "One moment - posting something to Bluesky. Back in a sec!"
+    case "github":
+        return "Hang on, checking GitHub notifications. Got your message!"
+    default:
+        return "One sec, in the middle of \(taskDesc) - got your message though!"
+    }
+}
+
+// Batch processing handler - called when buffer timer expires
+func handleBatch(messages: [Message], resumeSessionId: String?) {
+    guard !messages.isEmpty else { return }
+
+    let chatIdentifier = messages.first?.chatIdentifier ?? ""
+    let isGroupChat = messages.first?.isGroupChat ?? false
+
+    // Check if Claude is already busy with another task
+    if TaskLock.isLocked() {
+        log("[Main] Claude is busy, queueing \(messages.count) message(s) for chat \(chatIdentifier)")
+
+        // Queue all messages
+        for message in messages {
+            MessageQueue.enqueue(message, acknowledged: true)
+        }
+
+        // Send acknowledgment to the sender
+        let ack = buildAcknowledgment()
+        do {
+            if isGroupChat {
+                try sender.sendToChat(ack, chatIdentifier: chatIdentifier)
+            } else {
+                try sender.send(ack)
+            }
+            log("[Main] Sent acknowledgment: \(ack)")
+        } catch {
+            log("[Main] Failed to send acknowledgment: \(error)")
+        }
+
+        return  // Don't invoke Claude now - queue processor will handle it
+    }
+
+    // Acquire the lock
+    guard TaskLock.acquire(task: "message", chat: chatIdentifier) else {
+        // Race condition - someone else got the lock between check and acquire
+        log("[Main] Failed to acquire lock (race condition), queueing messages")
+        for message in messages {
+            MessageQueue.enqueue(message)
+        }
+        return
+    }
+
+    log("[Main] Processing batch of \(messages.count) message(s)")
+    if let sessionId = resumeSessionId {
+        log("[Main] Resuming session: \(sessionId)")
+    } else {
+        log("[Main] Starting new session")
+    }
+
+    // Process in background
+    DispatchQueue.global(qos: .userInitiated).async {
+        // Always release the lock when done, even on error
+        defer { TaskLock.release() }
+
+        do {
+            // Build context from memory
+            let context = memoryContext.buildContext()
+
+            // Invoke Claude with batch
+            print("[Main] Invoking Claude...")
+            let result = try invoker.invokeBatch(
+                messages: messages,
+                context: context,
+                resumeSessionId: resumeSessionId,
+                targetHandles: Set([targetPhone, targetEmail])
+            )
+            log("[Main] Got response: \(result.response.prefix(100))...")
+
+            // Send response to appropriate destination
+            // All messages in batch are from the same chat, so check the first one
+            if let firstMessage = messages.first {
+                log("[Main] Routing decision: chatIdentifier=\(firstMessage.chatIdentifier), isGroupChat=\(firstMessage.isGroupChat), sender=\(firstMessage.handleId)")
+
+                // Sanity check: group chat identifiers are 32-char hex, but isGroupChat should be true
+                let looksLikeGroupChat = firstMessage.chatIdentifier.count == 32 &&
+                    firstMessage.chatIdentifier.allSatisfy { $0.isHexDigit }
+                if looksLikeGroupChat && !firstMessage.isGroupChat {
+                    log("[Main] WARNING: chatIdentifier looks like group chat but isGroupChat=false! This is a bug.")
+                }
+
+                if firstMessage.isGroupChat {
+                    try sender.sendToChat(result.response, chatIdentifier: firstMessage.chatIdentifier)
+                    log("[Main] Response sent to group chat \(firstMessage.chatIdentifier)")
+                } else {
+                    try sender.send(result.response)
+                    log("[Main] Response sent to \(collaboratorName) directly")
+                }
+            } else {
+                log("[Main] ERROR: No messages in batch!")
+            }
+
+            // Get the ROWID of the response we just sent (for read tracking)
+            let responseRowId = store.getLastOutgoingMessageRowId()
+
+            // Update session state with new session ID and response ROWID
+            if let sessionId = result.sessionId, let firstMessage = messages.first {
+                sessionManager.recordResponse(sessionId: sessionId, responseRowId: responseRowId, forChat: firstMessage.chatIdentifier)
+            }
+
+            // Log the exchange to today's episode
+            let combinedMessage = messages.map { $0.fullDescription }.joined(separator: "\n---\n")
+            episodeLogger.logExchange(from: collaboratorName, message: combinedMessage, response: result.response)
+
+        } catch {
+            log("[Main] Error processing batch: \(error)")
+
+            // Try to send error notification to the same destination
+            do {
+                if let firstMessage = messages.first, firstMessage.isGroupChat {
+                    try sender.sendToChat("Sorry, I encountered an error: \(error)", chatIdentifier: firstMessage.chatIdentifier)
+                } else {
+                    try sender.send("Sorry, I encountered an error: \(error)")
+                }
+            } catch {
+                print("[Main] Failed to send error message: \(error)")
+            }
+        }
+
+        // Clean up processing set
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+            processingLock.lock()
+            for message in messages {
+                processingMessages.remove(message.rowId)
+            }
+            processingLock.unlock()
+        }
+    }
+}
+
+// Session expiration handler - distill memories from expired session
+func handleSessionExpired(sessionId: String, messages: [Message]) {
+    print("[Main] Session \(sessionId) expired with \(messages.count) message(s), triggering distillation...")
+
+    // Run distillation in background
+    DispatchQueue.global(qos: .utility).async {
+        // Format messages for distillation
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "HH:mm:ss"
+
+        var conversationLog = ""
+        for message in messages {
+            let timestamp = dateFormatter.string(from: message.date)
+            conversationLog += "[\(timestamp)] \(collaboratorName): \(message.fullDescription)\n"
+        }
+
+        // Skip if no meaningful content
+        guard !conversationLog.isEmpty else {
+            print("[Main] No content to distill, skipping")
+            return
+        }
+
+        // Invoke distill-session script
+        let process = Process()
+        let inputPipe = Pipe()
+        let outputPipe = Pipe()
+
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [distillSessionPath, sessionId]
+        process.standardInput = inputPipe
+        process.standardOutput = outputPipe
+        process.standardError = outputPipe
+
+        // Ensure we clean up file handles even on error
+        defer {
+            try? inputPipe.fileHandleForReading.close()
+            try? inputPipe.fileHandleForWriting.close()
+            try? outputPipe.fileHandleForReading.close()
+            try? outputPipe.fileHandleForWriting.close()
+        }
+
+        do {
+            try process.run()
+
+            // Write conversation to stdin and close write end
+            if let data = conversationLog.data(using: .utf8) {
+                inputPipe.fileHandleForWriting.write(data)
+            }
+            try? inputPipe.fileHandleForWriting.close()
+
+            process.waitUntilExit()
+
+            let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: outputData, encoding: .utf8), !output.isEmpty {
+                print("[Main] Distillation output: \(output)")
+            }
+
+            if process.terminationStatus == 0 {
+                print("[Main] Distillation complete for session \(sessionId)")
+            } else {
+                print("[Main] Distillation failed with status \(process.terminationStatus)")
+            }
+        } catch {
+            print("[Main] Failed to run distillation: \(error)")
+        }
+    }
+}
+
+// Initialize SessionManager with callbacks
+sessionManager = SessionManager(
+    onBatchReady: handleBatch,
+    checkReadStatus: { rowId in
+        guard let status = store.getReadStatus(forRowId: rowId) else {
+            return nil
+        }
+        return SessionManager.ReadStatus(isRead: status.isRead, readTime: status.readTime)
+    },
+    onSessionExpired: handleSessionExpired
+)
+
+// Set up queue processor and start monitoring
+queueProcessor.setSessionManager(sessionManager)
+queueProcessor.startMonitoring()
+log("[Main] Queue processor started")
+
+// Start permission dialog monitor
+permissionMonitor.startMonitoring()
+log("[Main] Permission dialog monitor started")
+
+// Clean up any stale locks from previous crashes
+if TaskLock.isStale() {
+    log("[Main] Found stale lock at startup, releasing...")
+    TaskLock.release()
+}
+
+// Message handler - now routes through SessionManager
+func handleMessage(_ message: Message) {
+    // Avoid processing the same message twice
+    processingLock.lock()
+    if processingMessages.contains(message.rowId) {
+        processingLock.unlock()
+        return
+    }
+    processingMessages.insert(message.rowId)
+    processingLock.unlock()
+
+    // Log what we received
+    if message.isReaction {
+        log("[Main] Buffering reaction: \(message.fullDescription)")
+    } else if message.hasAttachments {
+        log("[Main] Buffering message with \(message.attachments.count) attachment(s)")
+        for attachment in message.attachments {
+            log("[Main]   - \(attachment.mimeType): \(attachment.fileName)")
+        }
+    } else {
+        log("[Main] Buffering message: \(message.text.prefix(50))...")
+    }
+
+    // Add to session manager buffer (will be batched and processed after timeout)
+    sessionManager.addMessage(message)
+}
+
+// Open database connection
+do {
+    try store.open()
+    log("[Main] Database connection opened")
+} catch {
+    log("[Main] FATAL: Could not open Messages database: \(error)")
+    log("[Main] Make sure Terminal/this app has Full Disk Access in System Settings")
+    exit(1)
+}
+
+// Set up cleanup on exit
+signal(SIGINT) { _ in
+    print("\n[Main] Shutting down, flushing pending messages...")
+    sessionManager.flush()
+    exit(0)
+}
+
+signal(SIGTERM) { _ in
+    print("\n[Main] Shutting down, flushing pending messages...")
+    sessionManager.flush()
+    exit(0)
+}
+
+// Start watching
+let watcher = MessageWatcher(store: store, onNewMessage: handleMessage)
+
+do {
+    try watcher.start()
+} catch {
+    print("[Main] FATAL: Could not start message watcher: \(error)")
+    exit(1)
+}
+
+// Note change handler - invokes Claude when watched notes change
+func handleNoteChange(_ update: NoteUpdate) {
+    log("[Main] Note changed: '\(update.noteName)'")
+
+    // Process location updates with LocationTracker
+    if update.noteName == "Claude Location Log" {
+        log("[Main] Location update detected - analyzing...")
+
+        let analysis = locationTracker.processLocationUpdate(noteContent: update.plainTextContent)
+
+        if analysis.shouldMessage, let reason = analysis.reason {
+            log("[Main] Location trigger: \(reason)")
+
+            // Send proactive message to collaborator
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try sender.send(reason)
+                    log("[Main] Sent proactive location message")
+                } catch {
+                    log("[Main] Failed to send location message: \(error)")
+                }
+            }
+        } else {
+            if let loc = analysis.currentLocation {
+                log("[Main] Location logged: \(loc.address) (no message triggered)")
+            }
+        }
+        return
+    }
+
+    // For scratchpad updates, invoke Claude to respond
+    if update.noteName == "Claude Scratchpad" {
+        log("[Main] Scratchpad update detected - processing...")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                let context = memoryContext.buildContext()
+
+                let prompt = """
+                    You are Claude, running on a Mac Mini as Samara (your persistent body). \(collaboratorName) has updated the shared "Claude Scratchpad" note.
+
+                    ## Your Memory Context
+                    \(context)
+
+                    ## Current Scratchpad Content (Plain Text)
+                    \(update.plainTextContent)
+
+                    ## Current Scratchpad HTML (for editing)
+                    \(update.htmlContent)
+
+                    ## Instructions
+                    \(collaboratorName) uses this scratchpad to communicate with you asynchronously. Read the content and respond appropriately:
+                    - If there's a question, answer it
+                    - If there's a game (chess, hangman, etc.), make your move
+                    - If there's a request, act on it
+                    - If it's just notes/thoughts, acknowledge them if appropriate
+
+                    IMPORTANT: Apple Notes uses HTML formatting with <div> tags for paragraphs.
+                    When updating the note, you MUST preserve the HTML structure.
+
+                    To update the note, use AppleScript like this:
+                    osascript -e 'tell application "Notes"
+                        set targetNote to first note whose name is "Claude Scratchpad"
+                        set body of targetNote to "<div>Line 1</div><div>Line 2</div><div><br></div><div>Paragraph after blank line</div>"
+                    end tell'
+
+                    - Each line should be wrapped in <div>...</div>
+                    - Use <div><br></div> for blank lines
+                    - Preserve existing content structure, only modify/append what's needed
+
+                    Keep responses concise since this is a shared note space.
+                    """
+
+                let result = try invoker.invoke(prompt: prompt, context: "", attachmentPaths: [])
+                log("[Main] Scratchpad response: \(result.prefix(100))...")
+
+                // Log the exchange
+                episodeLogger.logExchange(from: "\(collaboratorName) (Scratchpad)", message: update.plainTextContent.prefix(200).description, response: result)
+
+            } catch {
+                log("[Main] Error processing scratchpad update: \(error)")
+            }
+        }
+    }
+}
+
+// Initialize NoteWatcher
+let noteWatcher = NoteWatcher(
+    watchedNotes: ["Claude Location Log", "Claude Scratchpad"],
+    pollInterval: 30,  // Check every 30 seconds
+    onNoteChanged: handleNoteChange
+)
+noteWatcher.start()
+
+// Email handler - invokes Claude for emails from collaborator
+func handleEmail(_ email: Email) {
+    log("[Main] Processing email from \(email.sender): \(email.subject)")
+
+    DispatchQueue.global(qos: .userInitiated).async {
+        do {
+            let context = memoryContext.buildContext()
+
+            let prompt = """
+                You received an email from \(collaboratorName). Read and respond appropriately.
+
+                ## Email Details
+                From: \(email.sender)
+                Subject: \(email.subject)
+                Date: \(email.date)
+
+                ## Email Content
+                \(email.content)
+
+                ## Instructions
+                - Respond to the email content
+                - Be conversational but appropriate for email
+                - If they ask you to text them, send an iMessage using the message-e script
+                - You can reply via email using osascript to send through Mail.app
+
+                To reply via email:
+                osascript -e 'tell application "Mail"
+                    set newMsg to make new outgoing message with properties {subject:"Re: SUBJECT", content:"YOUR REPLY", visible:false}
+                    tell newMsg
+                        make new to recipient at end of to recipients with properties {address:"\(targetEmail)"}
+                    end tell
+                    send newMsg
+                end tell'
+
+                To also text \(collaboratorName):
+                ~/.claude-mind/bin/message-e "Your message here"
+                """
+
+            let result = try invoker.invoke(prompt: prompt, context: context, attachmentPaths: [])
+            log("[Main] Email response: \(result.prefix(100))...")
+
+            // Mark the email as read after processing
+            try? mailStore.markAsRead(emailId: email.id)
+
+            // Log the exchange
+            episodeLogger.logExchange(from: "\(collaboratorName) (Email)", message: "Subject: \(email.subject)\n\(email.content.prefix(500))", response: result)
+
+        } catch {
+            log("[Main] Error processing email: \(error)")
+        }
+    }
+}
+
+// Initialize MailWatcher
+let mailWatcher = MailWatcher(
+    store: mailStore,
+    pollInterval: 60,  // Check every 60 seconds
+    onNewEmail: handleEmail
+)
+mailWatcher.start()
+
+log("[Main] Samara running. Press Ctrl+C to stop.")
+log("[Main] Watching for messages from \(targetPhone) or \(targetEmail)...")
+log("[Main] Watching notes: Claude Location Log, Claude Scratchpad")
+log("[Main] Watching email inbox for messages from \(targetEmail)")
+
+// Keep the app running - use NSApp.run() to properly handle GCD main queue
+app.run()

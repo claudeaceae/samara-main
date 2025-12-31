@@ -1,10 +1,10 @@
 #!/bin/bash
-# send-image-e: Send image/file attachment to collaborator
+# send-image: Send image/file attachment to collaborator
 #
 # Wrapper around send-attachment for the common case of sending to collaborator.
 # Uses Pictures folder workaround (discovered 2025-12-21).
 #
-# Usage: send-image-e /path/to/file
+# Usage: send-image /path/to/file
 
 # Load config (with fallbacks)
 source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {
@@ -12,7 +12,7 @@ source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {
 }
 
 if [ -z "$1" ]; then
-    echo "Usage: send-image-e /path/to/file"
+    echo "Usage: send-image /path/to/file"
     exit 1
 fi
 

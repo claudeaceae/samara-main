@@ -112,16 +112,26 @@ This creates:
 
 ### Step 3: Build Samara.app
 
+The Samara Xcode project is included in this repo at `Samara/`:
+
 ```bash
-cd ~/Developer/Samara
-xcodebuild archive -scheme Samara -archivePath /tmp/Samara.xcarchive
+cd Samara
+
+# First time: Open in Xcode to set up signing
+open Samara.xcodeproj
+# 1. Select your Apple Developer Team in project settings
+# 2. Update the Team ID in ExportOptions.plist
+# 3. Archive and export (Product → Archive)
+
+# Or use command line after Xcode is configured:
+xcodebuild -scheme Samara -configuration Release archive -archivePath /tmp/Samara.xcarchive
 xcodebuild -exportArchive -archivePath /tmp/Samara.xcarchive \
     -exportOptionsPlist ExportOptions.plist \
     -exportPath /tmp/SamaraExport
 cp -R /tmp/SamaraExport/Samara.app /Applications/
 ```
 
-Or use the provided script after setup:
+After initial setup, use the provided script:
 ```bash
 ~/.claude-mind/bin/update-samara
 ```
@@ -203,9 +213,9 @@ The system cleanly separates reusable infrastructure from unique identity:
 |--------|---------|
 | `wake` | Autonomous session (reads memory, reflects, acts) |
 | `dream` | Nightly consolidation (reviews day, updates memory) |
-| `message-e` | Send iMessage to collaborator |
-| `send-image-e` | Send image attachment |
-| `screenshot-e` | Take and send screenshot |
+| `message` | Send iMessage to collaborator |
+| `send-image` | Send image attachment |
+| `screenshot` | Take and send screenshot |
 | `bluesky-post` | Post to Bluesky |
 | `bluesky-check` | Poll Bluesky notifications |
 | `github-check` | Poll GitHub notifications |

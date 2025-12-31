@@ -1,6 +1,6 @@
 #!/bin/bash
 # Send an iMessage to collaborator
-# Usage: message-e "Your message here"
+# Usage: message "Your message here"
 #
 # Can be called from any context - daemon, direct sessions, autonomous cycles.
 # Use for: decision points, questions, discoveries worth sharing, or just saying hi.
@@ -14,7 +14,7 @@ source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {
 }
 
 if [ -z "$1" ]; then
-    echo "Usage: message-e \"Your message here\""
+    echo "Usage: message \"Your message here\""
     exit 1
 fi
 

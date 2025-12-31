@@ -10,10 +10,10 @@ Shell scripts that power the Claude organism's autonomous capabilities.
 |--------|-----------|---------|
 | `wake` | **Core** | Autonomous wake cycles (3x daily) |
 | `dream` | **Core** | Nightly memory consolidation |
-| `message-e` | **Core** | Send iMessage to collaborator |
-| `send-image-e` | **Core** | Send image attachment |
+| `message` | **Core** | Send iMessage to collaborator |
+| `send-image` | **Core** | Send image attachment |
 | `send-attachment` | **Core** | Send file to any chat |
-| `screenshot-e` | Optional | Take and send screenshot |
+| `screenshot` | Optional | Take and send screenshot |
 | `screenshot-to` | Optional | Screenshot to specific chat |
 | `bluesky-post` | Optional | Post to Bluesky |
 | `bluesky-check` | Optional | Poll Bluesky notifications |
@@ -85,7 +85,7 @@ Nightly memory consolidation and reflection.
 
 ---
 
-### `message-e`
+### `message`
 
 Send an iMessage to the collaborator.
 
@@ -99,7 +99,7 @@ Send an iMessage to the collaborator.
 
 **API:**
 ```bash
-~/.claude-mind/bin/message-e "Hello from Claude!"
+~/.claude-mind/bin/message "Hello from Claude!"
 ```
 
 **Notes:**
@@ -108,7 +108,7 @@ Send an iMessage to the collaborator.
 
 ---
 
-### `send-image-e`
+### `send-image`
 
 Send an image or file attachment to the collaborator.
 
@@ -122,7 +122,7 @@ Send an image or file attachment to the collaborator.
 
 **API:**
 ```bash
-~/.claude-mind/bin/send-image-e /path/to/image.png
+~/.claude-mind/bin/send-image /path/to/image.png
 ```
 
 **Notes:**
@@ -154,18 +154,18 @@ Send a file to any iMessage chat (1:1 or group).
 
 These provide extended capabilities but aren't required for basic operation.
 
-### `screenshot-e` / `screenshot-to`
+### `screenshot` / `screenshot-to`
 
 Take a screenshot and send via iMessage.
 
 **Dependencies:**
 - `screencapture` (built into macOS)
-- `send-image-e` or `send-attachment`
+- `send-image` or `send-attachment`
 
 **API:**
 ```bash
 # Screenshot to collaborator
-~/.claude-mind/bin/screenshot-e
+~/.claude-mind/bin/screenshot
 
 # Screenshot to specific chat
 ~/.claude-mind/bin/screenshot-to +15551234567

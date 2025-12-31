@@ -1,34 +1,77 @@
 #!/bin/bash
 # Updates Samara via proper Archive+Export workflow with Developer ID signing + notarization
 # This should preserve FDA across rebuilds since notarized apps get stable TCC treatment
+#
+# Usage: update-samara [samara-dir]
+#
+# If no directory specified, looks for Samara in:
+#   1. $SAMARA_DIR environment variable
+#   2. ~/Developer/Samara (legacy location)
+#   3. Relative to this script's repo (../Samara)
 
 set -e
 
-SAMARA_DIR="/Users/claude/Developer/Samara"
+# Find Samara directory
+find_samara_dir() {
+    # Check environment variable
+    if [ -n "$SAMARA_DIR" ] && [ -d "$SAMARA_DIR" ]; then
+        echo "$SAMARA_DIR"
+        return
+    fi
+
+    # Check legacy location
+    if [ -d "$HOME/Developer/Samara" ]; then
+        echo "$HOME/Developer/Samara"
+        return
+    fi
+
+    # Check relative to script (for repo-based setup)
+    local script_dir="$(cd "$(dirname "$0")" && pwd)"
+    local repo_samara="$(dirname "$script_dir")/Samara"
+    if [ -d "$repo_samara" ]; then
+        echo "$repo_samara"
+        return
+    fi
+
+    echo ""
+}
+
+SAMARA_DIR="${1:-$(find_samara_dir)}"
+
+if [ -z "$SAMARA_DIR" ] || [ ! -d "$SAMARA_DIR" ]; then
+    echo "Error: Cannot find Samara directory"
+    echo "Usage: update-samara [samara-dir]"
+    echo ""
+    echo "Or set SAMARA_DIR environment variable"
+    exit 1
+fi
+
+echo "Using Samara directory: $SAMARA_DIR"
+
 ARCHIVE_PATH="/tmp/Samara.xcarchive"
 EXPORT_PATH="/tmp/SamaraExport"
-EXPORT_OPTIONS="/tmp/ExportOptions.plist"
+EXPORT_OPTIONS="$SAMARA_DIR/ExportOptions.plist"
 NOTARY_PROFILE="notarytool-samara"
 
-echo "🔨 Building Samara with Developer ID signing..."
+# Check for ExportOptions.plist
+if [ ! -f "$EXPORT_OPTIONS" ]; then
+    echo "Error: ExportOptions.plist not found at $EXPORT_OPTIONS"
+    echo ""
+    echo "Create ExportOptions.plist with your Team ID:"
+    echo '<?xml version="1.0" encoding="UTF-8"?>'
+    echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+    echo '<plist version="1.0">'
+    echo '<dict>'
+    echo '    <key>method</key>'
+    echo '    <string>developer-id</string>'
+    echo '    <key>teamID</key>'
+    echo '    <string>YOUR_TEAM_ID</string>'
+    echo '</dict>'
+    echo '</plist>'
+    exit 1
+fi
 
-# Create export options for Developer ID
-cat > "$EXPORT_OPTIONS" << 'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>method</key>
-    <string>developer-id</string>
-    <key>teamID</key>
-    <string>G4XVD3J52J</string>
-    <key>signingStyle</key>
-    <string>manual</string>
-    <key>signingCertificate</key>
-    <string>Developer ID Application</string>
-</dict>
-</plist>
-EOF
+echo "🔨 Building Samara with Developer ID signing..."
 
 # Stop running Samara
 echo "⏹️  Stopping existing Samara..."
@@ -54,15 +97,17 @@ cd "$EXPORT_PATH"
 
 # Submit for notarization
 echo "🔏 Submitting for notarization (this may take a few minutes)..."
-xcrun notarytool submit "Samara.zip" --keychain-profile "$NOTARY_PROFILE" --wait
+if ! xcrun notarytool submit "Samara.zip" --keychain-profile "$NOTARY_PROFILE" --wait; then
+    echo ""
+    echo "⚠️  Notarization failed. You may need to set up notarytool credentials:"
+    echo "   xcrun notarytool store-credentials notarytool-samara --apple-id YOUR_APPLE_ID --team-id YOUR_TEAM_ID"
+    echo ""
+    echo "Continuing with non-notarized build (FDA may not persist)..."
+fi
 
-# Staple the ticket to the app
+# Staple the ticket to the app (if notarization succeeded)
 echo "📎 Stapling notarization ticket..."
-xcrun stapler staple "Samara.app"
-
-# Verify stapling
-echo "✅ Verifying notarization..."
-spctl -a -v "Samara.app"
+xcrun stapler staple "Samara.app" 2>/dev/null || true
 
 # Install
 echo "📲 Installing to /Applications..."
@@ -74,7 +119,5 @@ echo "🚀 Launching Samara..."
 open /Applications/Samara.app
 
 echo ""
-echo "✅ Samara updated and notarized successfully!"
-echo ""
-echo "FDA should now persist across future rebuilds."
+echo "✅ Samara updated successfully!"
 echo ""
