@@ -1,0 +1,37 @@
+#!/bin/bash
+# Get location - tries native CoreLocation first, falls back to IP geolocation
+
+# Try native location first (if GetLocation.app has permission)
+NATIVE_LOC=$("$HOME/.claude-mind/bin/GetLocation.app/Contents/MacOS/GetLocation" 2>/dev/null)
+if [ $? -eq 0 ] && [ -n "$NATIVE_LOC" ]; then
+    echo "Source: Native CoreLocation (GPS/WiFi)"
+    echo "$NATIVE_LOC"
+    exit 0
+fi
+
+# Fall back to IP geolocation
+IP_INFO=$(curl -s --max-time 5 ipinfo.io/json 2>/dev/null)
+if [ $? -eq 0 ] && [ -n "$IP_INFO" ]; then
+    CITY=$(echo "$IP_INFO" | grep '"city"' | sed 's/.*: "\(.*\)".*/\1/')
+    REGION=$(echo "$IP_INFO" | grep '"region"' | sed 's/.*: "\(.*\)".*/\1/')
+    COUNTRY=$(echo "$IP_INFO" | grep '"country"' | sed 's/.*: "\(.*\)".*/\1/')
+    LOC=$(echo "$IP_INFO" | grep '"loc"' | sed 's/.*: "\(.*\)".*/\1/')
+    POSTAL=$(echo "$IP_INFO" | grep '"postal"' | sed 's/.*: "\(.*\)".*/\1/')
+    TZ=$(echo "$IP_INFO" | grep '"timezone"' | sed 's/.*: "\(.*\)".*/\1/')
+
+    LAT=$(echo "$LOC" | cut -d',' -f1)
+    LON=$(echo "$LOC" | cut -d',' -f2)
+
+    echo "Source: IP Geolocation (approximate)"
+    echo "City: $CITY"
+    echo "Region: $REGION"
+    echo "Country: $COUNTRY"
+    echo "Latitude: $LAT"
+    echo "Longitude: $LON"
+    echo "Postal Code: $POSTAL"
+    echo "Timezone: $TZ"
+    exit 0
+fi
+
+echo "Error: Could not determine location"
+exit 1

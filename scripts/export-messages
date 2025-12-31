@@ -1,0 +1,179 @@
+#!/usr/bin/env swift
+
+import Foundation
+import SQLite3
+
+let dbPath = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent("Library/Messages/chat.db")
+    .path
+
+let handles = ["+15206099095", "edouard@urcad.es"]
+let outputPath = FileManager.default.homeDirectoryForCurrentUser
+    .appendingPathComponent(".claude-mind/memory/backfill/imessage-history.md")
+    .path
+
+var db: OpaquePointer?
+guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+    print("Failed to open database")
+    exit(1)
+}
+
+let handleList = handles.map { "'\($0)'" }.joined(separator: ", ")
+
+let query = """
+    SELECT
+        m.ROWID,
+        datetime(m.date/1000000000 + 978307200, 'unixepoch', 'localtime') as time,
+        m.is_from_me,
+        m.text,
+        m.attributedBody,
+        h.id as handle_id
+    FROM message m
+    LEFT JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+    LEFT JOIN chat_handle_join chj ON cmj.chat_id = chj.chat_id
+    LEFT JOIN handle h ON chj.handle_id = h.ROWID
+    WHERE h.id IN (\(handleList))
+    ORDER BY m.date ASC
+    """
+
+var statement: OpaquePointer?
+guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
+    print("Failed to prepare query: \(String(cString: sqlite3_errmsg(db)))")
+    exit(1)
+}
+
+/// Decodes NSKeyedArchiver attributedBody blob to extract plain text
+func decodeAttributedBody(_ data: Data) -> String? {
+    do {
+        if let attributedString = try NSKeyedUnarchiver.unarchivedObject(
+            ofClass: NSAttributedString.self,
+            from: data
+        ) {
+            return attributedString.string
+        }
+    } catch {
+        // Fallback: search for readable text in the blob
+        // Skip the binary preamble and look for the actual text content
+        // The text in attributedBody is typically stored after some markers
+
+        // Find sequences of printable characters
+        var runs: [(String, Int)] = []
+        var currentRun = ""
+
+        for byte in data {
+            // Printable ASCII range plus some extended chars
+            if (byte >= 0x20 && byte < 0x7F) || byte >= 0xC0 {
+                let scalar = UnicodeScalar(byte)
+                currentRun.append(Character(scalar))
+            } else if byte == 0x0A || byte == 0x0D { // newlines
+                currentRun.append("\n")
+            } else {
+                if currentRun.count >= 2 {
+                    runs.append((currentRun, currentRun.count))
+                }
+                currentRun = ""
+            }
+        }
+        if currentRun.count >= 2 {
+            runs.append((currentRun, currentRun.count))
+        }
+
+        // Filter out metadata strings and find the actual message
+        let filtered = runs.filter { run, _ in
+            !run.contains("NSAttributed") &&
+            !run.contains("NSDictionary") &&
+            !run.contains("NSArray") &&
+            !run.contains("NSString") &&
+            !run.contains("NSObject") &&
+            !run.contains("NSMutable") &&
+            !run.contains("NSNumber") &&
+            !run.contains("NSValue") &&
+            !run.contains("$class") &&
+            !run.contains("__kIM") &&
+            !run.contains("MessagePart") &&
+            !run.contains("AttributeName") &&
+            !run.hasPrefix("NS.") &&
+            !run.hasPrefix("$") &&
+            !run.hasPrefix("_") &&
+            run.count > 3
+        }
+
+        // Return the longest meaningful string (usually the message content)
+        if let best = filtered.max(by: { $0.1 < $1.1 }) {
+            return best.0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    return nil
+}
+
+var output = """
+# Message History Backfill
+
+Historical iMessage conversations with É, decoded from Messages database.
+Exported on \(Date())
+
+---
+
+"""
+
+var currentDate = ""
+var messageCount = 0
+
+while sqlite3_step(statement) == SQLITE_ROW {
+    guard let timePtr = sqlite3_column_text(statement, 1) else { continue }
+    let timeString = String(cString: timePtr)
+    let datePart = String(timeString.prefix(10))
+
+    if datePart != currentDate {
+        currentDate = datePart
+        output += "\n## \(datePart)\n"
+    }
+
+    let isFromMe = sqlite3_column_int(statement, 2) != 0
+    let sender = isFromMe ? "Claude" : "É"
+
+    var text: String? = nil
+
+    // Try text column first
+    if let textPtr = sqlite3_column_text(statement, 3) {
+        let textStr = String(cString: textPtr)
+        if !textStr.isEmpty {
+            text = textStr
+        }
+    }
+
+    // Try attributedBody if no text
+    if text == nil {
+        if let blobPointer = sqlite3_column_blob(statement, 4) {
+            let blobSize = sqlite3_column_bytes(statement, 4)
+            let data = Data(bytes: blobPointer, count: Int(blobSize))
+            text = decodeAttributedBody(data)
+        }
+    }
+
+    guard let messageText = text, !messageText.isEmpty else { continue }
+
+    // Skip metadata-only messages
+    if messageText.contains("__kIM") || messageText.contains("NSAttributed") ||
+       messageText.contains("streamtyped") || messageText == "streamtyped" ||
+       (messageText.hasPrefix("+") && messageText.count < 5) {
+        continue
+    }
+
+    // Extract time part (HH:mm) from "YYYY-MM-DD HH:mm:ss"
+    let components = timeString.split(separator: " ")
+    let timePart = components.count > 1 ? String(components[1].prefix(5)) : "??:??"
+    output += "\n**\(timePart) \(sender):** \(messageText)\n"
+    messageCount += 1
+}
+
+sqlite3_finalize(statement)
+sqlite3_close(db)
+
+do {
+    try output.write(toFile: outputPath, atomically: true, encoding: .utf8)
+    print("Exported \(messageCount) messages to \(outputPath)")
+} catch {
+    print("Failed to write: \(error)")
+}

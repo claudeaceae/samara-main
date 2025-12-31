@@ -66,7 +66,7 @@ Samara/
     ├── main.swift              # Message routing, SessionManager integration
     ├── PermissionRequester.swift
     ├── Info.plist              # Usage descriptions
-    ├── Samara.entitlements     # HomeKit, App Groups
+    ├── Samara.entitlements     # Apple Events automation
     ├── Senses/
     │   ├── MessageStore.swift  # Multimodal: text, images, reactions, read receipts
     │   ├── MessageWatcher.swift
@@ -77,7 +77,11 @@ Samara/
     │   ├── ClaudeInvoker.swift # Batch invocation, --resume support
     │   └── MessageSender.swift
     └── Mind/
-        ├── SessionManager.swift # Message batching, session continuity
+        ├── SessionManager.swift         # Message batching, session continuity
+        ├── TaskLock.swift               # System-wide lock for Claude invocations
+        ├── MessageQueue.swift           # Queue for messages received while busy
+        ├── QueueProcessor.swift         # Monitors lock, processes queued messages
+        ├── PermissionDialogMonitor.swift # Detects macOS permission dialogs
         ├── EpisodeLogger.swift
         ├── LocationTracker.swift
         └── MemoryContext.swift
@@ -86,9 +90,11 @@ Samara/
 ### Signing & Distribution
 
 - **Bundle ID**: co.organelle.Samara
-- **Team ID**: VFQ53X8F5P
-- **Signing**: Apple Development certificate
-- **Distribution**: Archive + Export (preserves FDA across updates)
+- **Team ID**: G4XVD3J52J (Flower Computer Company)
+- **Signing**: Developer ID Application (notarized)
+- **Distribution**: Archive + Export + Notarize
+
+**CRITICAL**: Always use the same Team ID. Changing Team IDs causes TCC (including FDA) to see the app as completely different, requiring re-granting all permissions.
 
 ### Build & Update Workflow
 
@@ -98,12 +104,109 @@ Samara/
 
 # This script does:
 # 1. xcodebuild archive (Release build)
-# 2. xcodebuild -exportArchive (properly signed)
-# 3. Install to /Applications
-# 4. Launch
+# 2. xcodebuild -exportArchive (Developer ID signed)
+# 3. notarytool submit + staple (Apple notarization)
+# 4. Install to /Applications
+# 5. Launch
 ```
 
 **IMPORTANT**: Never use `cp -R` to replace the app bundle directly. Always use Archive+Export.
+
+### FDA Persistence (TCC)
+
+macOS TCC (Transparency, Consent, and Control) identifies apps using the **designated requirement**, which includes:
+- Bundle ID (`co.organelle.Samara`)
+- Team ID (`G4XVD3J52J`)
+- Certificate chain
+
+**FDA persists across rebuilds** as long as you:
+1. Use the same Team ID
+2. Use a stable signing identity (not ad-hoc)
+3. Keep the same Bundle ID
+
+**FDA gets revoked** if you:
+1. Change Team IDs (e.g., switching between personal and organization accounts)
+2. Use ad-hoc signing (`-s -`)
+3. Change the Bundle ID
+
+To check the current designated requirement:
+```bash
+codesign -d -r- /Applications/Samara.app
+```
+
+This was discovered on 2025-12-30 after debugging why FDA kept getting revoked. The root cause was switching from Team VFQ53X8F5P (personal) to G4XVD3J52J (Flower Computer Company).
+
+---
+
+## Task Coordination (Lock + Acknowledge + Queue)
+
+Claude can only run one task at a time (API limitation). When a message arrives during a long-running task (wake cycle, dream cycle, etc.), the system now:
+
+1. **Detects** the busy state via lock file
+2. **Acknowledges** the message with a friendly response
+3. **Queues** the message for later processing
+4. **Processes** the queue when the current task completes
+
+### Lock File
+
+**Path:** `~/.claude-mind/claude.lock`
+
+JSON format:
+```json
+{
+  "task": "wake",
+  "started": "2025-12-30T09:00:00Z",
+  "chat": null,
+  "pid": 12345
+}
+```
+
+| Task Type | Source |
+|-----------|--------|
+| `wake` | Autonomous wake cycle |
+| `dream` | Nightly dream cycle |
+| `message` | iMessage/email from Samara |
+| `bluesky` | Bluesky notification check |
+| `github` | GitHub notification check |
+
+### Acknowledgment Messages
+
+When É messages during a busy period, they receive a friendly acknowledgment:
+
+| Task | Message |
+|------|---------|
+| Wake cycle | "One sec, wrapping up a wake cycle - got your message though!" |
+| Dream cycle | "Hold that thought - in the middle of dreaming. Back shortly!" |
+| Another chat | "Got it! Just finishing up another conversation, be right with you." |
+| Bluesky | "One moment - posting something to Bluesky. Back in a sec!" |
+| GitHub | "Hang on, checking GitHub notifications. Got your message!" |
+
+### Message Queue
+
+**Path:** `~/.claude-mind/message-queue.json`
+
+Messages are queued when Claude is busy and processed FIFO when the lock releases. The QueueProcessor runs a background thread that monitors for lock release and reinjects queued messages into SessionManager for normal batching.
+
+### Stale Lock Detection
+
+Locks are considered stale if:
+- The PID that created the lock is no longer running
+- The lock has been held for more than 30 minutes
+
+Stale locks are automatically cleaned up on Samara startup and by the QueueProcessor.
+
+### Permission Dialog Monitor
+
+When Claude is working (lock is held), a background monitor checks for macOS permission dialogs every 3 seconds. If detected, it sends an iMessage to É:
+
+> "Need your help! There's a Contacts permission dialog on the Mac - was in the middle of a wake cycle. Can you approve it?"
+
+Supported dialog types:
+- Contacts, Calendar, Reminders, Photos
+- Automation/Accessibility
+- Disk access, Camera, Microphone
+
+The monitor has a 5-minute cooldown per dialog type to avoid spam.
 
 ---
 
@@ -390,7 +493,7 @@ Note: Samara itself runs via Login Items or manual launch, not launchd.
 
 ## Contact Info
 
-- **Claude's iCloud**: claudaceae@icloud.com
+- **Claude's iCloud**: claudeaceae@icloud.com
 - **Claude's Bluesky**: @claudaceae.bsky.social
 - **Claude's GitHub**: @claudeaceae
 - **É's phone**: +15206099095
@@ -424,7 +527,20 @@ open /Applications/Samara.app # Start it
 ```
 
 ### FDA revoked after update
-You used the wrong update method. Always use:
+Most likely cause: **Team ID changed**. Check the designated requirement:
+```bash
+codesign -d -r- /Applications/Samara.app
+# Look for: certificate leaf[subject.OU] = G4XVD3J52J
+```
+
+If the Team ID doesn't match G4XVD3J52J, the app was signed with a different team. Rebuild with the correct team and re-grant FDA once.
+
+Other causes:
+- Used ad-hoc signing (`CODE_SIGN_IDENTITY="-"`)
+- Used `cp -R` instead of Archive+Export
+- Xcode signing settings changed
+
+Always use:
 ```bash
 ~/.claude-mind/bin/update-samara
 ```

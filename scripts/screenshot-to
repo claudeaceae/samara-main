@@ -1,0 +1,39 @@
+#!/bin/bash
+# screenshot-to: Take screenshot and send to any iMessage chat
+#
+# Uses Pictures folder workaround (discovered 2025-12-21).
+# No UI automation - purely programmatic.
+#
+# Usage: screenshot-to chat_identifier
+#
+# chat_identifier can be:
+#   - Phone number: +15206099095
+#   - Email: someone@example.com
+#   - Group chat GUID: 7409d77007664ff7b1eeb4683f49cadf
+
+if [ -z "$1" ]; then
+    echo "Usage: screenshot-to chat_identifier"
+    echo ""
+    echo "Examples:"
+    echo "  screenshot-to +15206099095"
+    echo "  screenshot-to someone@icloud.com"
+    echo "  screenshot-to 7409d77007664ff7b1eeb4683f49cadf"
+    exit 1
+fi
+
+CHAT_ID="$1"
+TEMP_FILE="/tmp/screenshot-$(date +%s).png"
+
+# Capture screenshot
+screencapture -x "$TEMP_FILE"
+
+if [ ! -f "$TEMP_FILE" ]; then
+    echo "Error: Failed to capture screenshot"
+    exit 1
+fi
+
+# Send it
+~/.claude-mind/bin/send-attachment "$TEMP_FILE" "$CHAT_ID"
+
+# Clean up
+rm -f "$TEMP_FILE"

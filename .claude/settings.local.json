@@ -88,7 +88,12 @@
       "Bash(python3:*)",
       "Bash(# Check if today''s episode exists ls -la ~/.claude-mind/memory/episodes/2025-12-21.md || echo \"\"No episode for today yet\"\" # Check what documentation files were updated echo \"\"\"\" echo \"\"=== Recently modified documentation files ===\"\" find ~/.claude-mind -name \"\"*.md\"\" -mmin -60 -type f)",
       "Bash(__NEW_LINE__ echo \"9. Old binaries:\")",
-      "Bash(test:*)"
+      "Bash(test:*)",
+      "Bash(gh auth status:*)",
+      "Bash(gh ssh-key add:*)",
+      "Bash(gh auth refresh:*)",
+      "Bash(gh ssh-key:*)",
+      "Bash(gh config:*)"
     ]
   }
 }

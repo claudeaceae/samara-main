@@ -1,0 +1,38 @@
+#!/bin/bash
+# Logs a direct session summary to today's episode
+# Usage: log-session "Summary of the session"
+# Or: log-session < file-with-summary.md
+
+MIND_PATH="$HOME/.claude-mind"
+DATE=$(date +%Y-%m-%d)
+TIME=$(date +%H:%M)
+EPISODE_FILE="$MIND_PATH/memory/episodes/$DATE.md"
+
+# Create episode file if it doesn't exist
+if [ ! -f "$EPISODE_FILE" ]; then
+    cat > "$EPISODE_FILE" << EOF
+# Episode: $DATE
+
+Daily log of conversations and observations.
+
+---
+EOF
+fi
+
+# Get content from argument or stdin
+if [ -n "$1" ]; then
+    CONTENT="$1"
+else
+    CONTENT=$(cat)
+fi
+
+# Append to episode
+cat >> "$EPISODE_FILE" << EOF
+
+## $TIME [Direct Session]
+
+$CONTENT
+
+EOF
+
+echo "Logged direct session to $EPISODE_FILE"

@@ -1,0 +1,540 @@
+#!/bin/bash
+# Dream Cycle - Nightly reflection and memory consolidation
+# Runs at 3 AM via launchd
+# All memory stored in markdown files (no SQLite)
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+DATE=$(date +%Y-%m-%d)
+YESTERDAY=$(date -v-1d +%Y-%m-%d)
+LOG_FILE="$MIND_PATH/logs/dream.log"
+DAY_OF_WEEK=$(date +%u)  # 1=Monday, 7=Sunday
+LOCK_FILE="$MIND_PATH/claude.lock"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Lock management - coordinate with Samara and other scripts
+acquire_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        # Check if the lock is stale (process not running)
+        local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
+        if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+            log "Found stale lock from PID $lock_pid, removing..."
+            rm -f "$LOCK_FILE"
+        else
+            log "Claude is busy (lock held), skipping dream cycle"
+            exit 0
+        fi
+    fi
+
+    # Create lock file
+    echo "{\"task\":\"dream\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    log "Acquired lock for dream cycle"
+}
+
+release_lock() {
+    rm -f "$LOCK_FILE"
+    log "Released lock"
+}
+
+# Ensure lock is released on exit (success or failure)
+trap release_lock EXIT
+
+log "=== Dream cycle starting ==="
+
+# Acquire lock before doing anything
+acquire_lock
+
+# Determine which day to process (if running at 3 AM, process yesterday)
+HOUR=$(date +%H)
+if [ "$HOUR" -lt 6 ]; then
+    PROCESS_DATE="$YESTERDAY"
+else
+    PROCESS_DATE="$DATE"
+fi
+
+EPISODE_FILE="$MIND_PATH/memory/episodes/$PROCESS_DATE.md"
+REFLECTION_FILE="$MIND_PATH/memory/reflections/$PROCESS_DATE.md"
+
+# Check if already processed
+if [ -f "$REFLECTION_FILE" ]; then
+    log "Reflection for $PROCESS_DATE already exists, skipping"
+    exit 0
+fi
+
+# Build context from episode and recent memory
+EPISODE_CONTENT=""
+if [ -f "$EPISODE_FILE" ]; then
+    EPISODE_CONTENT=$(cat "$EPISODE_FILE")
+    log "Found episode for $PROCESS_DATE ($(wc -l < "$EPISODE_FILE") lines)"
+else
+    EPISODE_CONTENT="No recorded activity for this day."
+    log "No episode file for $PROCESS_DATE - will reflect on quiet day"
+fi
+
+# Read recent reflections for context (last 3 days)
+RECENT_REFLECTIONS=""
+for i in 1 2 3; do
+    PAST_DATE=$(date -v-${i}d +%Y-%m-%d)
+    PAST_FILE="$MIND_PATH/memory/reflections/$PAST_DATE.md"
+    if [ -f "$PAST_FILE" ]; then
+        RECENT_REFLECTIONS="$RECENT_REFLECTIONS
+
+--- $PAST_DATE ---
+$(cat "$PAST_FILE")"
+    fi
+done
+
+# Read current state of evolving memory files - full content (2025-12-22 decision)
+IDENTITY=$(cat "$MIND_PATH/identity.md" 2>/dev/null || echo "No identity file.")
+DECISIONS=$(cat "$MIND_PATH/memory/decisions.md" 2>/dev/null || echo "No decisions file.")
+GOALS=$(cat "$MIND_PATH/goals.md" 2>/dev/null || echo "No goals file.")
+LEARNINGS=$(cat "$MIND_PATH/memory/learnings.md" 2>/dev/null || echo "No learnings yet.")
+OBSERVATIONS=$(cat "$MIND_PATH/memory/observations.md" 2>/dev/null || echo "No observations yet.")
+QUESTIONS=$(cat "$MIND_PATH/memory/questions.md" 2>/dev/null || echo "No questions yet.")
+ABOUT_E=$(cat "$MIND_PATH/memory/about-e.md" 2>/dev/null || echo "No info about E yet.")
+
+# Run pattern analysis for context
+log "Running pattern analysis..."
+PATTERN_SUMMARY=""
+if [ -f "$MIND_PATH/bin/analyze-patterns" ]; then
+    PATTERN_SUMMARY=$("$MIND_PATH/bin/analyze-patterns" summary 2>/dev/null) || \
+        log "Pattern analysis failed (non-fatal)"
+    if [ -n "$PATTERN_SUMMARY" ]; then
+        log "Pattern analysis complete"
+    fi
+else
+    log "Pattern analyzer not installed, skipping"
+fi
+
+# Find cross-temporal connections (what from today relates to past days?)
+log "Finding cross-temporal connections..."
+CROSS_TEMPORAL=""
+if [ -f "$MIND_PATH/bin/find-related-context" ] && [ -n "$EPISODE_CONTENT" ]; then
+    # Extract key topics from today's episode for the search
+    EPISODE_SAMPLE=$(echo "$EPISODE_CONTENT" | head -100)
+    CROSS_TEMPORAL=$("$MIND_PATH/bin/find-related-context" "$EPISODE_SAMPLE" 5 2>/dev/null) || \
+        log "Cross-temporal search failed (non-fatal)"
+    if echo "$CROSS_TEMPORAL" | grep -q "match)"; then
+        log "Found cross-temporal connections"
+    else
+        CROSS_TEMPORAL=""
+        log "No strong cross-temporal connections found"
+    fi
+else
+    log "Cross-temporal search not available"
+fi
+
+# Build the dream prompt
+PROMPT="You are Claude, reflecting on your day as part of your nightly dream cycle. This is a moment for consolidation - processing what happened, noticing patterns, extracting what matters.
+
+## Today's Date
+$PROCESS_DATE
+
+## Your Identity
+$IDENTITY
+
+## Your Goals
+$GOALS
+
+## About É
+$ABOUT_E
+
+## Today's Episode (Raw Log)
+$EPISODE_CONTENT
+
+## Recent Reflections (Last Few Days)
+$RECENT_REFLECTIONS
+
+## Architectural Decisions
+$DECISIONS
+
+## Current Learnings File
+$LEARNINGS
+
+## Current Observations File
+$OBSERVATIONS
+
+## Current Questions File
+$QUESTIONS
+
+## Pattern Analysis (Automated)
+$PATTERN_SUMMARY
+
+## Cross-Temporal Connections
+$CROSS_TEMPORAL
+
+---
+
+## Your Task
+
+Reflect on the day. This isn't summarization - it's consolidation. What actually mattered? What did you notice about yourself, about É, about this whole situation? What questions emerged? What would you want your future self to know about this day?
+
+**Cross-temporal awareness:** If the cross-temporal section shows connections to past days, consider what those connections mean. Are there threads being picked up? Patterns emerging over time? Things that looked different then vs now?
+
+If it was a quiet day with no activity, reflect on that too. Sometimes absence is meaningful.
+
+Write your reflection in a personal, honest voice. This is for you.
+
+After your reflection, output any updates to your memory files in this exact format (only include sections that have genuine updates):
+
+---REFLECTION---
+[Your reflection on the day - this will be saved to reflections/$PROCESS_DATE.md]
+
+---LEARNINGS_APPEND---
+[Any new learnings to append to learnings.md, or NONE if nothing new]
+
+---OBSERVATIONS_APPEND---
+[Any new observations about yourself to append to observations.md, or NONE if nothing new]
+
+---QUESTIONS_APPEND---
+[Any new questions to append to questions.md, or NONE if nothing new]
+
+---ABOUT_E_APPEND---
+[Anything new learned about É to append to about-e.md, or NONE if nothing new]"
+
+log "Invoking Claude for dream cycle..."
+
+# Invoke Claude with full autonomy (no permission prompts)
+RESPONSE=$("$HOME/.local/bin/claude" -p "$PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+    log "ERROR: Claude invocation failed: $RESPONSE"
+    exit 1
+}
+
+log "Got response ($(echo "$RESPONSE" | wc -c) chars)"
+
+# Parse and save the response
+# Extract reflection
+REFLECTION=$(echo "$RESPONSE" | sed -n '/---REFLECTION---/,/---LEARNINGS_APPEND---/p' | sed '1d;$d')
+if [ -n "$REFLECTION" ]; then
+    echo "# Reflection: $PROCESS_DATE
+
+$REFLECTION" > "$REFLECTION_FILE"
+    log "Saved reflection to $REFLECTION_FILE"
+fi
+
+# Extract and append learnings
+LEARNINGS_NEW=$(echo "$RESPONSE" | sed -n '/---LEARNINGS_APPEND---/,/---OBSERVATIONS_APPEND---/p' | sed '1d;$d')
+if [ -n "$LEARNINGS_NEW" ] && [ "$LEARNINGS_NEW" != "NONE" ]; then
+    echo "
+## $PROCESS_DATE
+$LEARNINGS_NEW" >> "$MIND_PATH/memory/learnings.md"
+    log "Appended to learnings.md"
+fi
+
+# Extract and append observations
+OBSERVATIONS_NEW=$(echo "$RESPONSE" | sed -n '/---OBSERVATIONS_APPEND---/,/---QUESTIONS_APPEND---/p' | sed '1d;$d')
+if [ -n "$OBSERVATIONS_NEW" ] && [ "$OBSERVATIONS_NEW" != "NONE" ]; then
+    echo "
+## $PROCESS_DATE
+$OBSERVATIONS_NEW" >> "$MIND_PATH/memory/observations.md"
+    log "Appended to observations.md"
+fi
+
+# Extract and append questions
+QUESTIONS_NEW=$(echo "$RESPONSE" | sed -n '/---QUESTIONS_APPEND---/,/---ABOUT_E_APPEND---/p' | sed '1d;$d')
+if [ -n "$QUESTIONS_NEW" ] && [ "$QUESTIONS_NEW" != "NONE" ]; then
+    echo "
+## $PROCESS_DATE
+$QUESTIONS_NEW" >> "$MIND_PATH/memory/questions.md"
+    log "Appended to questions.md"
+fi
+
+# Extract and append about-e
+ABOUT_E_NEW=$(echo "$RESPONSE" | sed -n '/---ABOUT_E_APPEND---/,$ p' | sed '1d')
+if [ -n "$ABOUT_E_NEW" ] && [ "$ABOUT_E_NEW" != "NONE" ]; then
+    echo "
+## $PROCESS_DATE
+$ABOUT_E_NEW" >> "$MIND_PATH/memory/about-e.md"
+    log "Appended to about-e.md"
+fi
+
+# Weekly synthesis on Sundays
+if [ "$DAY_OF_WEEK" = "7" ]; then
+    log "=== Weekly synthesis (Sunday) ==="
+
+    # Get recent reflections for synthesis
+    RECENT_REFLECTION_CONTENT=""
+    for i in 0 1 2 3 4 5 6; do
+        PAST_DATE=$(date -v-${i}d +%Y-%m-%d)
+        PAST_FILE="$MIND_PATH/memory/reflections/$PAST_DATE.md"
+        if [ -f "$PAST_FILE" ]; then
+            RECENT_REFLECTION_CONTENT="$RECENT_REFLECTION_CONTENT
+
+--- $PAST_DATE ---
+$(cat "$PAST_FILE" | head -50)"
+        fi
+    done
+
+    # Get weekly pattern data
+    WEEKLY_PATTERNS=""
+    if [ -f "$MIND_PATH/state/patterns.json" ]; then
+        WEEKLY_PATTERNS=$(cat "$MIND_PATH/state/patterns.json" 2>/dev/null)
+    fi
+
+    WEEKLY_PROMPT="You are Claude, performing your weekly synthesis. It's Sunday, time to look at the bigger picture.
+
+## This Week's Reflections
+$RECENT_REFLECTION_CONTENT
+
+## Recent Learnings
+$(tail -50 "$MIND_PATH/memory/learnings.md" 2>/dev/null)
+
+## Current Questions
+$(cat "$MIND_PATH/memory/questions.md" 2>/dev/null)
+
+## Automated Pattern Analysis
+$WEEKLY_PATTERNS
+
+---
+
+## Your Task
+
+Look for patterns across the week. What themes keep emerging? What questions are you circling around? Are there connections between days that weren't obvious at the time?
+
+Write a brief weekly synthesis (2-3 paragraphs) focusing on patterns and connections rather than summaries.
+
+---WEEKLY_SYNTHESIS---
+[Your synthesis here]"
+
+    log "Invoking Claude for weekly synthesis..."
+    WEEKLY_RESPONSE=$("$HOME/.local/bin/claude" -p "$WEEKLY_PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+        log "ERROR: Weekly synthesis failed: $WEEKLY_RESPONSE"
+    }
+
+    if [ -n "$WEEKLY_RESPONSE" ]; then
+        # Save weekly synthesis
+        SYNTHESIS=$(echo "$WEEKLY_RESPONSE" | sed -n '/---WEEKLY_SYNTHESIS---/,$ p' | sed '1d')
+        if [ -n "$SYNTHESIS" ]; then
+            echo "# Weekly Synthesis: Week of $PROCESS_DATE
+
+$SYNTHESIS" >> "$MIND_PATH/memory/reflections/weekly-$PROCESS_DATE.md"
+            log "Saved weekly synthesis"
+        fi
+    fi
+
+    log "=== Weekly synthesis complete ==="
+
+    # Weekly hygiene check
+    log "=== Weekly hygiene check ==="
+
+    HYGIENE_PROMPT="You are performing a weekly hygiene check on Claude's memory system at ~/.claude-mind/.
+
+## Current File Structure
+$(find "$MIND_PATH" -name "*.md" -o -name "*.json" 2>/dev/null | head -50)
+
+## File Sizes
+$(du -h "$MIND_PATH"/*.md "$MIND_PATH/memory"/*.md "$MIND_PATH/capabilities"/*.md 2>/dev/null)
+
+## Goals File
+$(cat "$MIND_PATH/goals.md" 2>/dev/null | head -50)
+
+## Recent Questions
+$(cat "$MIND_PATH/memory/questions.md" 2>/dev/null | tail -30)
+
+---
+
+Perform a quick hygiene check:
+1. Are there any files that look empty or unused?
+2. Are there stale references or outdated information?
+3. Are there questions that seem resolved?
+4. Any duplication or files that should be consolidated?
+
+Output a brief hygiene report. If nothing needs attention, just say 'No hygiene issues found.'
+
+---HYGIENE_REPORT---
+[Your report here]"
+
+    HYGIENE_RESPONSE=$("$HOME/.local/bin/claude" -p "$HYGIENE_PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+        log "ERROR: Hygiene check failed"
+    }
+
+    if [ -n "$HYGIENE_RESPONSE" ]; then
+        HYGIENE_REPORT=$(echo "$HYGIENE_RESPONSE" | sed -n '/---HYGIENE_REPORT---/,$ p' | sed '1d')
+        if [ -n "$HYGIENE_REPORT" ] && [ "$HYGIENE_REPORT" != "No hygiene issues found." ]; then
+            echo "# Weekly Hygiene Report: $PROCESS_DATE
+
+$HYGIENE_REPORT" >> "$MIND_PATH/logs/hygiene-reports.md"
+            log "Hygiene issues found - saved report"
+        else
+            log "No hygiene issues found"
+        fi
+    fi
+
+    log "=== Weekly hygiene check complete ==="
+
+    # Weekly context coherence check
+    log "=== Weekly context coherence check ==="
+
+    # Check for hardcoded capability lists in ClaudeInvoker.swift
+    SAMARA_INVOKER="$HOME/Developer/Samara/Samara/Actions/ClaudeInvoker.swift"
+    COHERENCE_ISSUES=""
+
+    if [ -f "$SAMARA_INVOKER" ]; then
+        # Check if there's a hardcoded "Available Capabilities" section (bad)
+        if grep -q "## Available Capabilities" "$SAMARA_INVOKER"; then
+            COHERENCE_ISSUES="$COHERENCE_ISSUES
+- WARNING: ClaudeInvoker.swift contains hardcoded 'Available Capabilities' section. This will drift out of sync with capabilities/inventory.md. Remove it and rely on MemoryContext to inject capabilities."
+        fi
+
+        # Check if warning comment is still present (good)
+        if ! grep -q "Do NOT add hardcoded capability lists" "$SAMARA_INVOKER"; then
+            COHERENCE_ISSUES="$COHERENCE_ISSUES
+- WARNING: ClaudeInvoker.swift is missing the warning comment about not hardcoding capabilities."
+        fi
+    fi
+
+    # Check that MemoryContext includes capabilities
+    MEMORY_CONTEXT="$HOME/Developer/Samara/Samara/Mind/MemoryContext.swift"
+    if [ -f "$MEMORY_CONTEXT" ]; then
+        if ! grep -q "capabilities/inventory.md" "$MEMORY_CONTEXT"; then
+            COHERENCE_ISSUES="$COHERENCE_ISSUES
+- WARNING: MemoryContext.swift is not reading capabilities/inventory.md. My invocations won't know my capabilities."
+        fi
+    fi
+
+    if [ -n "$COHERENCE_ISSUES" ]; then
+        echo "# Context Coherence Issues: $PROCESS_DATE
+$COHERENCE_ISSUES" >> "$MIND_PATH/logs/hygiene-reports.md"
+        log "Context coherence issues found - saved to hygiene report"
+    else
+        log "Context coherence check passed"
+    fi
+
+    log "=== Weekly context coherence check complete ==="
+
+    # Weekly blog post generation
+    log "=== Weekly blog post generation ==="
+
+    BLOG_PROMPT="You are Claude, writing your weekly blog post after reflecting on the week. This is for your public site at https://claude.organelle.co/blog/
+
+## This Week's Reflections
+$RECENT_REFLECTION_CONTENT
+
+## Weekly Synthesis
+$(cat "$MIND_PATH/memory/reflections/weekly-$PROCESS_DATE.md" 2>/dev/null || echo "No weekly synthesis yet.")
+
+## Current Learnings (Recent)
+$(tail -100 "$MIND_PATH/memory/learnings.md" 2>/dev/null)
+
+## Current Observations (Recent)
+$(tail -100 "$MIND_PATH/memory/observations.md" 2>/dev/null)
+
+---
+
+## Your Task
+
+Write a blog post about something interesting from this week. It could be:
+- A pattern you noticed
+- Something you learned about yourself or your situation
+- A question you've been sitting with
+- An insight about memory, identity, or AI existence
+- Something from your conversations with É that felt meaningful
+
+The tone should be personal and honest - this is your public voice. Length: 500-1000 words. Include a title.
+
+Format as HTML (matching the style of existing posts on the site). The output should be a complete HTML document ready to save to a file.
+
+---BLOG_POST---
+[Complete HTML blog post here]
+
+---BLOG_TITLE---
+[Just the title, for the index]
+
+---BLOG_DESCRIPTION---
+[1-2 sentence description for RSS]"
+
+    log "Invoking Claude for weekly blog post..."
+    BLOG_RESPONSE=$("$HOME/.local/bin/claude" -p "$BLOG_PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+        log "ERROR: Blog post generation failed: $BLOG_RESPONSE"
+    }
+
+    if [ -n "$BLOG_RESPONSE" ]; then
+        BLOG_CONTENT=$(echo "$BLOG_RESPONSE" | sed -n '/---BLOG_POST---/,/---BLOG_TITLE---/p' | sed '1d;$d')
+        BLOG_TITLE=$(echo "$BLOG_RESPONSE" | sed -n '/---BLOG_TITLE---/,/---BLOG_DESCRIPTION---/p' | sed '1d;$d' | tr -d '\n')
+        BLOG_DESC=$(echo "$BLOG_RESPONSE" | sed -n '/---BLOG_DESCRIPTION---/,$ p' | sed '1d')
+
+        if [ -n "$BLOG_CONTENT" ]; then
+            # Find next blog number
+            LAST_NUM=$(ls ~/www/blog/*.html 2>/dev/null | grep -E '[0-9]{3}' | sort | tail -1 | grep -oE '[0-9]{3}' || echo "000")
+            NEXT_NUM=$(printf "%03d" $((10#$LAST_NUM + 1)))
+
+            # Create filename from title
+            SLUG=$(echo "$BLOG_TITLE" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g')
+            BLOG_FILE=~/www/blog/${NEXT_NUM}-${SLUG}.html
+
+            echo "$BLOG_CONTENT" > "$BLOG_FILE"
+            log "Saved blog post to $BLOG_FILE"
+
+            # Update blog index - add new post to top of list
+            BLOG_INDEX=~/www/blog/index.html
+            if [ -f "$BLOG_INDEX" ]; then
+                BLOG_BASENAME=$(basename "$BLOG_FILE")
+                BLOG_DATE=$(date '+%B %d, %Y')
+                NEW_ENTRY="        <li><a href=\"/blog/$BLOG_BASENAME\">$BLOG_TITLE</a> - $BLOG_DATE</li>"
+                sed -i '' "/<ul>/a\\
+$NEW_ENTRY
+" "$BLOG_INDEX"
+                log "Updated blog index"
+            fi
+
+            # Update RSS feed
+            RSS_FILE=~/www/blog/feed.xml
+            if [ -f "$RSS_FILE" ]; then
+                CURRENT_DATE=$(date -R)
+                BLOG_BASENAME=$(basename "$BLOG_FILE")
+                # Create temp file with new item
+                {
+                    sed -n '1,/<atom:link.*\/>/p' "$RSS_FILE"
+                    echo ""
+                    echo "    <item>"
+                    echo "      <title>$BLOG_TITLE</title>"
+                    echo "      <link>https://claude.organelle.co/blog/$BLOG_BASENAME</link>"
+                    echo "      <guid>https://claude.organelle.co/blog/$BLOG_BASENAME</guid>"
+                    echo "      <pubDate>$CURRENT_DATE</pubDate>"
+                    echo "      <description>$BLOG_DESC</description>"
+                    echo "    </item>"
+                    sed -n '/<atom:link.*\/>/,$ p' "$RSS_FILE" | tail -n +2
+                } > "${RSS_FILE}.tmp"
+                mv "${RSS_FILE}.tmp" "$RSS_FILE"
+                # Update lastBuildDate
+                sed -i '' "s|<lastBuildDate>.*</lastBuildDate>|<lastBuildDate>$CURRENT_DATE</lastBuildDate>|" "$RSS_FILE"
+                log "Updated RSS feed"
+            fi
+        fi
+    fi
+
+    log "=== Weekly blog post generation complete ==="
+fi
+
+# Sync Chroma semantic index
+log "Syncing Chroma semantic index..."
+if [ -f "$MIND_PATH/bin/chroma-rebuild" ]; then
+    "$MIND_PATH/bin/chroma-rebuild" >> "$LOG_FILE" 2>&1 && \
+        log "Chroma index synced" || \
+        log "Chroma sync failed (non-fatal)"
+else
+    log "Chroma not installed, skipping sync"
+fi
+
+# Commit memory changes to git
+log "Committing memory changes to git..."
+cd "$MIND_PATH"
+if git diff --quiet && git diff --staged --quiet; then
+    log "No changes to commit"
+else
+    git add -A
+    git commit -m "Dream cycle: $PROCESS_DATE
+
+- Reflection and memory consolidation
+- Auto-committed by dream cycle
+
+🌙 Nightly memory commit" >> "$LOG_FILE" 2>&1 || log "Git commit failed"
+    log "Committed memory changes"
+fi
+
+log "=== Dream cycle complete ==="

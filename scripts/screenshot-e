@@ -1,0 +1,28 @@
+#!/bin/bash
+# screenshot-e: Take screenshot and send to collaborator
+#
+# Uses Pictures folder workaround (discovered 2025-12-21).
+# No UI automation - purely programmatic.
+#
+# Usage: screenshot-e
+
+# Load config (with fallbacks)
+source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {
+    COLLABORATOR_PHONE="+15206099095"
+}
+
+TEMP_FILE="/tmp/screenshot-$(date +%s).png"
+
+# Capture screenshot
+screencapture -x "$TEMP_FILE"
+
+if [ ! -f "$TEMP_FILE" ]; then
+    echo "Error: Failed to capture screenshot"
+    exit 1
+fi
+
+# Send it
+~/.claude-mind/bin/send-attachment "$TEMP_FILE" "$COLLABORATOR_PHONE"
+
+# Clean up
+rm -f "$TEMP_FILE"

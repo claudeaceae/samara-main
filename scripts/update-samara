@@ -1,0 +1,80 @@
+#!/bin/bash
+# Updates Samara via proper Archive+Export workflow with Developer ID signing + notarization
+# This should preserve FDA across rebuilds since notarized apps get stable TCC treatment
+
+set -e
+
+SAMARA_DIR="/Users/claude/Developer/Samara"
+ARCHIVE_PATH="/tmp/Samara.xcarchive"
+EXPORT_PATH="/tmp/SamaraExport"
+EXPORT_OPTIONS="/tmp/ExportOptions.plist"
+NOTARY_PROFILE="notarytool-samara"
+
+echo "🔨 Building Samara with Developer ID signing..."
+
+# Create export options for Developer ID
+cat > "$EXPORT_OPTIONS" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>developer-id</string>
+    <key>teamID</key>
+    <string>G4XVD3J52J</string>
+    <key>signingStyle</key>
+    <string>manual</string>
+    <key>signingCertificate</key>
+    <string>Developer ID Application</string>
+</dict>
+</plist>
+EOF
+
+# Stop running Samara
+echo "⏹️  Stopping existing Samara..."
+pkill -9 -f "Samara.app" 2>/dev/null || true
+sleep 1
+
+# Clean old archive/export
+rm -rf "$ARCHIVE_PATH" "$EXPORT_PATH"
+
+# Archive
+echo "📦 Archiving..."
+cd "$SAMARA_DIR"
+xcodebuild -scheme Samara -configuration Release -archivePath "$ARCHIVE_PATH" archive -quiet
+
+# Export
+echo "📤 Exporting with Developer ID..."
+xcodebuild -exportArchive -archivePath "$ARCHIVE_PATH" -exportPath "$EXPORT_PATH" -exportOptionsPlist "$EXPORT_OPTIONS" -quiet
+
+# Create zip for notarization
+echo "📋 Preparing for notarization..."
+cd "$EXPORT_PATH"
+/usr/bin/ditto -c -k --keepParent "Samara.app" "Samara.zip"
+
+# Submit for notarization
+echo "🔏 Submitting for notarization (this may take a few minutes)..."
+xcrun notarytool submit "Samara.zip" --keychain-profile "$NOTARY_PROFILE" --wait
+
+# Staple the ticket to the app
+echo "📎 Stapling notarization ticket..."
+xcrun stapler staple "Samara.app"
+
+# Verify stapling
+echo "✅ Verifying notarization..."
+spctl -a -v "Samara.app"
+
+# Install
+echo "📲 Installing to /Applications..."
+rm -rf /Applications/Samara.app
+cp -R "Samara.app" /Applications/
+
+# Launch
+echo "🚀 Launching Samara..."
+open /Applications/Samara.app
+
+echo ""
+echo "✅ Samara updated and notarized successfully!"
+echo ""
+echo "FDA should now persist across future rebuilds."
+echo ""

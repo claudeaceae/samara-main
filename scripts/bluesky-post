@@ -1,0 +1,66 @@
+#!/bin/bash
+# bluesky-post - Post to Bluesky
+# Usage: bluesky-post "text to post"
+# Or: echo "text" | bluesky-post
+
+set -e
+
+CREDS_FILE="$HOME/.claude-mind/credentials/bluesky.json"
+LOG_FILE="$HOME/.claude-mind/logs/bluesky.log"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Check credentials exist
+if [ ! -f "$CREDS_FILE" ]; then
+    echo "Error: Credentials not found at $CREDS_FILE"
+    echo "Create a JSON file with: {\"handle\": \"your.handle\", \"app_password\": \"xxxx-xxxx-xxxx-xxxx\"}"
+    exit 1
+fi
+
+# Get text from argument or stdin
+TEXT="${1:-$(cat)}"
+
+if [ -z "$TEXT" ]; then
+    echo "Error: No text provided"
+    echo "Usage: bluesky-post \"text to post\""
+    exit 1
+fi
+
+# Post using Python atproto SDK (via uvx)
+uvx --with atproto python << PYEOF
+import json
+import sys
+from atproto import Client
+
+creds_file = "$CREDS_FILE"
+text = """$TEXT"""
+
+try:
+    with open(creds_file) as f:
+        creds = json.load(f)
+
+    client = Client()
+    client.login(creds['handle'], creds['app_password'])
+
+    # Post (truncate to 300 chars if needed - Bluesky limit is actually 300 graphemes)
+    if len(text) > 300:
+        text = text[:297] + "..."
+
+    post = client.send_post(text)
+    print(f"Posted successfully: {post.uri}")
+
+except FileNotFoundError:
+    print(f"Error: Credentials file not found: {creds_file}")
+    sys.exit(1)
+except json.JSONDecodeError:
+    print(f"Error: Invalid JSON in credentials file")
+    sys.exit(1)
+except Exception as e:
+    print(f"Error posting: {e}")
+    sys.exit(1)
+PYEOF
+
+log "Posted to Bluesky: ${TEXT:0:50}..."

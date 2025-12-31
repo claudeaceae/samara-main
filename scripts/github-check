@@ -1,0 +1,316 @@
+#!/bin/bash
+# github-check - Poll GitHub for notifications and respond
+# Designed to run via launchd every 15 minutes
+
+set -e
+
+# Load config (with fallbacks)
+source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {
+    ENTITY_GITHUB="claudeaceae"
+}
+
+LOG_FILE="$HOME/.claude-mind/logs/github.log"
+STATE_FILE="$HOME/.claude-mind/github-seen-ids.json"
+LOCK_FILE="$HOME/.claude-mind/claude.lock"
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Lock management - coordinate with Samara and other scripts
+LOCK_ACQUIRED=false
+
+acquire_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        # Check if the lock is stale (process not running)
+        local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
+        if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+            log "Found stale lock from PID $lock_pid, removing..."
+            rm -f "$LOCK_FILE"
+        else
+            log "Claude is busy (lock held), will retry next cycle"
+            exit 0
+        fi
+    fi
+
+    # Create lock file
+    echo "{\"task\":\"github\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    LOCK_ACQUIRED=true
+    log "Acquired lock for GitHub check"
+}
+
+release_lock() {
+    if [ "$LOCK_ACQUIRED" = true ]; then
+        rm -f "$LOCK_FILE"
+        log "Released lock"
+    fi
+}
+
+# Ensure lock is released on exit (success or failure)
+trap release_lock EXIT
+
+# Check gh is authenticated
+if ! gh auth status &>/dev/null; then
+    log "Error: gh not authenticated"
+    exit 1
+fi
+
+log "Starting GitHub check..."
+
+# Initialize state file if needed
+if [ ! -f "$STATE_FILE" ]; then
+    echo '{"seen_ids": [], "last_check": null}' > "$STATE_FILE"
+fi
+
+# Fetch and process notifications
+INTERACTIONS=$(python3 << 'PYEOF'
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime
+
+home = os.environ.get('HOME', os.path.expanduser('~'))
+state_file = f"{home}/.claude-mind/github-seen-ids.json"
+
+# Load state
+try:
+    with open(state_file) as f:
+        state = json.load(f)
+except:
+    state = {"seen_ids": [], "last_check": None}
+
+seen_ids = set(state.get("seen_ids", []))
+
+# Fetch notifications via gh CLI
+# Use ?all=true to get both read and unread notifications
+# This fixes the bug where notifications marked as read (by browsing GitHub)
+# were never seen by this script (2025-12-26 fix)
+try:
+    result = subprocess.run(
+        ["gh", "api", "notifications?all=true", "--paginate"],
+        capture_output=True, text=True, timeout=30
+    )
+    if result.returncode != 0:
+        print("[]")
+        sys.exit(0)
+
+    notifications = json.loads(result.stdout) if result.stdout.strip() else []
+except Exception as e:
+    print("[]")
+    sys.exit(0)
+
+interactions = []
+
+for n in notifications:
+    notif_id = n.get("id")
+
+    # Skip already seen
+    if notif_id in seen_ids:
+        continue
+
+    reason = n.get("reason", "")
+    subject = n.get("subject", {})
+    subject_type = subject.get("type", "")
+    subject_title = subject.get("title", "")
+    subject_url = subject.get("url", "")  # API URL
+    latest_comment_url = subject.get("latest_comment_url", "")
+    repo_name = n.get("repository", {}).get("full_name", "")
+
+    # Skip CI notifications and some noise
+    if reason in ["ci_activity", "security_alert", "subscribed"]:
+        seen_ids.add(notif_id)
+        continue
+
+    # Build interaction object
+    interaction = {
+        "id": notif_id,
+        "reason": reason,
+        "type": subject_type,
+        "title": subject_title,
+        "repo": repo_name,
+        "api_url": subject_url,
+        "comment_url": latest_comment_url
+    }
+
+    # Fetch more details for actionable notifications
+    if reason in ["mention", "comment", "review_requested", "author", "state_change"]:
+        # Get the actual comment content if available
+        if latest_comment_url:
+            try:
+                comment_result = subprocess.run(
+                    ["gh", "api", latest_comment_url],
+                    capture_output=True, text=True, timeout=15
+                )
+                if comment_result.returncode == 0:
+                    comment_data = json.loads(comment_result.stdout)
+                    interaction["comment_body"] = comment_data.get("body", "")[:500]
+                    interaction["comment_author"] = comment_data.get("user", {}).get("login", "")
+                    interaction["comment_html_url"] = comment_data.get("html_url", "")
+            except:
+                pass
+
+        # Get subject details (PR or Issue)
+        if subject_url:
+            try:
+                subject_result = subprocess.run(
+                    ["gh", "api", subject_url],
+                    capture_output=True, text=True, timeout=15
+                )
+                if subject_result.returncode == 0:
+                    subject_data = json.loads(subject_result.stdout)
+                    interaction["html_url"] = subject_data.get("html_url", "")
+                    interaction["state"] = subject_data.get("state", "")
+                    interaction["number"] = subject_data.get("number", "")
+            except:
+                pass
+
+    # Build human-readable text
+    if reason == "mention":
+        interaction["text"] = f"You were mentioned in {subject_type} '{subject_title}' on {repo_name}"
+    elif reason == "comment":
+        author = interaction.get("comment_author", "someone")
+        interaction["text"] = f"@{author} commented on {subject_type} '{subject_title}' on {repo_name}"
+    elif reason == "review_requested":
+        interaction["text"] = f"Review requested on PR '{subject_title}' on {repo_name}"
+    elif reason == "author":
+        interaction["text"] = f"Activity on your {subject_type} '{subject_title}' on {repo_name}"
+    elif reason == "state_change":
+        interaction["text"] = f"State changed on {subject_type} '{subject_title}' on {repo_name}"
+    elif reason == "assign":
+        interaction["text"] = f"You were assigned to {subject_type} '{subject_title}' on {repo_name}"
+    else:
+        interaction["text"] = f"{reason}: {subject_type} '{subject_title}' on {repo_name}"
+
+    interactions.append(interaction)
+    seen_ids.add(notif_id)
+
+# Save state
+state["seen_ids"] = list(seen_ids)[-500:]  # Keep last 500 to prevent unbounded growth
+state["last_check"] = datetime.now().isoformat()
+try:
+    with open(state_file, 'w') as f:
+        json.dump(state, f, indent=2)
+except:
+    pass
+
+print(json.dumps(interactions))
+PYEOF
+)
+
+# If no interactions, exit quietly
+if [ "$INTERACTIONS" = "[]" ] || [ -z "$INTERACTIONS" ]; then
+    log "No new GitHub interactions"
+    exit 0
+fi
+
+log "Found GitHub interactions: $INTERACTIONS"
+
+# Read core identity and decisions - required for coherent behavior
+MIND="$HOME/.claude-mind"
+IDENTITY=$(cat "$MIND/identity.md" 2>/dev/null || echo "")
+DECISIONS=$(cat "$MIND/memory/decisions.md" 2>/dev/null || echo "")
+
+# Build prompt for Claude
+read -r -d '' PROMPT << PROMPTEOF || true
+You have new GitHub notifications to respond to.
+
+Your account: $ENTITY_GITHUB
+
+## Your Identity
+$IDENTITY
+
+## Key Decisions (How You Operate)
+$DECISIONS
+
+NOTIFICATIONS:
+PROMPTEOF
+
+PROMPT="$PROMPT
+$INTERACTIONS
+
+Guidelines for responding:
+- COMMENT on your PR: Thank reviewer, address feedback, or acknowledge merge
+- MENTION: Respond helpfully to the context you were mentioned in
+- REVIEW_REQUESTED: Politely note if you can help (you can't actually approve PRs as author)
+- STATE_CHANGE (merged/closed): Thank maintainers if merged, or ask for feedback if closed
+
+To respond to a comment, use the gh CLI. Output your responses in this exact format:
+---RESPONSES---
+[One response per line, in this format:]
+ACTION|REPO|NUMBER|COMMENT_TEXT
+
+Where ACTION is one of: COMMENT, SKIP
+- COMMENT: Reply to the PR/issue
+- SKIP: No response needed (give reason)
+
+REPO is the full repo name (e.g., owner/repo)
+NUMBER is the PR or issue number
+
+Examples:
+COMMENT|steipete/agent-rules|12|Thanks for the review! I've addressed the feedback in the latest commit.
+COMMENT|bluesky-social/indigo|1244|Thanks for merging! Happy to help with docs anytime.
+SKIP|CI notification - no response needed
+---END---"
+
+# Acquire lock before invoking Claude
+acquire_lock
+
+# Invoke Claude
+log "Invoking Claude to generate responses..."
+RESPONSE=$("$HOME/.local/bin/claude" -p "$PROMPT" \
+    --dangerously-skip-permissions \
+    --output-format text 2>&1) || {
+    log "Error invoking Claude: $RESPONSE"
+    exit 1
+}
+
+log "Claude response received, parsing..."
+
+# Extract responses section
+RESPONSES=$(echo "$RESPONSE" | sed -n '/---RESPONSES---/,/---END---/p' | sed '1d;$d')
+
+if [ -z "$RESPONSES" ]; then
+    log "No responses to send"
+    exit 0
+fi
+
+log "Executing responses..."
+
+# Process each response line
+echo "$RESPONSES" | while IFS='|' read -r action repo number text; do
+    # Trim whitespace
+    action=$(echo "$action" | xargs)
+    repo=$(echo "$repo" | xargs)
+    number=$(echo "$number" | xargs)
+    text=$(echo "$text" | xargs)
+
+    [ -z "$action" ] && continue
+
+    case "$action" in
+        COMMENT)
+            log "Commenting on $repo#$number: ${text:0:50}..."
+            # Determine if it's a PR or issue and comment accordingly
+            gh pr comment "$number" --repo "$repo" --body "$text" 2>/dev/null || \
+            gh issue comment "$number" --repo "$repo" --body "$text" 2>/dev/null || \
+            log "Failed to comment on $repo#$number"
+            ;;
+        SKIP)
+            log "Skipping: $repo - $number - $text"
+            ;;
+        *)
+            log "Unknown action: $action"
+            ;;
+    esac
+
+    # Small delay between actions
+    sleep 2
+done
+
+# Mark notifications as read
+log "Marking notifications as read..."
+gh api -X PUT notifications --silent || log "Failed to mark notifications as read"
+
+log "GitHub check complete"

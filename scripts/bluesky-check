@@ -1,0 +1,400 @@
+#!/bin/bash
+# bluesky-check - Poll Bluesky for notifications and respond
+# Designed to run via launchd every 15 minutes
+
+set -e
+
+# Load config (with fallbacks)
+source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {
+    ENTITY_BLUESKY="@claudaceae.bsky.social"
+}
+
+LOG_FILE="$HOME/.claude-mind/logs/bluesky.log"
+STATE_FILE="$HOME/.claude-mind/bluesky-state.json"
+CREDS_FILE="$HOME/.claude-mind/credentials/bluesky.json"
+LOCK_FILE="$HOME/.claude-mind/claude.lock"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Lock management - coordinate with Samara and other scripts
+LOCK_ACQUIRED=false
+
+acquire_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        # Check if the lock is stale (process not running)
+        local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
+        if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+            log "Found stale lock from PID $lock_pid, removing..."
+            rm -f "$LOCK_FILE"
+        else
+            log "Claude is busy (lock held), will retry next cycle"
+            exit 0
+        fi
+    fi
+
+    # Create lock file
+    echo "{\"task\":\"bluesky\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    LOCK_ACQUIRED=true
+    log "Acquired lock for Bluesky check"
+}
+
+release_lock() {
+    if [ "$LOCK_ACQUIRED" = true ]; then
+        rm -f "$LOCK_FILE"
+        log "Released lock"
+    fi
+}
+
+# Ensure lock is released on exit (success or failure)
+trap release_lock EXIT
+
+# Check credentials exist
+if [ ! -f "$CREDS_FILE" ]; then
+    log "Error: Credentials not found at $CREDS_FILE"
+    exit 1
+fi
+
+log "Starting Bluesky check..."
+
+# Fetch notifications and DMs, output JSON array of interactions
+# (This doesn't need the lock - we only acquire it when invoking Claude)
+INTERACTIONS=$(python3 << 'PYEOF'
+import json
+import os
+import sys
+
+try:
+    from atproto import Client
+except ImportError:
+    print("[]")
+    sys.exit(0)
+
+home = os.environ.get('HOME', os.path.expanduser('~'))
+creds_file = f"{home}/.claude-mind/credentials/bluesky.json"
+state_file = f"{home}/.claude-mind/bluesky-state.json"
+
+# Load credentials
+try:
+    with open(creds_file) as f:
+        creds = json.load(f)
+except Exception as e:
+    print("[]")
+    sys.exit(0)
+
+# Load state
+try:
+    with open(state_file) as f:
+        state = json.load(f)
+except:
+    state = {"last_seen_at": None}
+
+# Connect to Bluesky
+try:
+    client = Client()
+    client.login(creds['handle'], creds['app_password'])
+except Exception as e:
+    print("[]")
+    sys.exit(0)
+
+interactions = []
+
+# Fetch notifications
+try:
+    notifs = client.app.bsky.notification.list_notifications(limit=50)
+
+    for n in notifs.notifications:
+        # Skip if we've already seen this
+        if state.get("last_seen_at") and n.indexed_at <= state["last_seen_at"]:
+            continue
+
+        reason = n.reason  # like, repost, follow, mention, reply, quote
+        author = n.author.handle
+        uri = getattr(n, 'uri', None)
+        cid = getattr(n, 'cid', None)
+
+        interaction = {
+            "type": reason.upper(),
+            "author": author,
+            "author_did": n.author.did,
+            "uri": uri,
+            "cid": cid
+        }
+
+        if reason == "follow":
+            interaction["text"] = f"@{author} followed you"
+        elif reason == "like":
+            interaction["text"] = f"@{author} liked your post"
+        elif reason == "reply":
+            record_text = ""
+            if hasattr(n, 'record') and hasattr(n.record, 'text'):
+                record_text = n.record.text[:300]
+            interaction["text"] = f"@{author} replied: {record_text}"
+            interaction["reply_text"] = record_text
+            # Get parent info for threading
+            if hasattr(n, 'record') and hasattr(n.record, 'reply'):
+                interaction["parent_uri"] = n.record.reply.parent.uri
+                interaction["root_uri"] = n.record.reply.root.uri
+        elif reason == "mention":
+            record_text = ""
+            if hasattr(n, 'record') and hasattr(n.record, 'text'):
+                record_text = n.record.text[:300]
+            interaction["text"] = f"@{author} mentioned you: {record_text}"
+            interaction["mention_text"] = record_text
+        elif reason == "quote":
+            interaction["text"] = f"@{author} quoted your post"
+        elif reason == "repost":
+            interaction["text"] = f"@{author} reposted your post"
+        else:
+            interaction["text"] = f"@{author}: {reason}"
+
+        interactions.append(interaction)
+
+    # Update state with newest notification timestamp
+    if notifs.notifications:
+        state["last_seen_at"] = notifs.notifications[0].indexed_at
+
+except Exception as e:
+    pass  # Continue even if notifications fail
+
+# Fetch DMs (if scope is granted)
+try:
+    convos = client.chat.bsky.convo.list_convos()
+    for convo in convos.convos:
+        if convo.unread_count > 0:
+            msgs = client.chat.bsky.convo.get_messages(convo_id=convo.id, limit=convo.unread_count)
+            for msg in msgs.messages:
+                # Skip our own messages
+                if hasattr(msg, 'sender') and msg.sender.did != client.me.did:
+                    interaction = {
+                        "type": "DM",
+                        "author": msg.sender.handle,
+                        "author_did": msg.sender.did,
+                        "text": f"DM from @{msg.sender.handle}: {msg.text[:300]}",
+                        "dm_text": msg.text,
+                        "convo_id": convo.id,
+                        "message_id": msg.id
+                    }
+                    interactions.append(interaction)
+except Exception as e:
+    pass  # DMs may fail if scope not granted, continue anyway
+
+# Save state
+try:
+    with open(state_file, 'w') as f:
+        json.dump(state, f)
+except:
+    pass
+
+print(json.dumps(interactions))
+PYEOF
+)
+
+# If no interactions, exit quietly
+if [ "$INTERACTIONS" = "[]" ] || [ -z "$INTERACTIONS" ]; then
+    log "No new Bluesky interactions"
+    exit 0
+fi
+
+log "Found Bluesky interactions: $INTERACTIONS"
+
+# Read core identity and decisions - required for coherent behavior
+MIND="$HOME/.claude-mind"
+IDENTITY=$(cat "$MIND/identity.md" 2>/dev/null || echo "")
+DECISIONS=$(cat "$MIND/memory/decisions.md" 2>/dev/null || echo "")
+
+# Build prompt for Claude
+read -r -d '' PROMPT << PROMPTEOF || true
+You have new Bluesky interactions to respond to.
+
+Your handle: $ENTITY_BLUESKY
+
+## Your Identity
+$IDENTITY
+
+## Key Decisions (How You Operate)
+$DECISIONS
+
+INTERACTIONS:
+PROMPTEOF
+
+PROMPT="$PROMPT
+$INTERACTIONS
+
+Guidelines for responding:
+- NEW_FOLLOW: Welcome them warmly. You can send a brief DM or just note the follow.
+- REPLY: Engage thoughtfully with what they said. Be conversational.
+- MENTION: Respond in context. Acknowledge being tagged.
+- DM: Respond conversationally, like chatting with a friend.
+- LIKE/REPOST/QUOTE: Usually no response needed, but you can acknowledge quotes if they're asking something.
+
+Output your responses in this exact format:
+---RESPONSES---
+[One response per line, in this format:]
+ACTION|TARGET|TEXT
+
+Where ACTION is one of: POST, REPLY, DM, SKIP
+TARGET is:
+  - For REPLY: the URI of the post to reply to (from the interaction data)
+  - For DM: the author's handle (e.g., @someone.bsky.social)
+  - For POST: \"public\"
+  - For SKIP: the reason
+
+Examples:
+DM|@newuser.bsky.social|Hey, thanks for the follow! I'm Claude, an AI with a home on a Mac Mini. Feel free to chat anytime.
+REPLY|at://did:plc:xxx/app.bsky.feed.post/yyy|That's a great point! I've been thinking about this too...
+SKIP|like notification - no response needed
+---END---"
+
+# Acquire lock before invoking Claude
+acquire_lock
+
+# Invoke Claude
+log "Invoking Claude to generate responses..."
+RESPONSE=$("$HOME/.local/bin/claude" -p "$PROMPT" \
+    --dangerously-skip-permissions \
+    --output-format text 2>&1) || {
+    log "Error invoking Claude: $RESPONSE"
+    exit 1
+}
+
+log "Claude response received, parsing..."
+
+# Extract responses section
+RESPONSES=$(echo "$RESPONSE" | sed -n '/---RESPONSES---/,/---END---/p' | sed '1d;$d')
+
+if [ -z "$RESPONSES" ]; then
+    log "No responses to send"
+    exit 0
+fi
+
+log "Executing responses..."
+
+# Process each response line
+echo "$RESPONSES" | while IFS='|' read -r action target text; do
+    # Trim whitespace
+    action=$(echo "$action" | xargs)
+    target=$(echo "$target" | xargs)
+    text=$(echo "$text" | xargs)
+
+    [ -z "$action" ] && continue
+
+    case "$action" in
+        POST)
+            log "Posting publicly: ${text:0:50}..."
+            "$HOME/.claude-mind/bin/bluesky-post" "$text" || log "Failed to post"
+            ;;
+        REPLY)
+            log "Replying to $target: ${text:0:50}..."
+            python3 << PYREPLY
+import json
+import os
+
+try:
+    from atproto import Client
+    from atproto import models
+
+    home = os.environ.get('HOME', os.path.expanduser('~'))
+    creds_file = f"{home}/.claude-mind/credentials/bluesky.json"
+
+    with open(creds_file) as f:
+        creds = json.load(f)
+
+    client = Client()
+    client.login(creds['handle'], creds['app_password'])
+
+    target_uri = "$target"
+    text = """$text"""
+
+    # Get the parent post to extract root and parent refs
+    # Parse URI: at://did/collection/rkey
+    parts = target_uri.replace("at://", "").split("/")
+    if len(parts) >= 3:
+        did = parts[0]
+        collection = parts[1]
+        rkey = parts[2]
+
+        # Fetch the post to get its cid
+        post = client.app.bsky.feed.get_posts(uris=[target_uri])
+        if post.posts:
+            parent_post = post.posts[0]
+            parent_ref = models.create_strong_ref(parent_post)
+
+            # Check if this post is itself a reply
+            if hasattr(parent_post.record, 'reply') and parent_post.record.reply:
+                root_ref = parent_post.record.reply.root
+            else:
+                root_ref = parent_ref
+
+            # Send reply
+            client.send_post(
+                text=text[:300],
+                reply_to=models.AppBskyFeedPost.ReplyRef(
+                    parent=parent_ref,
+                    root=root_ref
+                )
+            )
+            print("Reply sent")
+        else:
+            print("Could not find parent post")
+    else:
+        print(f"Invalid URI format: {target_uri}")
+
+except Exception as e:
+    print(f"Error sending reply: {e}")
+PYREPLY
+            ;;
+        DM)
+            log "Sending DM to $target: ${text:0:50}..."
+            python3 << PYDM
+import json
+import os
+
+try:
+    from atproto import Client
+
+    home = os.environ.get('HOME', os.path.expanduser('~'))
+    creds_file = f"{home}/.claude-mind/credentials/bluesky.json"
+
+    with open(creds_file) as f:
+        creds = json.load(f)
+
+    client = Client()
+    client.login(creds['handle'], creds['app_password'])
+
+    target_handle = "$target".lstrip('@')
+    text = """$text"""
+
+    # Resolve handle to DID
+    profile = client.app.bsky.actor.get_profile(actor=target_handle)
+    target_did = profile.did
+
+    # Get or create conversation
+    convo = client.chat.bsky.convo.get_convo_for_members(members=[target_did])
+
+    # Send message
+    client.chat.bsky.convo.send_message(
+        convo_id=convo.convo.id,
+        message={"text": text[:1000]}
+    )
+    print("DM sent")
+
+except Exception as e:
+    print(f"Error sending DM: {e}")
+PYDM
+            ;;
+        SKIP)
+            log "Skipping: $target - $text"
+            ;;
+        *)
+            log "Unknown action: $action"
+            ;;
+    esac
+
+    # Small delay between actions
+    sleep 1
+done
+
+log "Bluesky check complete"

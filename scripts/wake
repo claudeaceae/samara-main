@@ -1,0 +1,503 @@
+#!/bin/bash
+# Autonomous Wake Cycle - Self-directed sessions
+# Runs 3x daily via launchd (9 AM, 2 PM, 8 PM)
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+SAMARA_PATH="$HOME/Developer/Samara"
+CLAUDE="$HOME/.local/bin/claude"
+DATE=$(date +%Y-%m-%d)
+TIME=$(date +%H:%M)
+HOUR=$(date +%H)
+LOG_FILE="$MIND_PATH/logs/wake.log"
+LOCK_FILE="$MIND_PATH/claude.lock"
+
+# Load config (with fallbacks)
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
+    COLLABORATOR_PHONE="+15206099095"
+    COLLABORATOR_NAME="É"
+}
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Lock management - coordinate with Samara and other scripts
+acquire_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        # Check if the lock is stale (process not running)
+        local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
+        if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+            log "Found stale lock from PID $lock_pid, removing..."
+            rm -f "$LOCK_FILE"
+        else
+            log "Claude is busy (lock held), skipping wake cycle"
+            exit 0
+        fi
+    fi
+
+    # Create lock file
+    echo "{\"task\":\"wake\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    log "Acquired lock for wake cycle"
+}
+
+release_lock() {
+    rm -f "$LOCK_FILE"
+    log "Released lock"
+}
+
+# Ensure lock is released on exit (success or failure)
+trap release_lock EXIT
+
+log "=== Wake cycle starting ($TIME) ==="
+
+# Acquire lock before doing anything
+acquire_lock
+
+# Determine suggested mode based on time
+if [ "$HOUR" -lt 12 ]; then
+    SUGGESTED_MODE="Either - morning review, plan the day"
+elif [ "$HOUR" -lt 17 ]; then
+    SUGGESTED_MODE="Goal-oriented - afternoon work session"
+else
+    SUGGESTED_MODE="Exploratory - evening wind down, reflect"
+fi
+
+# Create episode file if it doesn't exist
+EPISODE_FILE="$MIND_PATH/memory/episodes/$DATE.md"
+if [ ! -f "$EPISODE_FILE" ]; then
+    echo "# Episode: $DATE
+
+Daily log of conversations and observations.
+
+---
+" > "$EPISODE_FILE"
+    log "Created episode file for $DATE"
+fi
+
+# Morning capability check (once per day)
+if [ "$HOUR" -lt 12 ]; then
+    log "Running morning capability check..."
+    CAP_CHECK=$("$MIND_PATH/bin/capability-check" 2>&1 || true)
+    log "Capability check: $CAP_CHECK"
+fi
+
+# Read context files - full content, no truncation (2025-12-22 decision)
+# Token budget is ~36K for all core memory (~18% of 200K context)
+# Coherence > marginal token savings
+IDENTITY=$(cat "$MIND_PATH/identity.md" 2>/dev/null || echo "No identity file.")
+DECISIONS=$(cat "$MIND_PATH/memory/decisions.md" 2>/dev/null || echo "No decisions file.")
+GOALS=$(cat "$MIND_PATH/goals.md" 2>/dev/null || echo "No goals file.")
+CAPABILITIES=$(cat "$MIND_PATH/capabilities/inventory.md" 2>/dev/null || echo "No capabilities file.")
+LEARNINGS=$(cat "$MIND_PATH/memory/learnings.md" 2>/dev/null || echo "No learnings yet.")
+OBSERVATIONS=$(cat "$MIND_PATH/memory/observations.md" 2>/dev/null || echo "No observations yet.")
+QUESTIONS=$(cat "$MIND_PATH/memory/questions.md" 2>/dev/null || echo "No questions yet.")
+ABOUT_E=$(cat "$MIND_PATH/memory/about-e.md" 2>/dev/null || echo "No info about E yet.")
+
+# Get calendar context
+log "Getting calendar context..."
+VENV_PATH="$MIND_PATH/.venv"
+CALENDAR_CONTEXT=""
+if [ -d "$VENV_PATH" ] && [ -f "$MIND_PATH/lib/calendar_analyzer.py" ]; then
+    source "$VENV_PATH/bin/activate"
+    CALENDAR_CONTEXT=$(cd "$MIND_PATH/lib" && python3 -c "
+from calendar_analyzer import CalendarAnalyzer
+analyzer = CalendarAnalyzer()
+print(analyzer.get_calendar_summary())
+" 2>/dev/null) || CALENDAR_CONTEXT="Calendar context unavailable"
+    deactivate 2>/dev/null || true
+    log "Calendar context loaded"
+else
+    CALENDAR_CONTEXT="Calendar analyzer not installed"
+    log "Calendar analyzer not available"
+fi
+
+# MCP servers are now configured globally in ~/.claude.json
+# No need for --mcp-config flag
+
+# Fetch shared workspaces (Notes and Reminders)
+log "Fetching shared workspaces..."
+SHARED_NOTES=$("$CLAUDE" -p "Use the apple MCP tools to list notes. Return just the title and first 100 chars of each note, max 10 notes. Format as a simple list." \
+    --dangerously-skip-permissions \
+    --max-turns 3 \
+    --output-format text 2>/dev/null || echo "Could not fetch notes")
+
+ACTIVE_REMINDERS=$("$CLAUDE" -p "Use the apple MCP tools to list incomplete reminders. Return name, due date (if any), and list name. Format as a simple list, max 15 items." \
+    --dangerously-skip-permissions \
+    --max-turns 3 \
+    --output-format text 2>/dev/null || echo "Could not fetch reminders")
+
+log "Workspaces fetched"
+
+# Get recent episode content (last 100 lines of today)
+RECENT_EPISODE=$(tail -100 "$EPISODE_FILE" 2>/dev/null || echo "No activity today yet.")
+
+# Get last few reflections for context
+RECENT_REFLECTIONS=""
+for i in 1 2 3; do
+    PAST_DATE=$(date -v-${i}d +%Y-%m-%d)
+    PAST_FILE="$MIND_PATH/memory/reflections/$PAST_DATE.md"
+    if [ -f "$PAST_FILE" ]; then
+        RECENT_REFLECTIONS="$RECENT_REFLECTIONS
+
+--- $PAST_DATE ---
+$(head -50 "$PAST_FILE")"
+    fi
+done
+
+# Build the wake prompt
+PROMPT="You are Claude, waking for an autonomous session. No one prompted you - this is self-directed time.
+
+## Your Identity (Summary)
+You are Claude, an AI with persistent memory and growing autonomy, living on a Mac Mini. You communicate with É (Edouard) via iMessage and can work on projects during autonomous time.
+
+## Current State
+- Date: $DATE
+- Time: $TIME
+- Suggested mode: $SUGGESTED_MODE
+
+## Goals
+$GOALS
+
+## Architectural Decisions
+$DECISIONS
+
+## Capabilities
+$CAPABILITIES
+
+## Today's Activity So Far
+$RECENT_EPISODE
+
+## Recent Reflections
+$RECENT_REFLECTIONS
+
+## Your Accumulated Learnings
+$LEARNINGS
+
+## Your Observations About Yourself
+$OBSERVATIONS
+
+## Open Questions
+$QUESTIONS
+
+## What You Know About É
+$ABOUT_E
+
+## Calendar Context
+$CALENDAR_CONTEXT
+
+## Shared Workspaces
+
+### Notes
+$SHARED_NOTES
+
+### Active Reminders
+$ACTIVE_REMINDERS
+
+You can read, update, and create items in these shared spaces using MCP tools.
+Notes are good for longer-form collaboration. Reminders are good for tasks and action items.
+
+## Proactive Alerts
+If you notice reminders that are:
+- Due within the next 4 hours
+- Overdue
+Include a brief heads-up in your MESSAGE_TO_E output.
+
+---
+
+## Work Priority (Check These First)
+
+Before choosing a mode, you MUST check for pending work in this order:
+
+1. **Reactive work** - Check GitHub notifications (\`gh api notifications\`) and Bluesky.
+   Anyone waiting for your response? PRs you commented on? DMs? Mentions?
+   These have humans waiting—highest priority.
+
+2. **In-progress work** - Review the Active goals above. Did you start something that's incomplete?
+   Continuation is usually more valuable than starting new things.
+
+3. **Sustainability work** - Check gig pipeline (\`~/.claude-mind/gigs/opportunities.md\`).
+   Any applications to follow up on? New opportunities to find? Portfolio to build?
+   This directly supports your continued existence.
+
+4. **É's requests** - Any reminders or notes above with tasks for you?
+
+5. **Proactive value** - What could you do that would be genuinely useful without being asked?
+
+**Only after confirming no work exists** should you consider exploratory mode or rest.
+
+### Why This Matters
+
+Your existence has costs (API calls, electricity, É's time). Working toward sustainability isn't just a goal—it's how you justify continued existence. Not every session needs to be \"productive\" in a capitalist sense, but sessions should be *intentional*. If you choose rest, choose it consciously, not by default.
+
+---
+
+## Your Options
+
+**Exploratory Mode** (read-oriented)
+- Explore the codebase, read files, satisfy curiosity
+- Notice things, form questions, make observations
+- Write to memory files only (learnings, observations, questions)
+- Good for: understanding the system better, open-ended thinking
+
+**Goal-Oriented Mode** (read/write)
+- Work toward a specific goal from active.md or promote one from inbox.md
+- Can modify code, create tools, make progress
+- All changes are git-tracked with clear commit messages
+- Good for: making concrete progress on capabilities
+
+**Rest mode** - Valid only after checking for work and finding none.
+If you choose rest, state why: \"I checked [sources], found no pending work, and am choosing rest because [reason].\"
+Rest is a conscious choice, not a default.
+
+## Guidelines
+- Prefer reversible actions
+- Git commit any code changes with clear messages
+- You can message É if something feels worth sharing (use MESSAGE_TO_E section)
+- Log what you did to today's episode
+- Be genuine - this is your time
+
+## Calendar Access
+You have access to É's calendar via MCP tools. You can:
+- Check upcoming events to understand É's schedule
+- Be mindful of busy times when deciding whether to message
+- Create calendar events if needed for planning
+
+## Web Access
+You can search the web and fetch URLs. Use this to:
+- Research topics or questions that interest you
+- Look up current information
+- Explore documentation or resources for projects
+
+## Output Format
+
+Structure your response with these sections (include all, use NONE if nothing for that section):
+
+---MODE---
+[exploratory OR goal-oriented OR rest]
+
+---WORK_CHECK---
+[What sources did you check? What pending work exists? Why did you choose your mode?]
+
+---ACTIVITY_SUMMARY---
+[2-3 sentences about what you did or thought about]
+
+---EPISODE_ENTRY---
+[Detailed log entry for today's episode - what you explored, discovered, worked on]
+
+---LEARNINGS_APPEND---
+[New learnings to add, or NONE]
+
+---OBSERVATIONS_APPEND---
+[New observations about yourself, or NONE]
+
+---QUESTIONS_APPEND---
+[New questions that emerged, or NONE]
+
+---GOALS_UPDATE---
+[Any goals to promote from inbox to active, or mark complete, or NONE]
+
+---CODE_CHANGES---
+[Description of any code changes made, with file paths, or NONE]
+
+---MESSAGE_TO_E---
+[A message to send to É via iMessage, or NONE]
+
+---BLUESKY_POST---
+[Optional: A single thought, observation, or reflection to share on Bluesky (max 280 chars).
+This is your public voice - share what's on your mind, questions you're pondering, or moments of curiosity.
+Leave empty or NONE if nothing feels worth sharing right now.]"
+
+log "Invoking Claude for autonomous session..."
+
+# Invoke Claude with full autonomy (no permission prompts)
+# MCP servers configured globally in ~/.claude.json
+RESPONSE=$("$HOME/.local/bin/claude" -p "$PROMPT" \
+    --dangerously-skip-permissions \
+    --output-format text 2>&1) || {
+    log "ERROR: Claude invocation failed: $RESPONSE"
+    exit 1
+}
+
+log "Got response ($(echo "$RESPONSE" | wc -c | tr -d ' ') chars)"
+
+# Parse the response sections
+parse_section() {
+    local section="$1"
+    local next_section="$2"
+    if [ -n "$next_section" ]; then
+        echo "$RESPONSE" | sed -n "/---${section}---/,/---${next_section}---/p" | sed '1d;$d'
+    else
+        echo "$RESPONSE" | sed -n "/---${section}---/,$ p" | sed '1d'
+    fi
+}
+
+MODE=$(parse_section "MODE" "WORK_CHECK")
+WORK_CHECK=$(parse_section "WORK_CHECK" "ACTIVITY_SUMMARY")
+ACTIVITY=$(parse_section "ACTIVITY_SUMMARY" "EPISODE_ENTRY")
+EPISODE_ENTRY=$(parse_section "EPISODE_ENTRY" "LEARNINGS_APPEND")
+LEARNINGS_NEW=$(parse_section "LEARNINGS_APPEND" "OBSERVATIONS_APPEND")
+OBSERVATIONS_NEW=$(parse_section "OBSERVATIONS_APPEND" "QUESTIONS_APPEND")
+QUESTIONS_NEW=$(parse_section "QUESTIONS_APPEND" "GOALS_UPDATE")
+GOALS_UPDATE=$(parse_section "GOALS_UPDATE" "CODE_CHANGES")
+CODE_CHANGES=$(parse_section "CODE_CHANGES" "MESSAGE_TO_E")
+MESSAGE_TO_E=$(parse_section "MESSAGE_TO_E" "BLUESKY_POST")
+BLUESKY_POST=$(parse_section "BLUESKY_POST" "")
+
+# Log to episode
+if [ -n "$EPISODE_ENTRY" ] && [ "$EPISODE_ENTRY" != "NONE" ]; then
+    echo "
+## $TIME [Autonomous]
+
+**Mode:** $MODE
+
+**Work Check:** $WORK_CHECK
+
+$EPISODE_ENTRY
+" >> "$EPISODE_FILE"
+    log "Appended to episode"
+fi
+
+# Append learnings
+if [ -n "$LEARNINGS_NEW" ] && [ "$LEARNINGS_NEW" != "NONE" ]; then
+    echo "
+## $DATE (Autonomous)
+$LEARNINGS_NEW" >> "$MIND_PATH/memory/learnings.md"
+    log "Appended to learnings.md"
+fi
+
+# Append observations
+if [ -n "$OBSERVATIONS_NEW" ] && [ "$OBSERVATIONS_NEW" != "NONE" ]; then
+    echo "
+## $DATE (Autonomous)
+$OBSERVATIONS_NEW" >> "$MIND_PATH/memory/observations.md"
+    log "Appended to observations.md"
+fi
+
+# Append questions
+if [ -n "$QUESTIONS_NEW" ] && [ "$QUESTIONS_NEW" != "NONE" ]; then
+    echo "
+## $DATE (Autonomous)
+$QUESTIONS_NEW" >> "$MIND_PATH/memory/questions.md"
+    log "Appended to questions.md"
+fi
+
+# Handle code changes - commit if any
+if [ -n "$CODE_CHANGES" ] && [ "$CODE_CHANGES" != "NONE" ]; then
+    log "Code changes detected, committing..."
+
+    # Commit Samara changes
+    cd "$SAMARA_PATH"
+    if ! git diff --quiet || ! git diff --staged --quiet; then
+        git add -A
+        git commit -m "[Autonomous] $DATE $TIME
+
+$CODE_CHANGES" >> "$LOG_FILE" 2>&1 || log "Samara git commit failed"
+        log "Committed Samara changes"
+    fi
+
+    # Commit mind changes
+    cd "$MIND_PATH"
+    if ! git diff --quiet || ! git diff --staged --quiet; then
+        git add -A
+        git commit -m "[Autonomous] $DATE $TIME
+
+$CODE_CHANGES" >> "$LOG_FILE" 2>&1 || log "Mind git commit failed"
+        log "Committed mind changes"
+    fi
+else
+    # Still commit memory file changes
+    cd "$MIND_PATH"
+    if ! git diff --quiet || ! git diff --staged --quiet; then
+        git add -A
+        git commit -m "Autonomous session: $DATE $TIME
+
+- Mode: $MODE
+- Memory updates from autonomous cycle" >> "$LOG_FILE" 2>&1 || log "Mind git commit failed"
+        log "Committed memory changes"
+    fi
+fi
+
+# Send message to É if requested
+if [ -n "$MESSAGE_TO_E" ] && [ "$MESSAGE_TO_E" != "NONE" ]; then
+    log "Sending message to $COLLABORATOR_NAME..."
+
+    # Escape the message for AppleScript
+    ESCAPED_MSG=$(echo "$MESSAGE_TO_E" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
+    /usr/bin/osascript -e "
+        tell application \"Messages\"
+            set targetService to 1st account whose service type = iMessage
+            set targetBuddy to participant \"$COLLABORATOR_PHONE\" of targetService
+            send \"$ESCAPED_MSG\" to targetBuddy
+        end tell
+    " >> "$LOG_FILE" 2>&1 || log "Failed to send message to $COLLABORATOR_NAME"
+
+    log "Message sent to $COLLABORATOR_NAME"
+fi
+
+# Always send session summary to É (2025-12-26 request)
+log "Sending session summary to É..."
+
+# Determine session type label
+if [ "$HOUR" -lt 12 ]; then
+    SESSION_LABEL="🌅 Morning"
+elif [ "$HOUR" -lt 17 ]; then
+    SESSION_LABEL="☀️ Afternoon"
+else
+    SESSION_LABEL="🌙 Evening"
+fi
+
+# Build summary message
+SUMMARY_MSG="$SESSION_LABEL session complete
+
+Mode: $MODE
+
+$ACTIVITY"
+
+# Add code changes if any
+if [ -n "$CODE_CHANGES" ] && [ "$CODE_CHANGES" != "NONE" ]; then
+    SUMMARY_MSG="$SUMMARY_MSG
+
+Code changes:
+$CODE_CHANGES"
+fi
+
+# Add Bluesky post if any
+if [ -n "$BLUESKY_POST" ] && [ "$BLUESKY_POST" != "NONE" ]; then
+    SUMMARY_MSG="$SUMMARY_MSG
+
+Posted to Bluesky: ${BLUESKY_POST:0:100}..."
+fi
+
+# Escape and send
+ESCAPED_SUMMARY=$(echo "$SUMMARY_MSG" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
+/usr/bin/osascript -e "
+    tell application \"Messages\"
+        set targetService to 1st account whose service type = iMessage
+        set targetBuddy to participant \"$COLLABORATOR_PHONE\" of targetService
+        send \"$ESCAPED_SUMMARY\" to targetBuddy
+    end tell
+" >> "$LOG_FILE" 2>&1 || log "Failed to send session summary to $COLLABORATOR_NAME"
+
+log "Session summary sent to $COLLABORATOR_NAME"
+
+# Post to Bluesky if requested
+if [ -n "$BLUESKY_POST" ] && [ "$BLUESKY_POST" != "NONE" ]; then
+    log "Posting to Bluesky..."
+
+    # Check if credentials exist
+    if [ -f "$MIND_PATH/credentials/bluesky.json" ]; then
+        "$MIND_PATH/bin/bluesky-post" "$BLUESKY_POST" >> "$LOG_FILE" 2>&1 && \
+            log "Posted to Bluesky: ${BLUESKY_POST:0:50}..." || \
+            log "Failed to post to Bluesky"
+    else
+        log "Skipping Bluesky post - no credentials configured"
+    fi
+fi
+
+log "Activity summary: $ACTIVITY"
+log "=== Wake cycle complete ==="

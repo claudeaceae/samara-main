@@ -1,0 +1,37 @@
+#!/bin/bash
+# Send an iMessage to collaborator
+# Usage: message-e "Your message here"
+#
+# Can be called from any context - daemon, direct sessions, autonomous cycles.
+# Use for: decision points, questions, discoveries worth sharing, or just saying hi.
+
+set -e
+
+# Load config (with fallbacks)
+source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {
+    # Fallback if config.sh doesn't exist
+    COLLABORATOR_PHONE="+15206099095"
+}
+
+if [ -z "$1" ]; then
+    echo "Usage: message-e \"Your message here\""
+    exit 1
+fi
+
+MESSAGE="$1"
+PHONE="$COLLABORATOR_PHONE"
+
+# Escape for AppleScript
+ESCAPED=$(echo "$MESSAGE" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
+/usr/bin/osascript -e "
+    tell application \"Messages\"
+        set targetService to 1st account whose service type = iMessage
+        set targetBuddy to participant \"$PHONE\" of targetService
+        send \"$ESCAPED\" to targetBuddy
+    end tell
+"
+
+# Log it
+LOG_FILE="$HOME/.claude-mind/logs/messages-sent.log"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sent: $MESSAGE" >> "$LOG_FILE"

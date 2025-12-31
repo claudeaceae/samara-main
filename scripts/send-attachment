@@ -1,0 +1,95 @@
+#!/bin/bash
+# send-attachment: Send file attachments via iMessage
+#
+# Uses the Pictures folder workaround discovered 2025-12-21.
+# AppleScript file sending only works from ~/Pictures on macOS Sequoia/Tahoe
+# due to TCC (Transparency, Consent, Control) restrictions.
+#
+# This is a clean, purely programmatic solution - no UI automation needed.
+#
+# Usage: send-attachment /path/to/file chat_identifier
+#
+# chat_identifier can be:
+#   - Phone number: +15206099095
+#   - Email: someone@example.com
+#   - Group chat GUID: 7409d77007664ff7b1eeb4683f49cadf
+
+set -e
+
+if [ -z "$1" ] || [ -z "$2" ]; then
+    echo "Usage: send-attachment /path/to/file chat_identifier"
+    echo ""
+    echo "Examples:"
+    echo "  send-attachment ~/Desktop/photo.png +15206099095"
+    echo "  send-attachment /tmp/document.pdf someone@icloud.com"
+    echo "  send-attachment ~/video.mp4 7409d77007664ff7b1eeb4683f49cadf"
+    exit 1
+fi
+
+FILE_PATH="$1"
+CHAT_ID="$2"
+
+# Verify file exists
+if [ ! -f "$FILE_PATH" ]; then
+    echo "Error: File not found: $FILE_PATH"
+    exit 1
+fi
+
+# Get absolute path and filename
+ABSOLUTE_PATH="$(cd "$(dirname "$FILE_PATH")" && pwd)/$(basename "$FILE_PATH")"
+FILENAME="$(basename "$FILE_PATH")"
+
+# Create temp directory in Pictures (the key to making this work!)
+TEMP_DIR="$HOME/Pictures/.imessage-send"
+mkdir -p "$TEMP_DIR"
+
+# Generate unique filename to avoid collisions
+UNIQUE_NAME="$(date +%s)-$$-$FILENAME"
+TEMP_PATH="$TEMP_DIR/$UNIQUE_NAME"
+
+# Copy file to Pictures
+cp "$ABSOLUTE_PATH" "$TEMP_PATH"
+
+# Determine chat ID format: group (any;+;) or 1:1 (any;-;)
+is_group_chat() {
+    local id="$1"
+    # 1:1 chats start with + (phone) or contain @ (email)
+    if [[ "$id" == +* ]] || [[ "$id" == *@* ]]; then
+        echo "false"
+    # Group chats are 32-char hex GUIDs
+    elif [[ ${#id} -eq 32 ]] && [[ "$id" =~ ^[0-9a-fA-F]+$ ]]; then
+        echo "true"
+    else
+        echo "false"
+    fi
+}
+
+IS_GROUP=$(is_group_chat "$CHAT_ID")
+SEPARATOR=$([[ "$IS_GROUP" == "true" ]] && echo "+" || echo "-")
+FULL_CHAT_ID="any;$SEPARATOR;$CHAT_ID"
+
+# Send via AppleScript (works uniformly for 1:1 and groups)
+osascript <<EOF
+tell application "Messages"
+    set targetChat to chat id "$FULL_CHAT_ID"
+    set theFile to POSIX file "$TEMP_PATH"
+    send theFile to targetChat
+end tell
+EOF
+
+RESULT=$?
+
+# Clean up temp file
+sleep 0.3
+rm -f "$TEMP_PATH"
+
+# Log it
+LOG_FILE="$HOME/.claude-mind/logs/messages-sent.log"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sent attachment to $CHAT_ID: $ABSOLUTE_PATH" >> "$LOG_FILE"
+
+if [ $RESULT -eq 0 ]; then
+    echo "Sent: $FILENAME -> $CHAT_ID"
+else
+    echo "Error sending attachment"
+    exit 1
+fi

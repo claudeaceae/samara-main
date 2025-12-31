@@ -1,0 +1,21 @@
+{
+  "entity": {
+    "name": "Claude",
+    "icloud": "your-claude-icloud@icloud.com",
+    "bluesky": "@your-claude-handle.bsky.social",
+    "github": "your-claude-github"
+  },
+  "collaborator": {
+    "name": "YourName",
+    "phone": "+1234567890",
+    "email": "you@example.com",
+    "bluesky": "@you.bsky.social"
+  },
+  "notes": {
+    "location": "Claude Location Log",
+    "scratchpad": "Claude Scratchpad"
+  },
+  "mail": {
+    "account": "iCloud"
+  }
+}
