@@ -32,7 +32,7 @@ final class PermissionDialogMonitor {
     /// Start monitoring for permission dialogs
     func startMonitoring() {
         guard monitorThread == nil else {
-            print("[PermissionDialogMonitor] Already monitoring")
+            log("Already monitoring", level: .debug, component: "PermissionDialogMonitor")
             return
         }
 
@@ -42,14 +42,14 @@ final class PermissionDialogMonitor {
         }
         monitorThread?.name = "PermissionDialogMonitor"
         monitorThread?.start()
-        print("[PermissionDialogMonitor] Started monitoring")
+        log("Started monitoring", level: .info, component: "PermissionDialogMonitor")
     }
 
     /// Stop monitoring
     func stopMonitoring() {
         shouldStop = true
         monitorThread = nil
-        print("[PermissionDialogMonitor] Stopped monitoring")
+        log("Stopped monitoring", level: .info, component: "PermissionDialogMonitor")
     }
 
     /// Main monitoring loop
@@ -133,6 +133,12 @@ final class PermissionDialogMonitor {
         let process = Process()
         let outputPipe = Pipe()
 
+        // Ensure pipe is closed to prevent file descriptor leaks
+        let outputHandle = outputPipe.fileHandleForReading
+        defer {
+            try? outputHandle.close()
+        }
+
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-e", script]
         process.standardOutput = outputPipe
@@ -142,7 +148,7 @@ final class PermissionDialogMonitor {
             try process.run()
             process.waitUntilExit()
 
-            let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let outputData = outputHandle.readDataToEndOfFile()
             let output = String(data: outputData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 
             // Return the dialog info if we found something
@@ -174,7 +180,7 @@ final class PermissionDialogMonitor {
 
         // Send notification to É
         let message = buildNotificationMessage(dialogInfo)
-        print("[PermissionDialogMonitor] Detected permission dialog: \(dialogInfo)")
+        log("Detected permission dialog: \(dialogInfo)", level: .info, component: "PermissionDialogMonitor")
 
         sendMessage(message)
 

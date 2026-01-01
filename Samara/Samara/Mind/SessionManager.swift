@@ -114,7 +114,7 @@ final class SessionManager {
         defer { lock.unlock() }
 
         let chatId = message.chatIdentifier
-        print("[SessionManager] Buffering message for chat \(chatId) (isGroupChat=\(message.isGroupChat)): \(message.text.prefix(50))...")
+        log("Buffering message for chat \(chatId) (isGroupChat=\(message.isGroupChat)): \(message.text.prefix(50))...", level: .debug, component: "SessionManager")
 
         // Add to per-chat buffer
         if chatBuffers[chatId] == nil {
@@ -160,7 +160,7 @@ final class SessionManager {
         )
 
         saveSessionState(forChat: chatIdentifier)
-        print("[SessionManager] Recorded session \(sessionId) for chat \(chatIdentifier), response ROWID: \(responseRowId ?? -1)")
+        log("Recorded session \(sessionId) for chat \(chatIdentifier), response ROWID: \(responseRowId ?? -1)", level: .info, component: "SessionManager")
     }
 
     /// Clear the session for a specific chat
@@ -175,13 +175,13 @@ final class SessionManager {
 
         let statePath = sessionStatePath(forChat: chatIdentifier)
         try? FileManager.default.removeItem(atPath: statePath)
-        print("[SessionManager] Session cleared for chat \(chatIdentifier)")
+        log("Session cleared for chat \(chatIdentifier)", level: .info, component: "SessionManager")
 
         lock.unlock()
 
         // Trigger distillation outside lock if requested
         if triggerDistillation, let sessionId = oldSessionId, !messagesToDistill.isEmpty {
-            print("[SessionManager] Triggering distillation for cleared session \(sessionId)")
+            log("Triggering distillation for cleared session \(sessionId)", level: .info, component: "SessionManager")
             onSessionExpired?(sessionId, messagesToDistill)
         }
     }
@@ -208,7 +208,7 @@ final class SessionManager {
             if messages.isEmpty { continue }
 
             let sessionId = getCurrentSessionId(forChat: chatId)
-            print("[SessionManager] Flushing \(messages.count) buffered message(s) for chat \(chatId)")
+            log("Flushing \(messages.count) buffered message(s) for chat \(chatId)", level: .info, component: "SessionManager")
             onBatchReady(messages, sessionId)
         }
     }
@@ -237,7 +237,7 @@ final class SessionManager {
             self.chatTimers[chatIdentifier] = timer
             self.lock.unlock()
 
-            print("[SessionManager] Batch timer reset for chat \(chatIdentifier), will fire in \(Int(self.batchWindowSeconds))s")
+            log("Batch timer reset for chat \(chatIdentifier), will fire in \(Int(self.batchWindowSeconds))s", level: .debug, component: "SessionManager")
         }
     }
 
@@ -246,14 +246,14 @@ final class SessionManager {
 
         // Prevent concurrent batch processing for this chat
         if processingChats.contains(chatIdentifier) {
-            print("[SessionManager] Batch already processing for chat \(chatIdentifier), skipping")
+            log("Batch already processing for chat \(chatIdentifier), skipping", level: .debug, component: "SessionManager")
             lock.unlock()
             return
         }
 
         // Check if there are messages for this chat
         guard let bufferedMessages = chatBuffers[chatIdentifier], !bufferedMessages.isEmpty else {
-            print("[SessionManager] No messages in buffer for chat \(chatIdentifier), skipping")
+            log("No messages in buffer for chat \(chatIdentifier), skipping", level: .debug, component: "SessionManager")
             lock.unlock()
             return
         }
@@ -278,9 +278,9 @@ final class SessionManager {
 
             if state.isValid(sessionTimeout: sessionTimeoutSeconds, currentReadStatus: readStatus) {
                 sessionId = state.sessionId
-                print("[SessionManager] Resuming session \(state.sessionId) for chat \(chatIdentifier)")
+                log("Resuming session \(state.sessionId) for chat \(chatIdentifier)", level: .info, component: "SessionManager")
             } else {
-                print("[SessionManager] Session expired for chat \(chatIdentifier), starting fresh")
+                log("Session expired for chat \(chatIdentifier), starting fresh", level: .info, component: "SessionManager")
                 // Capture expired session info for distillation
                 expiredSessionId = state.sessionId
                 expiredSessionMessages = chatSessionMessages[chatIdentifier] ?? []
@@ -301,15 +301,15 @@ final class SessionManager {
 
         // Trigger distillation for expired session (outside lock)
         if let expiredId = expiredSessionId, !expiredSessionMessages.isEmpty {
-            print("[SessionManager] Triggering distillation for expired session \(expiredId)")
+            log("Triggering distillation for expired session \(expiredId)", level: .info, component: "SessionManager")
             onSessionExpired?(expiredId, expiredSessionMessages)
         }
 
         // Debug: log message details
         for (idx, msg) in messages.enumerated() {
-            print("[SessionManager] Message[\(idx)]: chatIdentifier=\(msg.chatIdentifier), isGroupChat=\(msg.isGroupChat), sender=\(msg.handleId)")
+            log("Message[\(idx)]: chatIdentifier=\(msg.chatIdentifier), isGroupChat=\(msg.isGroupChat), sender=\(msg.handleId)", level: .debug, component: "SessionManager")
         }
-        print("[SessionManager] Processing batch of \(messages.count) message(s) for chat \(chatIdentifier)")
+        log("Processing batch of \(messages.count) message(s) for chat \(chatIdentifier)", level: .info, component: "SessionManager")
         onBatchReady(messages, sessionId)
 
         // Mark batch processing complete for this chat
@@ -337,9 +337,9 @@ final class SessionManager {
                 let data = try Data(contentsOf: URL(fileURLWithPath: path))
                 let state = try JSONDecoder().decode(SessionState.self, from: data)
                 chatSessions[state.chatIdentifier] = state
-                print("[SessionManager] Loaded session state for chat \(state.chatIdentifier): \(state.sessionId)")
+                log("Loaded session state for chat \(state.chatIdentifier): \(state.sessionId)", level: .debug, component: "SessionManager")
             } catch {
-                print("[SessionManager] Failed to load session state from \(file): \(error)")
+                log("Failed to load session state from \(file): \(error)", level: .warn, component: "SessionManager")
             }
         }
     }
@@ -354,7 +354,7 @@ final class SessionManager {
                 try? FileManager.default.removeItem(atPath: path)
             }
         } catch {
-            print("[SessionManager] Failed to save session state for chat \(chatIdentifier): \(error)")
+            log("Failed to save session state for chat \(chatIdentifier): \(error)", level: .error, component: "SessionManager")
         }
     }
 }

@@ -5,6 +5,7 @@ import AppKit
 let lockFilePath = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/samara.lock"
 let lockFileDescriptor = open(lockFilePath, O_WRONLY | O_CREAT, 0o600)
 if lockFileDescriptor == -1 || flock(lockFileDescriptor, LOCK_EX | LOCK_NB) != 0 {
+    // Can't use log() here since Logger may not be initialized yet
     print("[Main] Another Samara instance is already running. Exiting.")
     exit(0)
 }
@@ -15,30 +16,7 @@ let targetPhone = config.collaborator.phone
 let targetEmail = config.collaborator.email
 let collaboratorName = config.collaborator.name
 
-// File-based logging to ensure output is captured (thread-safe)
-let logUrl = URL(fileURLWithPath: "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/logs/samara.log")
-let logLock = NSLock()
-func log(_ message: String) {
-    let timestamp = ISO8601DateFormatter().string(from: Date())
-    let line = "[\(timestamp)] \(message)\n"
-    print(message)  // Also print to stdout
-
-    logLock.lock()
-    defer { logLock.unlock() }
-
-    // Append to log file
-    do {
-        let handle = try FileHandle(forWritingTo: logUrl)
-        handle.seekToEndOfFile()
-        if let data = line.data(using: .utf8) {
-            handle.write(data)
-        }
-        try handle.close()
-    } catch {
-        // File might not exist, try creating it
-        try? line.data(using: .utf8)?.write(to: logUrl)
-    }
-}
+// Logging is now handled by Logger.swift with log levels and alerting
 
 log("===========================================")
 log("  Samara Starting")
@@ -54,7 +32,7 @@ app.setActivationPolicy(.regular)
 app.activate(ignoringOtherApps: true)
 
 // Request permissions - dialogs will appear during run loop
-print("[Main] Requesting permissions (dialogs may appear)...")
+log("Requesting permissions (dialogs may appear)...")
 PermissionRequester.requestAllPermissions()
 
 // Run the event loop briefly to allow dialogs to process
@@ -65,7 +43,7 @@ for _ in 0..<100 {
 
 // Switch to accessory mode (no Dock icon) for daemon operation
 app.setActivationPolicy(.accessory)
-print("[Main] Switched to background mode")
+log("Switched to background mode")
 
 // Initialize components
 let store = MessageStore(targetHandles: [targetPhone, targetEmail])
@@ -180,7 +158,7 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
             let context = memoryContext.buildContext()
 
             // Invoke Claude with batch
-            print("[Main] Invoking Claude...")
+            log("Invoking Claude...")
             let result = try invoker.invokeBatch(
                 messages: messages,
                 context: context,
@@ -235,7 +213,7 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
                     try sender.send("Sorry, I encountered an error: \(error)")
                 }
             } catch {
-                print("[Main] Failed to send error message: \(error)")
+                log("Failed to send error message: \(error)", level: .warn)
             }
         }
 
@@ -252,7 +230,7 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
 
 // Session expiration handler - distill memories from expired session
 func handleSessionExpired(sessionId: String, messages: [Message]) {
-    print("[Main] Session \(sessionId) expired with \(messages.count) message(s), triggering distillation...")
+    log("Session \(sessionId) expired with \(messages.count) message(s), triggering distillation...")
 
     // Run distillation in background
     DispatchQueue.global(qos: .utility).async {
@@ -268,7 +246,7 @@ func handleSessionExpired(sessionId: String, messages: [Message]) {
 
         // Skip if no meaningful content
         guard !conversationLog.isEmpty else {
-            print("[Main] No content to distill, skipping")
+            log("No content to distill, skipping", level: .debug)
             return
         }
 
@@ -304,16 +282,16 @@ func handleSessionExpired(sessionId: String, messages: [Message]) {
 
             let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
             if let output = String(data: outputData, encoding: .utf8), !output.isEmpty {
-                print("[Main] Distillation output: \(output)")
+                log("Distillation output: \(output)", level: .debug)
             }
 
             if process.terminationStatus == 0 {
-                print("[Main] Distillation complete for session \(sessionId)")
+                log("Distillation complete for session \(sessionId)")
             } else {
-                print("[Main] Distillation failed with status \(process.terminationStatus)")
+                log("Distillation failed with status \(process.terminationStatus)", level: .warn)
             }
         } catch {
-            print("[Main] Failed to run distillation: \(error)")
+            log("Failed to run distillation: \(error)", level: .error)
         }
     }
 }
@@ -384,13 +362,13 @@ do {
 
 // Set up cleanup on exit
 signal(SIGINT) { _ in
-    print("\n[Main] Shutting down, flushing pending messages...")
+    log("Shutting down, flushing pending messages...")
     sessionManager.flush()
     exit(0)
 }
 
 signal(SIGTERM) { _ in
-    print("\n[Main] Shutting down, flushing pending messages...")
+    log("Shutting down, flushing pending messages...")
     sessionManager.flush()
     exit(0)
 }
@@ -401,7 +379,7 @@ let watcher = MessageWatcher(store: store, onNewMessage: handleMessage)
 do {
     try watcher.start()
 } catch {
-    print("[Main] FATAL: Could not start message watcher: \(error)")
+    log("FATAL: Could not start message watcher: \(error)", level: .error)
     exit(1)
 }
 

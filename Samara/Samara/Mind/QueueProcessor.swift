@@ -25,7 +25,7 @@ final class QueueProcessor {
     /// Start monitoring the queue
     func startMonitoring() {
         guard monitorThread == nil else {
-            print("[QueueProcessor] Already monitoring")
+            log("Already monitoring", level: .debug, component: "QueueProcessor")
             return
         }
 
@@ -35,14 +35,14 @@ final class QueueProcessor {
         }
         monitorThread?.name = "QueueProcessor"
         monitorThread?.start()
-        print("[QueueProcessor] Started monitoring")
+        log("Started monitoring", level: .info, component: "QueueProcessor")
     }
 
     /// Stop monitoring the queue
     func stopMonitoring() {
         shouldStop = true
         monitorThread = nil
-        print("[QueueProcessor] Stopped monitoring")
+        log("Stopped monitoring", level: .info, component: "QueueProcessor")
     }
 
     /// Main monitoring loop
@@ -52,7 +52,7 @@ final class QueueProcessor {
 
             // Check for stale locks and clean them up
             if TaskLock.isStale() {
-                print("[QueueProcessor] Detected stale lock, releasing...")
+                log("Detected stale lock, releasing...", level: .warn, component: "QueueProcessor")
                 TaskLock.release()
             }
 
@@ -66,14 +66,14 @@ final class QueueProcessor {
     /// Process all queued messages by reinjecting them into the session manager
     private func processQueue() {
         guard let sessionManager = sessionManager else {
-            print("[QueueProcessor] No session manager set, cannot process queue")
+            log("No session manager set, cannot process queue", level: .error, component: "QueueProcessor")
             return
         }
 
         let queuedMessages = MessageQueue.dequeueAll()
         if queuedMessages.isEmpty { return }
 
-        print("[QueueProcessor] Processing \(queuedMessages.count) queued message(s)")
+        log("Processing \(queuedMessages.count) queued message(s)", level: .info, component: "QueueProcessor")
 
         // Group messages by chat to maintain proper batching
         var messagesByChat: [String: [Message]] = [:]
@@ -88,7 +88,7 @@ final class QueueProcessor {
         // Reinject messages into session manager
         // The session manager will handle batching (11-second window)
         for (chatId, messages) in messagesByChat {
-            print("[QueueProcessor] Reinjecting \(messages.count) message(s) for chat \(chatId)")
+            log("Reinjecting \(messages.count) message(s) for chat \(chatId)", level: .info, component: "QueueProcessor")
             for message in messages {
                 sessionManager.addMessage(message)
             }

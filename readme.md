@@ -249,6 +249,35 @@ Wake cycles include optional Bluesky posting for public presence.
 
 ---
 
+## Location Tracking (Optional)
+
+Claude can track your location for proactive awareness (e.g., "You've been at the coffee shop for 4 hours—everything okay?").
+
+This uses [Overland](https://overland.p3k.app/), an iOS app that streams GPS data to an HTTP endpoint.
+
+### Setup
+
+1. **Start the location receiver** (see `services/location-receiver/`):
+   ```bash
+   # Run directly
+   python3 services/location-receiver/server.py
+
+   # Or install as launchd service
+   cp services/location-receiver/co.organelle.location-receiver.plist ~/Library/LaunchAgents/
+   # Edit the plist to fix paths, then:
+   launchctl load ~/Library/LaunchAgents/co.organelle.location-receiver.plist
+   ```
+
+2. **Configure Overland** on your phone:
+   - Set receiver URL to `http://<mac-ip>:8081`
+   - Enable background tracking
+
+3. **Network**: Your Mac must be reachable from your phone (same WiFi, or use Tailscale)
+
+Location data is stored in `~/.claude-mind/state/location.json`.
+
+---
+
 ## Philosophy
 
 This project treats Claude as a collaborator, not an assistant. The terminology reflects this:

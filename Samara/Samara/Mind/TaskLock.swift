@@ -22,13 +22,13 @@ final class TaskLock {
     static func acquire(task: String, chat: String? = nil) -> Bool {
         // First check if there's a stale lock we should clean up
         if isStale() {
-            print("[TaskLock] Releasing stale lock")
+            log("Releasing stale lock", level: .warn, component: "TaskLock")
             release()
         }
 
         // Check if already locked
         if isLocked() {
-            print("[TaskLock] Already locked by another task")
+            log("Already locked by another task", level: .debug, component: "TaskLock")
             return false
         }
 
@@ -51,10 +51,10 @@ final class TaskLock {
             try data.write(to: URL(fileURLWithPath: tempPath))
             try FileManager.default.moveItem(atPath: tempPath, toPath: lockPath)
 
-            print("[TaskLock] Acquired lock for task: \(task)")
+            log("Acquired lock for task: \(task)", level: .info, component: "TaskLock")
             return true
         } catch {
-            print("[TaskLock] Failed to acquire lock: \(error)")
+            log("Failed to acquire lock: \(error)", level: .error, component: "TaskLock")
             return false
         }
     }
@@ -63,11 +63,11 @@ final class TaskLock {
     static func release() {
         do {
             try FileManager.default.removeItem(atPath: lockPath)
-            print("[TaskLock] Released lock")
+            log("Released lock", level: .debug, component: "TaskLock")
         } catch {
             // File might not exist, that's fine
             if (error as NSError).code != NSFileNoSuchFileError {
-                print("[TaskLock] Failed to release lock: \(error)")
+                log("Failed to release lock: \(error)", level: .warn, component: "TaskLock")
             }
         }
     }
@@ -85,7 +85,7 @@ final class TaskLock {
             decoder.dateDecodingStrategy = .iso8601
             return try decoder.decode(TaskInfo.self, from: data)
         } catch {
-            print("[TaskLock] Failed to read lock info: \(error)")
+            log("Failed to read lock info: \(error)", level: .warn, component: "TaskLock")
             return nil
         }
     }
@@ -105,7 +105,7 @@ final class TaskLock {
         let result = kill(info.pid, 0)  // Signal 0 just checks if process exists
         if result == -1 && errno == ESRCH {
             // ESRCH means no such process
-            print("[TaskLock] Lock is stale - PID \(info.pid) no longer running")
+            log("Lock is stale - PID \(info.pid) no longer running", level: .warn, component: "TaskLock")
             return true
         }
 
@@ -113,7 +113,7 @@ final class TaskLock {
         // (normal Claude invocations shouldn't take this long)
         let staleDuration: TimeInterval = 30 * 60  // 30 minutes
         if Date().timeIntervalSince(info.started) > staleDuration {
-            print("[TaskLock] Lock is stale - held for more than 30 minutes")
+            log("Lock is stale - held for more than 30 minutes", level: .warn, component: "TaskLock")
             return true
         }
 

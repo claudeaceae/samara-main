@@ -5,6 +5,12 @@ final class MessageSender {
     /// The target phone number or email to send to
     private let targetId: String
 
+    /// Maximum retry attempts for AppleScript failures
+    private let maxRetries = 3
+
+    /// Base delay for exponential backoff (doubles each retry: 1s, 2s, 4s)
+    private let baseRetryDelay: TimeInterval = 1.0
+
     init(targetId: String) {
         self.targetId = targetId
     }
@@ -36,7 +42,7 @@ final class MessageSender {
                 Thread.sleep(forTimeInterval: 0.5)
             }
         }
-        print("[MessageSender] Sent message to \(targetId) (\(chunks.count) chunk(s))")
+        log("Sent message to \(targetId) (\(chunks.count) chunk(s))", level: .info, component: "MessageSender")
     }
 
     /// Sends a file/image attachment to the target (1:1 chat)
@@ -62,7 +68,7 @@ final class MessageSender {
             """
 
         try runAppleScript(script)
-        print("[MessageSender] Sent attachment to \(targetId): \(filePath)")
+        log("Sent attachment to \(targetId): \(filePath)", level: .info, component: "MessageSender")
     }
 
     // MARK: - Public API (specific chat by identifier)
@@ -94,7 +100,7 @@ final class MessageSender {
                 Thread.sleep(forTimeInterval: 0.5)
             }
         }
-        print("[MessageSender] Sent message to chat \(chatIdentifier) (\(chunks.count) chunk(s))")
+        log("Sent message to chat \(chatIdentifier) (\(chunks.count) chunk(s))", level: .info, component: "MessageSender")
     }
 
     /// Sends a file/image attachment to a specific chat
@@ -122,7 +128,7 @@ final class MessageSender {
             """
 
         try runAppleScript(script)
-        print("[MessageSender] Sent attachment to chat \(chatIdentifier): \(filePath)")
+        log("Sent attachment to chat \(chatIdentifier): \(filePath)", level: .info, component: "MessageSender")
     }
 
     // MARK: - Private Helpers
@@ -230,27 +236,51 @@ final class MessageSender {
         return chunks.isEmpty ? [text] : chunks
     }
 
-    /// Runs an AppleScript via osascript command
+    /// Runs an AppleScript via osascript command with retry logic
     private func runAppleScript(_ source: String) throws {
-        let process = Process()
-        let errorPipe = Pipe()
+        var lastError: Error?
 
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", source]
-        process.standardError = errorPipe
+        for attempt in 0..<maxRetries {
+            let process = Process()
+            let errorPipe = Pipe()
 
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            throw MessageSenderError.executionFailed(error.localizedDescription)
+            // Ensure pipe is closed to prevent file descriptor leaks
+            let errorHandle = errorPipe.fileHandleForReading
+            defer {
+                try? errorHandle.close()
+            }
+
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = ["-e", source]
+            process.standardError = errorPipe
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
+                if process.terminationStatus == 0 {
+                    return // Success!
+                }
+
+                let errorData = errorHandle.readDataToEndOfFile()
+                let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
+                lastError = MessageSenderError.executionFailed(errorMessage)
+
+            } catch {
+                lastError = MessageSenderError.executionFailed(error.localizedDescription)
+            }
+
+            // If not the last attempt, wait with exponential backoff
+            if attempt < maxRetries - 1 {
+                let delay = baseRetryDelay * pow(2.0, Double(attempt))
+                log("AppleScript failed, retrying in \(Int(delay))s (attempt \(attempt + 1)/\(maxRetries))", level: .warn, component: "MessageSender")
+                Thread.sleep(forTimeInterval: delay)
+            }
         }
 
-        if process.terminationStatus != 0 {
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-            let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
-            throw MessageSenderError.executionFailed(errorMessage)
-        }
+        // All retries exhausted
+        log("All \(maxRetries) retry attempts failed", level: .error, component: "MessageSender")
+        throw lastError ?? MessageSenderError.executionFailed("Unknown error after \(maxRetries) retries")
     }
 }
 

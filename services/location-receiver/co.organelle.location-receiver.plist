@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>co.organelle.location-receiver</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <!-- UPDATE THIS PATH to where you cloned samara-main -->
+        <string>/Users/YOUR_USERNAME/Developer/samara-main/services/location-receiver/server.py</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/YOUR_USERNAME/.claude-mind/logs/location-receiver.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/YOUR_USERNAME/.claude-mind/logs/location-receiver.log</string>
+</dict>
+</plist>

@@ -65,7 +65,7 @@ final class EpisodeLogger {
             fileHandle.closeFile()
         }
 
-        print("[EpisodeLogger] Logged exchange to \(dateString).md")
+        log("Logged exchange to \(dateString).md", level: .debug, component: "EpisodeLogger")
     }
 
     /// Logs a standalone observation or note

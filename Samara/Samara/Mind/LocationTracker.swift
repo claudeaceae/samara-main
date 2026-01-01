@@ -75,7 +75,7 @@ final class LocationTracker {
     /// Process a location update from the note and determine if we should message
     func processLocationUpdate(noteContent: String) -> LocationAnalysis {
         guard let location = parseLocation(from: noteContent) else {
-            print("[LocationTracker] Could not parse location from note")
+            log("Could not parse location from note", level: .debug, component: "LocationTracker")
             return LocationAnalysis(shouldMessage: false, reason: nil, currentLocation: nil)
         }
 
@@ -316,9 +316,9 @@ final class LocationTracker {
                 locationHistory = Array(locationHistory.suffix(1000))
             }
 
-            print("[LocationTracker] Loaded \(locationHistory.count) history entries")
+            log("Loaded \(locationHistory.count) history entries", level: .debug, component: "LocationTracker")
         } catch {
-            print("[LocationTracker] Error loading history: \(error)")
+            log("Error loading history: \(error)", level: .warn, component: "LocationTracker")
         }
     }
 
@@ -346,7 +346,7 @@ final class LocationTracker {
                 }
             }
         } catch {
-            print("[LocationTracker] Error saving history: \(error)")
+            log("Error saving history: \(error)", level: .warn, component: "LocationTracker")
         }
     }
 
@@ -358,9 +358,9 @@ final class LocationTracker {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             knownPlaces = try decoder.decode([String: LocationEntry].self, from: data)
-            print("[LocationTracker] Loaded \(knownPlaces.count) known places")
+            log("Loaded \(knownPlaces.count) known places", level: .debug, component: "LocationTracker")
         } catch {
-            print("[LocationTracker] Error loading known places: \(error)")
+            log("Error loading known places: \(error)", level: .warn, component: "LocationTracker")
         }
     }
 
@@ -374,9 +374,9 @@ final class LocationTracker {
         do {
             let data = try encoder.encode(knownPlaces)
             try data.write(to: URL(fileURLWithPath: knownPlacesPath))
-            print("[LocationTracker] Saved known place: \(name)")
+            log("Saved known place: \(name)", level: .debug, component: "LocationTracker")
         } catch {
-            print("[LocationTracker] Error saving known places: \(error)")
+            log("Error saving known places: \(error)", level: .warn, component: "LocationTracker")
         }
     }
 }

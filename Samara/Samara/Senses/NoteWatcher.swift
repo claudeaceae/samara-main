@@ -56,9 +56,9 @@ final class NoteWatcher {
         for noteName in watchedNotes {
             if let (htmlContent, _) = readNote(named: noteName) {
                 contentHashes[noteName] = hashContent(htmlContent)
-                print("[NoteWatcher] Initialized watch for '\(noteName)' (hash: \(contentHashes[noteName]?.prefix(8) ?? "nil"))")
+                log("Initialized watch for '\(noteName)' (hash: \(contentHashes[noteName]?.prefix(8) ?? "nil"))", level: .debug, component: "NoteWatcher")
             } else {
-                print("[NoteWatcher] Warning: Could not find note '\(noteName)'")
+                log("Warning: Could not find note '\(noteName)'", level: .warn, component: "NoteWatcher")
             }
         }
 
@@ -69,7 +69,7 @@ final class NoteWatcher {
         watchThread?.name = "NoteWatcher"
         watchThread?.start()
 
-        print("[NoteWatcher] Started watching \(watchedNotes.count) note(s), polling every \(Int(pollInterval))s")
+        log("Started watching \(watchedNotes.count) note(s), polling every \(Int(pollInterval))s", level: .info, component: "NoteWatcher")
     }
 
     /// Stop watching
@@ -77,7 +77,7 @@ final class NoteWatcher {
         shouldStop = true
         watchThread?.cancel()
         watchThread = nil
-        print("[NoteWatcher] Stopped")
+        log("Stopped", level: .info, component: "NoteWatcher")
     }
 
     /// Manually check a specific note (useful for on-demand checks)
@@ -118,7 +118,7 @@ final class NoteWatcher {
             let oldHash = contentHashes[noteName]
 
             if newHash != oldHash {
-                print("[NoteWatcher] Change detected in '\(noteName)'")
+                log("Change detected in '\(noteName)'", level: .info, component: "NoteWatcher")
                 contentHashes[noteName] = newHash
 
                 let update = NoteUpdate(
@@ -152,6 +152,12 @@ final class NoteWatcher {
         let process = Process()
         let outputPipe = Pipe()
 
+        // Ensure pipe is closed to prevent file descriptor leaks
+        let outputHandle = outputPipe.fileHandleForReading
+        defer {
+            try? outputHandle.close()
+        }
+
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-e", script]
         process.standardOutput = outputPipe
@@ -161,7 +167,7 @@ final class NoteWatcher {
             try process.run()
             process.waitUntilExit()
 
-            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            let data = outputHandle.readDataToEndOfFile()
             guard let htmlContent = String(data: data, encoding: .utf8), !htmlContent.isEmpty else {
                 return nil
             }
@@ -171,7 +177,7 @@ final class NoteWatcher {
             return (html: htmlContent.trimmingCharacters(in: .whitespacesAndNewlines),
                     plainText: plainText)
         } catch {
-            print("[NoteWatcher] Error reading note '\(noteName)': \(error)")
+            log("Error reading note '\(noteName)': \(error)", level: .warn, component: "NoteWatcher")
             return nil
         }
     }

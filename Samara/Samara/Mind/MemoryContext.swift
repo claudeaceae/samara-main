@@ -114,6 +114,12 @@ final class MemoryContext {
         let process = Process()
         let outputPipe = Pipe()
 
+        // Ensure pipe is closed to prevent file descriptor leaks
+        let outputHandle = outputPipe.fileHandleForReading
+        defer {
+            try? outputHandle.close()
+        }
+
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
         process.arguments = [scriptPath, query]
         process.standardOutput = outputPipe
@@ -127,9 +133,21 @@ final class MemoryContext {
 
         do {
             try process.run()
-            process.waitUntilExit()
 
-            let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            // Wait with timeout to prevent blocking forever
+            let timeout: TimeInterval = 10
+            let deadline = Date().addingTimeInterval(timeout)
+            while process.isRunning && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+
+            if process.isRunning {
+                log("Cross-temporal search timeout after \(Int(timeout))s - killing process", level: .warn, component: "MemoryContext")
+                process.terminate()
+                return nil
+            }
+
+            let outputData = outputHandle.readDataToEndOfFile()
             guard let output = String(data: outputData, encoding: .utf8),
                   !output.isEmpty,
                   output.contains("match)") else {  // Only include if we found matches
@@ -138,7 +156,7 @@ final class MemoryContext {
 
             return output
         } catch {
-            print("[MemoryContext] Cross-temporal search failed: \(error)")
+            log("Cross-temporal search failed: \(error)", level: .warn, component: "MemoryContext")
             return nil
         }
     }
@@ -200,6 +218,12 @@ final class MemoryContext {
         let process = Process()
         let outputPipe = Pipe()
 
+        // Ensure pipe is closed to prevent file descriptor leaks
+        let outputHandle = outputPipe.fileHandleForReading
+        defer {
+            try? outputHandle.close()
+        }
+
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
         process.arguments = [
             dbPath,
@@ -226,16 +250,28 @@ final class MemoryContext {
 
         do {
             try process.run()
-            process.waitUntilExit()
 
-            let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            // Wait with timeout to prevent blocking forever
+            let timeout: TimeInterval = 5
+            let deadline = Date().addingTimeInterval(timeout)
+            while process.isRunning && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+
+            if process.isRunning {
+                log("FTS search timeout after \(Int(timeout))s - killing process", level: .warn, component: "MemoryContext")
+                process.terminate()
+                return []
+            }
+
+            let outputData = outputHandle.readDataToEndOfFile()
             guard let output = String(data: outputData, encoding: .utf8), !output.isEmpty else {
                 return []
             }
 
             return parseMemoriesFromSqlite(output)
         } catch {
-            print("[MemoryContext] FTS search failed: \(error)")
+            log("FTS search failed: \(error)", level: .warn, component: "MemoryContext")
             return []
         }
     }

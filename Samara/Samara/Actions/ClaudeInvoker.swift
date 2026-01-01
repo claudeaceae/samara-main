@@ -17,6 +17,9 @@ final class ClaudeInvoker {
     /// Memory context for related memories search
     private let memoryContext: MemoryContext
 
+    /// Maximum retry attempts for session-related errors
+    private let maxRetries = 2
+
     init(claudePath: String = "/usr/local/bin/claude", timeout: TimeInterval = 300, memoryContext: MemoryContext? = nil) {
         self.claudePath = claudePath
         self.timeout = timeout
@@ -32,18 +35,22 @@ final class ClaudeInvoker {
     /// - Returns: ClaudeInvocationResult containing response and new session ID
     func invokeBatch(messages: [Message], context: String, resumeSessionId: String? = nil, targetHandles: Set<String> = []) throws -> ClaudeInvocationResult {
         let fullPrompt = buildBatchPrompt(messages: messages, context: context, targetHandles: targetHandles)
-        return try invokeWithPrompt(fullPrompt, resumeSessionId: resumeSessionId)
+        return try invokeWithPrompt(fullPrompt, resumeSessionId: resumeSessionId, retryCount: 0)
     }
 
     /// Invokes Claude with the given prompt and returns the response (legacy single-message interface)
     func invoke(prompt: String, context: String, attachmentPaths: [String] = []) throws -> String {
         let fullPrompt = buildPrompt(message: prompt, context: context, attachmentPaths: attachmentPaths)
-        let result = try invokeWithPrompt(fullPrompt, resumeSessionId: nil)
+        let result = try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: 0)
         return result.response
     }
 
-    /// Core invocation method
-    private func invokeWithPrompt(_ fullPrompt: String, resumeSessionId: String?) throws -> ClaudeInvocationResult {
+    /// Core invocation method with retry tracking to prevent infinite loops
+    private func invokeWithPrompt(_ fullPrompt: String, resumeSessionId: String?, retryCount: Int) throws -> ClaudeInvocationResult {
+        // Guard against infinite retry loops
+        if retryCount > maxRetries {
+            throw ClaudeInvokerError.executionFailed(-1, "Max retries (\(maxRetries)) exceeded for session-related errors")
+        }
         let process = Process()
         let outputPipe = Pipe()
         let errorPipe = Pipe()
@@ -83,7 +90,7 @@ final class ClaudeInvoker {
         // Add resume flag if we have a session to continue
         if let sessionId = resumeSessionId {
             arguments.append(contentsOf: ["--resume", sessionId])
-            print("[ClaudeInvoker] Resuming session: \(sessionId)")
+            log("Resuming session: \(sessionId)", level: .info, component: "ClaudeInvoker")
         }
 
         process.arguments = arguments
@@ -180,16 +187,16 @@ final class ClaudeInvoker {
         // Check for errors in the output (Claude CLI may exit 0 even on errors)
         if output.contains("No conversation found with session ID:") {
             if resumeSessionId != nil {
-                print("[ClaudeInvoker] Session not found, retrying without --resume")
-                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil)
+                log("Session not found, retrying without --resume (attempt \(retryCount + 1)/\(maxRetries))", level: .warn, component: "ClaudeInvoker")
+                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1)
             }
         }
 
         // Check for "Prompt is too long" error - need to start fresh session
         if output.contains("Prompt is too long") {
             if resumeSessionId != nil {
-                print("[ClaudeInvoker] Prompt too long (session context exceeded), starting fresh session")
-                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil)
+                log("Prompt too long (session context exceeded), starting fresh session (attempt \(retryCount + 1)/\(maxRetries))", level: .warn, component: "ClaudeInvoker")
+                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1)
             }
             // If already no session and still too long, that's a real error
             throw ClaudeInvokerError.executionFailed(Int(process.terminationStatus), "Prompt is too long even without session context")
@@ -199,8 +206,8 @@ final class ClaudeInvoker {
         if !output.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") {
             // Not JSON, might be an error message
             if resumeSessionId != nil && output.contains("session") {
-                print("[ClaudeInvoker] Possible session error, retrying without --resume")
-                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil)
+                log("Possible session error, retrying without --resume (attempt \(retryCount + 1)/\(maxRetries))", level: .warn, component: "ClaudeInvoker")
+                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1)
             }
             throw ClaudeInvokerError.executionFailed(Int(process.terminationStatus), output)
         }
@@ -213,8 +220,8 @@ final class ClaudeInvoker {
 
             // If prompt too long with a session, retry without session
             if errorResult.contains("Prompt is too long") && resumeSessionId != nil {
-                print("[ClaudeInvoker] Prompt too long (JSON response), starting fresh session")
-                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil)
+                log("Prompt too long (JSON response), starting fresh session (attempt \(retryCount + 1)/\(maxRetries))", level: .warn, component: "ClaudeInvoker")
+                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1)
             }
 
             throw ClaudeInvokerError.executionFailed(Int(process.terminationStatus), errorResult)
@@ -246,7 +253,7 @@ final class ClaudeInvoker {
                 )
             }
         } catch {
-            print("[ClaudeInvoker] Failed to parse JSON output: \(error)")
+            log("Failed to parse JSON output: \(error)", level: .warn, component: "ClaudeInvoker")
         }
 
         return ClaudeInvocationResult(response: output.trimmingCharacters(in: .whitespacesAndNewlines), sessionId: nil)

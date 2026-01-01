@@ -219,6 +219,14 @@ final class MailStore {
         let outputPipe = Pipe()
         let errorPipe = Pipe()
 
+        // Ensure pipes are closed to prevent file descriptor leaks
+        let outputHandle = outputPipe.fileHandleForReading
+        let errorHandle = errorPipe.fileHandleForReading
+        defer {
+            try? outputHandle.close()
+            try? errorHandle.close()
+        }
+
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-e", script]
         process.standardOutput = outputPipe
@@ -245,12 +253,12 @@ final class MailStore {
         }
 
         if process.terminationStatus != 0 {
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            let errorData = errorHandle.readDataToEndOfFile()
             let errorString = String(data: errorData, encoding: .utf8) ?? "Unknown error"
             throw MailStoreError.appleScriptFailed(errorString)
         }
 
-        let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
+        let outputData = outputHandle.readDataToEndOfFile()
         return String(data: outputData, encoding: .utf8) ?? ""
     }
 

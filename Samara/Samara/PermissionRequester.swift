@@ -17,7 +17,7 @@ final class PermissionRequester: NSObject {
 
     /// Request all permissions. Call once at startup.
     static func requestAllPermissions() {
-        print("[Permissions] Checking and requesting permissions...")
+        log("Checking and requesting permissions...", level: .info, component: "Permissions")
 
         // Keep a strong reference to self for delegate callbacks
         permissionRequester = PermissionRequester()
@@ -40,13 +40,13 @@ final class PermissionRequester: NSObject {
         requestBluetoothPermission()
 
         // HomeKit requires app bundle with entitlements, skipped for daemon
-        print("[Permissions] HomeKit: requires app entitlements, must be granted manually")
+        log("HomeKit: requires app entitlements, must be granted manually", level: .info, component: "Permissions")
 
         // Focus status is checked on-demand, no upfront request needed
-        print("[Permissions] Focus: will be checked on-demand")
+        log("Focus: will be checked on-demand", level: .info, component: "Permissions")
 
         // Local network permission is triggered by actual network activity
-        print("[Permissions] Local Network: will be triggered on first network discovery")
+        log("Local Network: will be triggered on first network discovery", level: .info, component: "Permissions")
     }
 
     // MARK: - Calendar
@@ -57,32 +57,32 @@ final class PermissionRequester: NSObject {
 
         switch status {
         case .notDetermined:
-            print("[Permissions] Calendar: not determined, requesting...")
+            log("Calendar: not determined, requesting...", level: .info, component: "Permissions")
             if #available(macOS 14.0, *) {
                 store.requestFullAccessToEvents { granted, error in
                     if let error = error {
-                        print("[Permissions] Calendar error: \(error.localizedDescription)")
+                        log("Calendar error: \(error.localizedDescription)", level: .warn, component: "Permissions")
                     } else {
-                        print("[Permissions] Calendar: \(granted ? "granted" : "denied")")
+                        log("Calendar: \(granted ? "granted" : "denied")", level: .info, component: "Permissions")
                     }
                 }
             } else {
                 store.requestAccess(to: .event) { granted, error in
                     if let error = error {
-                        print("[Permissions] Calendar error: \(error.localizedDescription)")
+                        log("Calendar error: \(error.localizedDescription)", level: .warn, component: "Permissions")
                     } else {
-                        print("[Permissions] Calendar: \(granted ? "granted" : "denied")")
+                        log("Calendar: \(granted ? "granted" : "denied")", level: .info, component: "Permissions")
                     }
                 }
             }
         case .authorized, .fullAccess:
-            print("[Permissions] Calendar: already authorized")
+            log("Calendar: already authorized", level: .info, component: "Permissions")
         case .denied, .restricted:
-            print("[Permissions] Calendar: denied/restricted - user must grant in System Settings")
+            log("Calendar: denied/restricted - user must grant in System Settings", level: .warn, component: "Permissions")
         case .writeOnly:
-            print("[Permissions] Calendar: write-only access")
+            log("Calendar: write-only access", level: .info, component: "Permissions")
         @unknown default:
-            print("[Permissions] Calendar: unknown status")
+            log("Calendar: unknown status", level: .warn, component: "Permissions")
         }
     }
 
@@ -94,32 +94,32 @@ final class PermissionRequester: NSObject {
 
         switch status {
         case .notDetermined:
-            print("[Permissions] Reminders: not determined, requesting...")
+            log("Reminders: not determined, requesting...", level: .info, component: "Permissions")
             if #available(macOS 14.0, *) {
                 store.requestFullAccessToReminders { granted, error in
                     if let error = error {
-                        print("[Permissions] Reminders error: \(error.localizedDescription)")
+                        log("Reminders error: \(error.localizedDescription)", level: .warn, component: "Permissions")
                     } else {
-                        print("[Permissions] Reminders: \(granted ? "granted" : "denied")")
+                        log("Reminders: \(granted ? "granted" : "denied")", level: .info, component: "Permissions")
                     }
                 }
             } else {
                 store.requestAccess(to: .reminder) { granted, error in
                     if let error = error {
-                        print("[Permissions] Reminders error: \(error.localizedDescription)")
+                        log("Reminders error: \(error.localizedDescription)", level: .warn, component: "Permissions")
                     } else {
-                        print("[Permissions] Reminders: \(granted ? "granted" : "denied")")
+                        log("Reminders: \(granted ? "granted" : "denied")", level: .info, component: "Permissions")
                     }
                 }
             }
         case .authorized, .fullAccess:
-            print("[Permissions] Reminders: already authorized")
+            log("Reminders: already authorized", level: .info, component: "Permissions")
         case .denied, .restricted:
-            print("[Permissions] Reminders: denied/restricted - user must grant in System Settings")
+            log("Reminders: denied/restricted - user must grant in System Settings", level: .warn, component: "Permissions")
         case .writeOnly:
-            print("[Permissions] Reminders: write-only access")
+            log("Reminders: write-only access", level: .info, component: "Permissions")
         @unknown default:
-            print("[Permissions] Reminders: unknown status")
+            log("Reminders: unknown status", level: .warn, component: "Permissions")
         }
     }
 
@@ -131,22 +131,22 @@ final class PermissionRequester: NSObject {
 
         switch status {
         case .notDetermined:
-            print("[Permissions] Contacts: not determined, requesting...")
+            log("Contacts: not determined, requesting...", level: .info, component: "Permissions")
             store.requestAccess(for: .contacts) { granted, error in
                 if let error = error {
-                    print("[Permissions] Contacts error: \(error.localizedDescription)")
+                    log("Contacts error: \(error.localizedDescription)", level: .warn, component: "Permissions")
                 } else {
-                    print("[Permissions] Contacts: \(granted ? "granted" : "denied")")
+                    log("Contacts: \(granted ? "granted" : "denied")", level: .info, component: "Permissions")
                 }
             }
         case .authorized:
-            print("[Permissions] Contacts: already authorized")
+            log("Contacts: already authorized", level: .info, component: "Permissions")
         case .denied, .restricted:
-            print("[Permissions] Contacts: denied/restricted - user must grant in System Settings")
+            log("Contacts: denied/restricted - user must grant in System Settings", level: .warn, component: "Permissions")
         case .limited:
-            print("[Permissions] Contacts: limited access")
+            log("Contacts: limited access", level: .info, component: "Permissions")
         @unknown default:
-            print("[Permissions] Contacts: unknown status")
+            log("Contacts: unknown status", level: .warn, component: "Permissions")
         }
     }
 
@@ -157,16 +157,16 @@ final class PermissionRequester: NSObject {
 
         switch status {
         case .notDetermined:
-            print("[Permissions] Location: not determined, requesting...")
+            log("Location: not determined, requesting...", level: .info, component: "Permissions")
             locationManager = CLLocationManager()
             locationManager?.delegate = permissionRequester
             locationManager?.requestAlwaysAuthorization()
         case .authorized, .authorizedAlways:
-            print("[Permissions] Location: already authorized")
+            log("Location: already authorized", level: .info, component: "Permissions")
         case .denied, .restricted:
-            print("[Permissions] Location: denied/restricted - user must grant in System Settings")
+            log("Location: denied/restricted - user must grant in System Settings", level: .warn, component: "Permissions")
         @unknown default:
-            print("[Permissions] Location: unknown status")
+            log("Location: unknown status", level: .warn, component: "Permissions")
         }
     }
 
@@ -177,18 +177,18 @@ final class PermissionRequester: NSObject {
 
         switch status {
         case .notDetermined:
-            print("[Permissions] Photos: not determined, requesting...")
+            log("Photos: not determined, requesting...", level: .info, component: "Permissions")
             PHPhotoLibrary.requestAuthorization(for: .readWrite) { newStatus in
-                print("[Permissions] Photos: \(newStatus == .authorized ? "granted" : "denied/limited")")
+                log("Photos: \(newStatus == .authorized ? "granted" : "denied/limited")", level: .info, component: "Permissions")
             }
         case .authorized:
-            print("[Permissions] Photos: already authorized")
+            log("Photos: already authorized", level: .info, component: "Permissions")
         case .limited:
-            print("[Permissions] Photos: limited access")
+            log("Photos: limited access", level: .info, component: "Permissions")
         case .denied, .restricted:
-            print("[Permissions] Photos: denied/restricted - user must grant in System Settings")
+            log("Photos: denied/restricted - user must grant in System Settings", level: .warn, component: "Permissions")
         @unknown default:
-            print("[Permissions] Photos: unknown status")
+            log("Photos: unknown status", level: .warn, component: "Permissions")
         }
     }
 
@@ -198,7 +198,7 @@ final class PermissionRequester: NSObject {
         // MediaPlayer/MusicKit authorization
         // On macOS, this is typically granted via the usage description
         // The actual permission prompt appears when first accessing the library
-        print("[Permissions] Music: will be requested on first library access")
+        log("Music: will be requested on first library access", level: .info, component: "Permissions")
     }
 
     // MARK: - Camera
@@ -208,16 +208,16 @@ final class PermissionRequester: NSObject {
 
         switch status {
         case .notDetermined:
-            print("[Permissions] Camera: not determined, requesting...")
+            log("Camera: not determined, requesting...", level: .info, component: "Permissions")
             AVCaptureDevice.requestAccess(for: .video) { granted in
-                print("[Permissions] Camera: \(granted ? "granted" : "denied")")
+                log("Camera: \(granted ? "granted" : "denied")", level: .info, component: "Permissions")
             }
         case .authorized:
-            print("[Permissions] Camera: already authorized")
+            log("Camera: already authorized", level: .info, component: "Permissions")
         case .denied, .restricted:
-            print("[Permissions] Camera: denied/restricted - user must grant in System Settings")
+            log("Camera: denied/restricted - user must grant in System Settings", level: .warn, component: "Permissions")
         @unknown default:
-            print("[Permissions] Camera: unknown status")
+            log("Camera: unknown status", level: .warn, component: "Permissions")
         }
     }
 
@@ -228,23 +228,23 @@ final class PermissionRequester: NSObject {
 
         switch status {
         case .notDetermined:
-            print("[Permissions] Microphone: not determined, requesting...")
+            log("Microphone: not determined, requesting...", level: .info, component: "Permissions")
             AVCaptureDevice.requestAccess(for: .audio) { granted in
-                print("[Permissions] Microphone: \(granted ? "granted" : "denied")")
+                log("Microphone: \(granted ? "granted" : "denied")", level: .info, component: "Permissions")
             }
         case .authorized:
-            print("[Permissions] Microphone: already authorized")
+            log("Microphone: already authorized", level: .info, component: "Permissions")
         case .denied, .restricted:
-            print("[Permissions] Microphone: denied/restricted - user must grant in System Settings")
+            log("Microphone: denied/restricted - user must grant in System Settings", level: .warn, component: "Permissions")
         @unknown default:
-            print("[Permissions] Microphone: unknown status")
+            log("Microphone: unknown status", level: .warn, component: "Permissions")
         }
     }
 
     // MARK: - Bluetooth
 
     private static func requestBluetoothPermission() {
-        print("[Permissions] Bluetooth: initializing...")
+        log("Bluetooth: initializing...", level: .info, component: "Permissions")
         // CBCentralManager prompts when created
         bluetoothManager = CBCentralManager(delegate: permissionRequester, queue: nil)
     }
@@ -257,13 +257,13 @@ extension PermissionRequester: CLLocationManagerDelegate {
         let status = manager.authorizationStatus
         switch status {
         case .authorized, .authorizedAlways:
-            print("[Permissions] Location: granted")
+            log("Location: granted", level: .info, component: "Permissions")
         case .denied, .restricted:
-            print("[Permissions] Location: denied")
+            log("Location: denied", level: .warn, component: "Permissions")
         case .notDetermined:
             break // Still waiting
         @unknown default:
-            print("[Permissions] Location: unknown status change")
+            log("Location: unknown status change", level: .warn, component: "Permissions")
         }
     }
 }
@@ -274,19 +274,19 @@ extension PermissionRequester: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
         case .poweredOn:
-            print("[Permissions] Bluetooth: powered on and authorized")
+            log("Bluetooth: powered on and authorized", level: .info, component: "Permissions")
         case .poweredOff:
-            print("[Permissions] Bluetooth: powered off")
+            log("Bluetooth: powered off", level: .info, component: "Permissions")
         case .unauthorized:
-            print("[Permissions] Bluetooth: unauthorized - user must grant in System Settings")
+            log("Bluetooth: unauthorized - user must grant in System Settings", level: .warn, component: "Permissions")
         case .unsupported:
-            print("[Permissions] Bluetooth: unsupported on this device")
+            log("Bluetooth: unsupported on this device", level: .info, component: "Permissions")
         case .resetting:
-            print("[Permissions] Bluetooth: resetting")
+            log("Bluetooth: resetting", level: .info, component: "Permissions")
         case .unknown:
-            print("[Permissions] Bluetooth: unknown state")
+            log("Bluetooth: unknown state", level: .debug, component: "Permissions")
         @unknown default:
-            print("[Permissions] Bluetooth: unknown state")
+            log("Bluetooth: unknown state", level: .debug, component: "Permissions")
         }
     }
 }

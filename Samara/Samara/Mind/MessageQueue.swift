@@ -89,7 +89,7 @@ final class MessageQueue {
 
         // Check if this message is already queued (by rowId)
         if queue.contains(where: { $0.message.rowId == message.rowId }) {
-            print("[MessageQueue] Message \(message.rowId) already in queue, skipping")
+            log("Message \(message.rowId) already in queue, skipping", level: .debug, component: "MessageQueue")
             return
         }
 
@@ -105,11 +105,11 @@ final class MessageQueue {
         if queue.count > maxQueueSize {
             let dropped = queue.count - maxQueueSize
             queue = Array(queue.suffix(maxQueueSize))
-            print("[MessageQueue] Queue overflow - dropped \(dropped) oldest message(s)")
+            log("Queue overflow - dropped \(dropped) oldest message(s)", level: .warn, component: "MessageQueue")
         }
 
         saveQueue(queue)
-        print("[MessageQueue] Enqueued message \(message.rowId) for chat \(message.chatIdentifier)")
+        log("Enqueued message \(message.rowId) for chat \(message.chatIdentifier)", level: .debug, component: "MessageQueue")
     }
 
     /// Dequeue all messages, clearing the queue
@@ -123,7 +123,7 @@ final class MessageQueue {
 
         // Clear the queue
         saveQueue([])
-        print("[MessageQueue] Dequeued \(queue.count) message(s)")
+        log("Dequeued \(queue.count) message(s)", level: .info, component: "MessageQueue")
 
         return queue
     }
@@ -140,7 +140,7 @@ final class MessageQueue {
         queue = queue.filter { $0.message.chatIdentifier != chatIdentifier }
 
         saveQueue(queue)
-        print("[MessageQueue] Dequeued \(chatMessages.count) message(s) for chat \(chatIdentifier)")
+        log("Dequeued \(chatMessages.count) message(s) for chat \(chatIdentifier)", level: .info, component: "MessageQueue")
 
         return chatMessages
     }
@@ -164,7 +164,7 @@ final class MessageQueue {
         lock.lock()
         defer { lock.unlock() }
         saveQueue([])
-        print("[MessageQueue] Queue cleared")
+        log("Queue cleared", level: .info, component: "MessageQueue")
     }
 
     /// Get all chats that have queued messages
@@ -187,7 +187,7 @@ final class MessageQueue {
             decoder.dateDecodingStrategy = .iso8601
             return try decoder.decode([QueuedMessage].self, from: data)
         } catch {
-            print("[MessageQueue] Failed to load queue: \(error)")
+            log("Failed to load queue: \(error)", level: .warn, component: "MessageQueue")
             return []
         }
     }
@@ -200,7 +200,7 @@ final class MessageQueue {
             let data = try encoder.encode(queue)
             try data.write(to: URL(fileURLWithPath: queuePath))
         } catch {
-            print("[MessageQueue] Failed to save queue: \(error)")
+            log("Failed to save queue: \(error)", level: .error, component: "MessageQueue")
         }
     }
 }

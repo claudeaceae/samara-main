@@ -61,20 +61,20 @@ struct Configuration: Codable {
             .appendingPathComponent(".claude-mind/config.json")
 
         guard FileManager.default.fileExists(atPath: configPath.path) else {
-            print("[Configuration] config.json not found, using defaults")
+            log("config.json not found, using defaults", level: .info, component: "Configuration")
             return defaults
         }
 
         do {
             let data = try Data(contentsOf: configPath)
             let config = try JSONDecoder().decode(Configuration.self, from: data)
-            print("[Configuration] Loaded from config.json")
-            print("[Configuration] Entity: \(config.entity.name)")
-            print("[Configuration] Collaborator: \(config.collaborator.name)")
+            log("Loaded from config.json", level: .info, component: "Configuration")
+            log("Entity: \(config.entity.name)", level: .info, component: "Configuration")
+            log("Collaborator: \(config.collaborator.name)", level: .info, component: "Configuration")
             return config
         } catch {
-            print("[Configuration] Failed to parse config.json: \(error)")
-            print("[Configuration] Using defaults")
+            log("Failed to parse config.json: \(error)", level: .warn, component: "Configuration")
+            log("Using defaults", level: .info, component: "Configuration")
             return defaults
         }
     }
