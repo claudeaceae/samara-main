@@ -6,9 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+
 /* Begin PBXFileReference section */
 		517B8C802EF3C2640097C359 /* Samara.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Samara.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		517B8C8F2EF3C6AE0097C359 /* Samara.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Samara.entitlements; sourceTree = "<group>"; };
+		517B8CAF2EF4000000000001 /* SamaraTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SamaraTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -19,6 +21,14 @@
 			);
 			target = 517B8C7F2EF3C2640097C359 /* Samara */;
 		};
+		517B8CB82EF4000000000002 /* Exceptions for "Samara" folder in "SamaraTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				main.swift,
+			);
+			target = 517B8CAE2EF4000000000001 /* SamaraTests */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -26,14 +36,27 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				517B8CA52EF3CC3E0097C359 /* Exceptions for "Samara" folder in "Samara" target */,
+				517B8CB82EF4000000000002 /* Exceptions for "Samara" folder in "SamaraTests" target */,
 			);
 			path = Samara;
+			sourceTree = "<group>";
+		};
+		517B8CB12EF4000000000001 /* SamaraTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SamaraTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		517B8C7D2EF3C2640097C359 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		517B8CAC2EF4000000000001 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -48,6 +71,7 @@
 			children = (
 				517B8C8F2EF3C6AE0097C359 /* Samara.entitlements */,
 				517B8C822EF3C2640097C359 /* Samara */,
+				517B8CB12EF4000000000001 /* SamaraTests */,
 				517B8C812EF3C2640097C359 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -56,6 +80,7 @@
 			isa = PBXGroup;
 			children = (
 				517B8C802EF3C2640097C359 /* Samara.app */,
+				517B8CAF2EF4000000000001 /* SamaraTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -85,6 +110,29 @@
 			productReference = 517B8C802EF3C2640097C359 /* Samara.app */;
 			productType = "com.apple.product-type.application";
 		};
+		517B8CAE2EF4000000000001 /* SamaraTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 517B8CB52EF4000000000001 /* Build configuration list for PBXNativeTarget "SamaraTests" */;
+			buildPhases = (
+				517B8CAB2EF4000000000001 /* Sources */,
+				517B8CAC2EF4000000000001 /* Frameworks */,
+				517B8CAD2EF4000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				517B8C822EF3C2640097C359 /* Samara */,
+				517B8CB12EF4000000000001 /* SamaraTests */,
+			);
+			name = SamaraTests;
+			packageProductDependencies = (
+			);
+			productName = SamaraTests;
+			productReference = 517B8CAF2EF4000000000001 /* SamaraTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -96,6 +144,9 @@
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
 					517B8C7F2EF3C2640097C359 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					517B8CAE2EF4000000000001 = {
 						CreatedOnToolsVersion = 26.2;
 					};
 				};
@@ -115,12 +166,20 @@
 			projectRoot = "";
 			targets = (
 				517B8C7F2EF3C2640097C359 /* Samara */,
+				517B8CAE2EF4000000000001 /* SamaraTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		517B8C7E2EF3C2640097C359 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		517B8CAD2EF4000000000001 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -137,7 +196,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		517B8CAB2EF4000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
 
 /* Begin XCBuildConfiguration section */
 		517B8C892EF3C2650097C359 /* Debug */ = {
@@ -333,6 +400,36 @@
 			};
 			name = Release;
 		};
+		517B8CB62EF4000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = G4XVD3J52J;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = co.organelle.SamaraTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		517B8CB72EF4000000000001 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = G4XVD3J52J;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = co.organelle.SamaraTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -350,6 +447,15 @@
 			buildConfigurations = (
 				517B8C8C2EF3C2650097C359 /* Debug */,
 				517B8C8D2EF3C2650097C359 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		517B8CB52EF4000000000001 /* Build configuration list for PBXNativeTarget "SamaraTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				517B8CB62EF4000000000001 /* Debug */,
+				517B8CB72EF4000000000001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

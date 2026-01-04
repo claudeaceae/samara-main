@@ -1,0 +1,103 @@
+#!/usr/bin/env python3
+"""Download and parse MTA GTFS data to create subway station reference file."""
+
+import csv
+import json
+import os
+import sys
+import tempfile
+import urllib.request
+import zipfile
+from datetime import datetime
+
+GTFS_URL = "http://web.mta.info/developers/data/nyct/subway/google_transit.zip"
+STATE_DIR = os.path.expanduser("~/.claude-mind/state")
+OUTPUT_FILE = os.path.join(STATE_DIR, "subway-stations.json")
+
+
+def download_gtfs(url: str, dest_dir: str) -> str:
+    """Download and extract GTFS zip file."""
+    print(f"Downloading GTFS data from {url}...")
+    zip_path = os.path.join(dest_dir, "gtfs.zip")
+
+    urllib.request.urlretrieve(url, zip_path)
+
+    print("Extracting...")
+    extract_dir = os.path.join(dest_dir, "gtfs")
+    with zipfile.ZipFile(zip_path, 'r') as z:
+        z.extractall(extract_dir)
+
+    return extract_dir
+
+
+def parse_stops(gtfs_dir: str) -> list:
+    """Parse stops.txt to extract subway stations."""
+    stops_file = os.path.join(gtfs_dir, "stops.txt")
+    stations = []
+    seen_names = set()
+
+    print("Parsing stops.txt...")
+
+    with open(stops_file, 'r', encoding='utf-8-sig') as f:
+        reader = csv.DictReader(f)
+
+        for row in reader:
+            # location_type: 0 or blank = stop, 1 = station (parent)
+            # We want parent stations (location_type == '1') to avoid duplicates
+            # for each platform entrance
+            location_type = row.get('location_type', '0')
+
+            if location_type == '1':
+                name = row['stop_name'].strip()
+
+                # Skip if we've already seen this name (some duplicates exist)
+                if name in seen_names:
+                    continue
+                seen_names.add(name)
+
+                stations.append({
+                    'name': name,
+                    'lat': float(row['stop_lat']),
+                    'lon': float(row['stop_lon']),
+                    'stop_id': row['stop_id']
+                })
+
+    return stations
+
+
+def main():
+    os.makedirs(STATE_DIR, exist_ok=True)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            gtfs_dir = download_gtfs(GTFS_URL, tmpdir)
+            stations = parse_stops(gtfs_dir)
+
+            output = {
+                'stations': stations,
+                'source': 'MTA GTFS stops.txt',
+                'count': len(stations),
+                'updated': datetime.now().isoformat()
+            }
+
+            with open(OUTPUT_FILE, 'w') as f:
+                json.dump(output, f, indent=2)
+
+            print(f"\nSaved {len(stations)} subway stations to {OUTPUT_FILE}")
+
+            # Print a few examples
+            print("\nSample stations:")
+            for s in stations[:5]:
+                print(f"  - {s['name']} ({s['lat']:.4f}, {s['lon']:.4f})")
+
+        except urllib.error.URLError as e:
+            print(f"Error downloading GTFS data: {e}", file=sys.stderr)
+            print("You may need to check your internet connection or the MTA URL.", file=sys.stderr)
+            sys.exit(1)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

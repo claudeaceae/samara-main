@@ -224,6 +224,43 @@ The system cleanly separates reusable infrastructure from unique identity:
 
 ---
 
+## Skills
+
+Claude Code skills are interactive slash commands that provide structured workflows for common operations. Skills are installed to `~/.claude/skills/` during birth (symlinked from this repo).
+
+After installation, restart Claude Code to load the skills. They can be invoked explicitly (`/status`) or triggered naturally through conversation.
+
+| Skill | Trigger | Purpose |
+|-------|---------|---------|
+| `/status` | "check status", "is it running" | System health check - Samara, wake cycles, FDA, disk space |
+| `/reflect` | "I noticed...", "just realized" | Quick capture of learnings, observations, or insights |
+| `/memory` | "what did I learn about", "remember when" | Search through all memory files |
+| `/morning` | "morning briefing", "what's on deck" | Daily overview - calendar, location, context |
+| `/samara` | "messages not working", "restart samara" | Debug/restart Samara, view logs, check FDA |
+| `/episode` | "what happened today", "add to log" | View or append to today's episode |
+| `/location` | "where am I", "location context" | Current location with patterns and nearby places |
+| `/decide` | "let's document this decision" | Capture decisions with rationale and alternatives |
+| `/capability` | "can I do X", "what's possible" | Check if specific actions are available |
+
+### Skill Architecture
+
+Skills live in `.claude/skills/` in this repo. Each skill is a directory containing a `SKILL.md` file with:
+
+```yaml
+---
+name: skill-name
+description: When to trigger this skill (keywords, phrases)
+---
+
+# Skill Title
+
+Instructions for Claude to follow when the skill is invoked...
+```
+
+The `birth.sh` script symlinks these to `~/.claude/skills/` so they're available globally.
+
+---
+
 ## Autonomy Schedule
 
 | Time | Event | Purpose |

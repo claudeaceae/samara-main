@@ -154,6 +154,24 @@ Samara.app (message broker)
 | `screenshot` | Take and send screenshot |
 | `bluesky-post` | Post to Bluesky |
 
+### Skills (Slash Commands)
+
+Interactive workflows available via Claude Code. Invoke with `/skillname` or trigger naturally.
+
+| Skill | Purpose |
+|-------|---------|
+| `/status` | System health check (Samara, wake cycles, FDA) |
+| `/reflect` | Quick capture learning/observation/insight |
+| `/memory` | Search learnings, decisions, observations |
+| `/morning` | Morning briefing (calendar, location, context) |
+| `/samara` | Debug/restart Samara, view logs |
+| `/episode` | View/append today's episode log |
+| `/location` | Current location with patterns |
+| `/decide` | Document decision with rationale |
+| `/capability` | Check if action is possible |
+
+Skills are defined in `.claude/skills/` and symlinked to `~/.claude/skills/` during birth.
+
 ### Autonomy Schedule
 
 | Time | Event |
@@ -171,6 +189,29 @@ When busy (wake/dream cycle), incoming messages are:
 3. Processed when current task completes
 
 Lock file: `~/.claude-mind/claude.lock`
+
+### Services (`services/`)
+
+Python services that extend the organism's capabilities:
+
+| Service | Purpose |
+|---------|---------|
+| `location-receiver` | Receives GPS updates from Overland app (port 8081) |
+| `mcp-memory-bridge` | Shared memory layer for Claude Desktop/Web integration (port 8765) |
+
+#### MCP Memory Bridge
+
+Allows Claude instances across different interfaces (Desktop, Web, Code) to share the same memory system.
+
+**URL:** `https://your-domain.com/sse` (via Cloudflare Tunnel)
+
+**Tools provided:**
+- `log_exchange` — Log conversation turns
+- `add_learning` — Record insights
+- `search_memory` — Search across memory files
+- `get_recent_context` — Get recent episodes/learnings
+
+See `services/mcp-memory-bridge/README.md` for setup.
 
 ---
 

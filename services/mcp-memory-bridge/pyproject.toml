@@ -1,0 +1,22 @@
+[project]
+name = "mcp-memory-bridge"
+version = "0.1.0"
+description = "Shared memory layer for Claude instances across interfaces"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.0.0",
+    "starlette>=0.40.0",
+    "uvicorn>=0.32.0",
+    "sse-starlette>=2.0.0",
+]
+
+[project.scripts]
+mcp-memory-bridge = "server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+only-include = ["server.py"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -1,0 +1,429 @@
+#!/usr/bin/env python3
+"""
+Analyze location history to learn behavioral patterns.
+Run during dream cycle to update location-patterns.json.
+"""
+
+import json
+import os
+import sys
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Tuple
+from collections import defaultdict
+import math
+
+STATE_DIR = os.path.expanduser("~/.claude-mind/state")
+HISTORY_FILE = os.path.join(STATE_DIR, "location-history.jsonl")
+PLACES_FILE = os.path.join(STATE_DIR, "places.json")
+TRIPS_FILE = os.path.join(STATE_DIR, "trips.jsonl")
+PATTERNS_FILE = os.path.join(STATE_DIR, "location-patterns.json")
+
+# Clustering parameters
+CLUSTER_DISTANCE_M = 100  # Points within this distance are same cluster
+MIN_CLUSTER_VISITS = 3    # Minimum visits to be a learned place
+MIN_DWELL_TIME_S = 600    # 10 minutes minimum dwell time
+
+
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate distance in meters between two points."""
+    R = 6371000
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi/2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda/2)**2
+    return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1-a))
+
+
+def load_history(days: int = 30) -> List[Dict]:
+    """Load location history for the past N days."""
+    if not os.path.exists(HISTORY_FILE):
+        return []
+
+    cutoff = datetime.now() - timedelta(days=days)
+    locations = []
+
+    with open(HISTORY_FILE) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+                ts = datetime.fromisoformat(entry['timestamp'].replace('Z', '+00:00'))
+                if ts.replace(tzinfo=None) > cutoff:
+                    entry['_datetime'] = ts.replace(tzinfo=None)
+                    locations.append(entry)
+            except (json.JSONDecodeError, KeyError, ValueError):
+                continue
+
+    return locations
+
+
+def load_places() -> Dict:
+    """Load known places."""
+    if not os.path.exists(PLACES_FILE):
+        return {"places": []}
+
+    with open(PLACES_FILE) as f:
+        return json.load(f)
+
+
+def load_trips() -> List[Dict]:
+    """Load trip history."""
+    if not os.path.exists(TRIPS_FILE):
+        return []
+
+    trips = []
+    with open(TRIPS_FILE) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                trips.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return trips
+
+
+def find_home(places: Dict) -> Optional[Dict]:
+    """Find the home location from places."""
+    for place in places.get("places", []):
+        if place.get("name") == "home":
+            return place
+    return None
+
+
+def is_at_place(lat: float, lon: float, place: Dict, threshold: float = None) -> bool:
+    """Check if coordinates are at a known place."""
+    radius = threshold or place.get("radius_m", 150)
+    return haversine_distance(lat, lon, place["lat"], place["lon"]) < radius
+
+
+def analyze_home_patterns(locations: List[Dict], home: Dict) -> Dict:
+    """Analyze typical home departure and return times."""
+    weekday_departures = []
+    weekend_departures = []
+    weekday_returns = []
+    weekend_returns = []
+
+    prev_at_home = None
+    prev_time = None
+
+    for loc in locations:
+        if loc.get("lat") is None or loc.get("lon") is None:
+            continue
+
+        dt = loc["_datetime"]
+        at_home = is_at_place(loc["lat"], loc["lon"], home)
+
+        if prev_at_home is not None and prev_time is not None:
+            # Departure: was home, now not home
+            if prev_at_home and not at_home:
+                hour_decimal = prev_time.hour + prev_time.minute / 60
+                if prev_time.weekday() < 5:  # Weekday
+                    weekday_departures.append(hour_decimal)
+                else:
+                    weekend_departures.append(hour_decimal)
+
+            # Return: was not home, now home
+            if not prev_at_home and at_home:
+                hour_decimal = dt.hour + dt.minute / 60
+                if dt.weekday() < 5:
+                    weekday_returns.append(hour_decimal)
+                else:
+                    weekend_returns.append(hour_decimal)
+
+        prev_at_home = at_home
+        prev_time = dt
+
+    def summarize(hours: List[float]) -> Optional[Dict]:
+        if len(hours) < 3:
+            return None
+        avg = sum(hours) / len(hours)
+        std = math.sqrt(sum((h - avg) ** 2 for h in hours) / len(hours)) if len(hours) > 1 else 0
+        return {
+            "typical_time": f"{int(avg):02d}:{int((avg % 1) * 60):02d}",
+            "std_dev_m": round(std * 60),
+            "sample_size": len(hours)
+        }
+
+    return {
+        "home_departure": {
+            "weekday": summarize(weekday_departures),
+            "weekend": summarize(weekend_departures)
+        },
+        "home_return": {
+            "weekday": summarize(weekday_returns),
+            "weekend": summarize(weekend_returns)
+        }
+    }
+
+
+def cluster_stops(locations: List[Dict], places: Dict) -> List[Dict]:
+    """Find clusters of stops that aren't already known places."""
+    known_places = places.get("places", [])
+
+    # Find stationary periods
+    stops = []
+    current_stop = None
+
+    for i, loc in enumerate(locations):
+        if loc.get("lat") is None or loc.get("lon") is None:
+            continue
+
+        # Check if at a known place
+        at_known = any(is_at_place(loc["lat"], loc["lon"], p) for p in known_places)
+        if at_known:
+            if current_stop:
+                stops.append(current_stop)
+                current_stop = None
+            continue
+
+        # Check if stationary (speed < 0.5 m/s or motion is stationary)
+        speed = loc.get("speed") or 0
+        motion = loc.get("motion", [])
+        is_stationary = speed < 0.5 or "stationary" in motion
+
+        if is_stationary:
+            if current_stop is None:
+                current_stop = {
+                    "lat": loc["lat"],
+                    "lon": loc["lon"],
+                    "start": loc["_datetime"],
+                    "end": loc["_datetime"],
+                    "points": [loc]
+                }
+            else:
+                # Check if close enough to current stop
+                dist = haversine_distance(
+                    loc["lat"], loc["lon"],
+                    current_stop["lat"], current_stop["lon"]
+                )
+                if dist < CLUSTER_DISTANCE_M:
+                    current_stop["end"] = loc["_datetime"]
+                    current_stop["points"].append(loc)
+                else:
+                    stops.append(current_stop)
+                    current_stop = {
+                        "lat": loc["lat"],
+                        "lon": loc["lon"],
+                        "start": loc["_datetime"],
+                        "end": loc["_datetime"],
+                        "points": [loc]
+                    }
+        else:
+            if current_stop:
+                stops.append(current_stop)
+                current_stop = None
+
+    if current_stop:
+        stops.append(current_stop)
+
+    # Cluster nearby stops
+    clusters = []
+    for stop in stops:
+        duration = (stop["end"] - stop["start"]).total_seconds()
+        if duration < MIN_DWELL_TIME_S:
+            continue
+
+        # Find if this matches an existing cluster
+        matched = False
+        for cluster in clusters:
+            dist = haversine_distance(
+                stop["lat"], stop["lon"],
+                cluster["lat"], cluster["lon"]
+            )
+            if dist < CLUSTER_DISTANCE_M:
+                cluster["visits"] += 1
+                cluster["total_duration_s"] += duration
+                matched = True
+                break
+
+        if not matched:
+            clusters.append({
+                "lat": stop["lat"],
+                "lon": stop["lon"],
+                "visits": 1,
+                "total_duration_s": duration,
+                "first_seen": stop["start"].isoformat()
+            })
+
+    # Filter by minimum visits
+    learned = [c for c in clusters if c["visits"] >= MIN_CLUSTER_VISITS]
+
+    # Convert to place format
+    new_places = []
+    for i, c in enumerate(learned):
+        new_places.append({
+            "name": f"learned_{i+1}",
+            "label": None,
+            "lat": c["lat"],
+            "lon": c["lon"],
+            "radius_m": 75,
+            "type": "learned",
+            "visit_count": c["visits"],
+            "typical_duration_m": round(c["total_duration_s"] / c["visits"] / 60),
+            "first_seen": c["first_seen"],
+            "learned": True
+        })
+
+    return new_places
+
+
+def analyze_frequent_routes(trips: List[Dict]) -> List[Dict]:
+    """Find frequently traveled routes."""
+    route_counts: Dict[Tuple[str, str], Dict] = defaultdict(lambda: {
+        "count": 0,
+        "total_duration": 0,
+        "transit": set()
+    })
+
+    for trip in trips:
+        start = trip.get("start_place", "unknown")
+        end = trip.get("end_place", "unknown")
+        if start == "unknown" and end == "unknown":
+            continue
+
+        key = (start, end)
+        route_counts[key]["count"] += 1
+        route_counts[key]["total_duration"] += trip.get("duration_s", 0)
+        route_counts[key]["transit"].update(trip.get("transit_near", []))
+
+    # Filter to routes with 3+ occurrences
+    frequent = []
+    for (start, end), data in route_counts.items():
+        if data["count"] >= 3:
+            frequent.append({
+                "from": start,
+                "to": end,
+                "via": list(data["transit"]),
+                "typical_duration_m": round(data["total_duration"] / data["count"] / 60),
+                "occurrences": data["count"]
+            })
+
+    return sorted(frequent, key=lambda x: x["occurrences"], reverse=True)
+
+
+def compute_activity_zones(locations: List[Dict]) -> Dict:
+    """Compute typical activity zones by time period."""
+    zones = {
+        "weekday_morning": [],    # 6-12
+        "weekday_afternoon": [],  # 12-18
+        "weekday_evening": [],    # 18-24
+        "weekend_daytime": [],    # 8-20
+    }
+
+    for loc in locations:
+        if loc.get("lat") is None or loc.get("lon") is None:
+            continue
+
+        dt = loc["_datetime"]
+        hour = dt.hour
+        is_weekday = dt.weekday() < 5
+
+        if is_weekday:
+            if 6 <= hour < 12:
+                zones["weekday_morning"].append((loc["lat"], loc["lon"]))
+            elif 12 <= hour < 18:
+                zones["weekday_afternoon"].append((loc["lat"], loc["lon"]))
+            elif 18 <= hour < 24:
+                zones["weekday_evening"].append((loc["lat"], loc["lon"]))
+        else:
+            if 8 <= hour < 20:
+                zones["weekend_daytime"].append((loc["lat"], loc["lon"]))
+
+    result = {}
+    for zone_name, points in zones.items():
+        if len(points) < 10:
+            continue
+
+        avg_lat = sum(p[0] for p in points) / len(points)
+        avg_lon = sum(p[1] for p in points) / len(points)
+
+        # Calculate radius (distance to furthest 90th percentile point)
+        distances = [haversine_distance(avg_lat, avg_lon, p[0], p[1]) for p in points]
+        distances.sort()
+        radius = distances[int(len(distances) * 0.9)] if distances else 1000
+
+        result[zone_name] = {
+            "center_lat": round(avg_lat, 6),
+            "center_lon": round(avg_lon, 6),
+            "radius_m": round(radius),
+            "sample_size": len(points)
+        }
+
+    return result
+
+
+def main():
+    print("Loading location history...")
+    locations = load_history(days=30)
+    print(f"Loaded {len(locations)} location entries")
+
+    if len(locations) < 50:
+        print("Not enough location data for pattern learning (need 50+ entries)")
+        sys.exit(0)
+
+    places = load_places()
+    home = find_home(places)
+
+    patterns = {
+        "updated": datetime.now().isoformat(),
+        "data_points": len(locations)
+    }
+
+    # Analyze home patterns
+    if home:
+        print("Analyzing home departure/return patterns...")
+        home_patterns = analyze_home_patterns(locations, home)
+        patterns.update(home_patterns)
+    else:
+        print("No home location defined, skipping home pattern analysis")
+
+    # Find learned places
+    print("Discovering frequently visited places...")
+    new_places = cluster_stops(locations, places)
+    if new_places:
+        print(f"Found {len(new_places)} new place clusters")
+        patterns["learned_places"] = new_places
+
+    # Analyze routes
+    print("Analyzing frequent routes...")
+    trips = load_trips()
+    if trips:
+        routes = analyze_frequent_routes(trips)
+        if routes:
+            print(f"Found {len(routes)} frequent routes")
+            patterns["frequent_routes"] = routes
+    else:
+        print("No trip data available yet")
+
+    # Compute activity zones
+    print("Computing activity zones...")
+    zones = compute_activity_zones(locations)
+    if zones:
+        patterns["activity_zones"] = zones
+
+    # Save patterns
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(PATTERNS_FILE, 'w') as f:
+        json.dump(patterns, f, indent=2)
+
+    print(f"\nPatterns saved to {PATTERNS_FILE}")
+
+    # Summary
+    print("\n=== Pattern Summary ===")
+    if home and patterns.get("home_departure", {}).get("weekday"):
+        wd = patterns["home_departure"]["weekday"]
+        print(f"Typical weekday departure: {wd['typical_time']} (±{wd['std_dev_m']}min)")
+    if home and patterns.get("home_return", {}).get("weekday"):
+        wr = patterns["home_return"]["weekday"]
+        print(f"Typical weekday return: {wr['typical_time']} (±{wr['std_dev_m']}min)")
+    if patterns.get("learned_places"):
+        print(f"Discovered places: {len(patterns['learned_places'])}")
+    if patterns.get("frequent_routes"):
+        for r in patterns["frequent_routes"][:3]:
+            print(f"  Route: {r['from']} → {r['to']} ({r['occurrences']}x)")
+
+
+if __name__ == "__main__":
+    main()

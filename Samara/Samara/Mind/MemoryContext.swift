@@ -84,6 +84,11 @@ final class MemoryContext {
             sections.append("### Today's Journal\n\(episode)")
         }
 
+        // Location awareness - current state and patterns
+        if let locationSummary = buildLocationSummary() {
+            sections.append("### Location Awareness\n\(locationSummary)")
+        }
+
         return sections.joined(separator: "\n\n")
     }
 
@@ -173,6 +178,64 @@ final class MemoryContext {
         formatter.dateFormat = "yyyy-MM-dd"
         let today = formatter.string(from: Date())
         return "memory/episodes/\(today).md"
+    }
+
+    /// Builds location awareness summary from state files
+    private func buildLocationSummary() -> String? {
+        var lines: [String] = []
+
+        // Current location
+        if let locationData = readFile("state/location.json"),
+           let data = locationData.data(using: .utf8),
+           let location = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            if let lat = location["lat"] as? Double,
+               let lon = location["lon"] as? Double {
+                let timestamp = location["timestamp"] as? String ?? "unknown"
+                lines.append("Current: \(lat), \(lon) (as of \(timestamp))")
+            }
+        }
+
+        // Today's trips
+        if let tripsData = readFile("state/trips.jsonl") {
+            let today = todayEpisodePath().replacingOccurrences(of: "memory/episodes/", with: "")
+                .replacingOccurrences(of: ".md", with: "")
+            let todayTrips = tripsData.components(separatedBy: "\n")
+                .filter { $0.contains(today) && !$0.isEmpty }
+
+            if !todayTrips.isEmpty {
+                lines.append("Trips today: \(todayTrips.count)")
+                // Show last trip
+                if let lastTrip = todayTrips.last,
+                   let data = lastTrip.data(using: .utf8),
+                   let trip = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let start = trip["start_place"] as? String ?? "unknown"
+                    let end = trip["end_place"] as? String ?? "unknown"
+                    let distance = trip["distance_m"] as? Int ?? 0
+                    lines.append("Last trip: \(start) → \(end) (\(distance)m)")
+                }
+            }
+        }
+
+        // Learned patterns
+        if let patternsData = readFile("state/location-patterns.json"),
+           let data = patternsData.data(using: .utf8),
+           let patterns = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+
+            if let homeDeparture = patterns["home_departure"] as? [String: Any],
+               let weekday = homeDeparture["weekday"] as? [String: Any],
+               let typicalTime = weekday["typical_time"] as? String {
+                lines.append("Typical departure: ~\(typicalTime) on weekdays")
+            }
+
+            if let homeReturn = patterns["home_return"] as? [String: Any],
+               let weekday = homeReturn["weekday"] as? [String: Any],
+               let typicalTime = weekday["typical_time"] as? String {
+                lines.append("Typical return: ~\(typicalTime) on weekdays")
+            }
+        }
+
+        guard !lines.isEmpty else { return nil }
+        return lines.joined(separator: "\n")
     }
 
     /// Abbreviates content to a maximum number of lines (from the START)

@@ -180,6 +180,38 @@ install_scripts() {
     fi
 }
 
+# Install Claude Code skills
+install_skills() {
+    log_info "Installing Claude Code skills..."
+
+    local skills_src="$SCRIPT_DIR/.claude/skills"
+    local skills_dst="$HOME/.claude/skills"
+
+    if [ -d "$skills_src" ]; then
+        mkdir -p "$skills_dst"
+
+        # Symlink each skill directory
+        for skill_dir in "$skills_src"/*/; do
+            if [ -d "$skill_dir" ]; then
+                local skill_name=$(basename "$skill_dir")
+                local target="$skills_dst/$skill_name"
+
+                # Remove existing if present
+                if [ -L "$target" ] || [ -d "$target" ]; then
+                    rm -rf "$target"
+                fi
+
+                ln -s "$skill_dir" "$target"
+                log_success "Linked skill: $skill_name"
+            fi
+        done
+
+        log_success "Skills installed (symlinked to $skills_dst)"
+    else
+        log_warn "No skills directory found at $skills_src"
+    fi
+}
+
 # Create launchd plist templates
 create_launchd_templates() {
     log_info "Creating launchd templates..."
@@ -362,6 +394,7 @@ main() {
     install_config
     install_templates
     install_scripts
+    install_skills
     create_launchd_templates
     print_next_steps
 }

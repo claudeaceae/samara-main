@@ -200,6 +200,17 @@ final class SessionManager {
         let pendingChats = chatBuffers
         chatBuffers.removeAll()
 
+        // Add messages to session tracking before unlocking
+        for (chatId, bufferedMessages) in pendingChats {
+            let messages = bufferedMessages.map { $0.message }
+            if messages.isEmpty { continue }
+
+            if chatSessionMessages[chatId] == nil {
+                chatSessionMessages[chatId] = []
+            }
+            chatSessionMessages[chatId]!.append(contentsOf: messages)
+        }
+
         lock.unlock()
 
         // Process each chat's pending messages
@@ -340,21 +351,61 @@ final class SessionManager {
                 log("Loaded session state for chat \(state.chatIdentifier): \(state.sessionId)", level: .debug, component: "SessionManager")
             } catch {
                 log("Failed to load session state from \(file): \(error)", level: .warn, component: "SessionManager")
+                // Backup corrupted file and continue
+                backupCorruptedFile(at: path, filename: file)
             }
         }
     }
 
+    /// Backup a corrupted session state file for debugging
+    private func backupCorruptedFile(at path: String, filename: String) {
+        let backupDir = "\(sessionStateDir)/corrupted"
+        let timestamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let backupPath = "\(backupDir)/\(timestamp)-\(filename)"
+
+        do {
+            try FileManager.default.createDirectory(atPath: backupDir, withIntermediateDirectories: true)
+            try FileManager.default.moveItem(atPath: path, toPath: backupPath)
+            log("Backed up corrupted session state to \(backupPath)", level: .warn, component: "SessionManager")
+        } catch {
+            // If backup fails, just delete the corrupted file
+            try? FileManager.default.removeItem(atPath: path)
+            log("Removed corrupted session state (backup failed): \(filename)", level: .warn, component: "SessionManager")
+        }
+    }
+
+    /// Save session state with atomic write and retry
     private func saveSessionState(forChat chatIdentifier: String) {
         let path = sessionStatePath(forChat: chatIdentifier)
+        let url = URL(fileURLWithPath: path)
+
+        guard let state = chatSessions[chatIdentifier] else {
+            // No state to save - remove the file
+            try? FileManager.default.removeItem(atPath: path)
+            return
+        }
+
+        let backoff = Backoff(config: Backoff.Config(
+            maxRetries: 3,
+            baseDelay: 0.1,
+            maxDelay: 1.0,
+            multiplier: 2.0,
+            jitter: 0.05
+        ))
+
         do {
-            if let state = chatSessions[chatIdentifier] {
-                let data = try JSONEncoder().encode(state)
-                try data.write(to: URL(fileURLWithPath: path))
-            } else {
-                try? FileManager.default.removeItem(atPath: path)
-            }
+            try backoff.execute(
+                operation: {
+                    let data = try JSONEncoder().encode(state)
+                    // .atomic option handles temp file + rename internally
+                    try data.write(to: url, options: .atomic)
+                },
+                onRetry: { attempt, delay, error in
+                    log("Retrying session state save for \(chatIdentifier) (attempt \(attempt))", level: .warn, component: "SessionManager")
+                }
+            )
         } catch {
-            log("Failed to save session state for chat \(chatIdentifier): \(error)", level: .error, component: "SessionManager")
+            log("Failed to save session state for chat \(chatIdentifier) after retries: \(error)", level: .error, component: "SessionManager")
         }
     }
 }

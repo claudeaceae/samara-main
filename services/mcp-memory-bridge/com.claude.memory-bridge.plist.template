@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claude.memory-bridge</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{UV_PATH}}</string>
+        <string>run</string>
+        <string>--directory</string>
+        <string>{{MEMORY_BRIDGE_DIR}}</string>
+        <string>python</string>
+        <string>server.py</string>
+        <string>--http</string>
+        <string>--port</string>
+        <string>8765</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>{{MIND_DIR}}/logs/memory-bridge.log</string>
+    <key>StandardErrorPath</key>
+    <string>{{MIND_DIR}}/logs/memory-bridge.log</string>
+    <key>WorkingDirectory</key>
+    <string>{{MEMORY_BRIDGE_DIR}}</string>
+</dict>
+</plist>

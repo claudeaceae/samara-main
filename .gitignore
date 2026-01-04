@@ -1,0 +1,25 @@
+# Playwright screenshots (temporary)
+.playwright-mcp/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Xcode
+xcuserdata/
+*.xcscmblueprint
+DerivedData/
+
+# Dependencies
+node_modules/
+
+# Logs (keep structure, ignore contents)
+*.log
+
+# Local config (contains secrets)
+*.local.md

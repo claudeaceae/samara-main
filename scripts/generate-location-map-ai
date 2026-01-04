@@ -1,0 +1,307 @@
+#!/usr/bin/env python3
+"""
+Generate stylized map visualizations using Gemini image generation.
+
+Instead of precise cartographic maps, this creates artistic interpretations
+of location data - perfect for "where have I been this week?" visualizations.
+
+Usage:
+  generate-location-map-ai --type today --output /tmp/today-map.png
+  generate-location-map-ai --type weekly --output /tmp/weekly-map.png
+  generate-location-map-ai --style watercolor --output /tmp/artistic-map.png
+
+Styles: illustrated, watercolor, minimal, hand-drawn, vintage (default: illustrated)
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional, Tuple
+from collections import defaultdict
+
+STATE_DIR = os.path.expanduser("~/.claude-mind/state")
+HISTORY_FILE = os.path.join(STATE_DIR, "location-history.jsonl")
+PLACES_FILE = os.path.join(STATE_DIR, "places.json")
+GENERATE_IMAGE = os.path.expanduser("~/.claude-mind/bin/generate-image")
+
+# Brooklyn neighborhood approximate boundaries (lat, lon)
+NEIGHBORHOODS = {
+    "Crown Heights": (40.669, -73.942),
+    "Prospect Heights": (40.677, -73.969),
+    "Park Slope": (40.672, -73.981),
+    "Downtown Brooklyn": (40.692, -73.987),
+    "Fort Greene": (40.689, -73.975),
+    "Clinton Hill": (40.689, -73.962),
+    "Bedford-Stuyvesant": (40.682, -73.936),
+    "Williamsburg": (40.714, -73.953),
+    "DUMBO": (40.703, -73.988),
+    "Brooklyn Heights": (40.696, -73.994),
+    "Prospect Park": (40.660, -73.969),
+    "Flatbush": (40.652, -73.959),
+    "Gowanus": (40.674, -73.989),
+    "Boerum Hill": (40.684, -73.985),
+    "Cobble Hill": (40.687, -73.996),
+}
+
+
+def load_places() -> Dict[str, Dict]:
+    """Load known places."""
+    if not os.path.exists(PLACES_FILE):
+        return {}
+
+    with open(PLACES_FILE) as f:
+        data = json.load(f)
+        return {p['name']: p for p in data.get('places', [])}
+
+
+def load_history(days: int = 7) -> List[Dict]:
+    """Load location history from the past N days."""
+    if not os.path.exists(HISTORY_FILE):
+        return []
+
+    cutoff = datetime.now() - timedelta(days=days)
+    points = []
+
+    with open(HISTORY_FILE) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                point = json.loads(line)
+                ts = datetime.fromisoformat(point['timestamp'].replace('Z', '+00:00'))
+                if ts.replace(tzinfo=None) > cutoff:
+                    points.append(point)
+            except (json.JSONDecodeError, KeyError, ValueError):
+                continue
+
+    return points
+
+
+def find_nearest_neighborhood(lat: float, lon: float) -> str:
+    """Find the nearest Brooklyn neighborhood to a coordinate."""
+    min_dist = float('inf')
+    nearest = "Brooklyn"
+
+    for name, (nlat, nlon) in NEIGHBORHOODS.items():
+        # Simple Euclidean distance (good enough for nearby neighborhoods)
+        dist = ((lat - nlat) ** 2 + (lon - nlon) ** 2) ** 0.5
+        if dist < min_dist:
+            min_dist = dist
+            nearest = name
+
+    return nearest
+
+
+def find_place_name(lat: float, lon: float, places: Dict) -> Optional[str]:
+    """Check if coordinates match a known place."""
+    for name, place in places.items():
+        plat, plon = place['lat'], place['lon']
+        radius = place.get('radius_m', 100) / 111000  # Convert meters to degrees
+        if ((lat - plat) ** 2 + (lon - plon) ** 2) ** 0.5 < radius:
+            return place.get('label', name)
+    return None
+
+
+def analyze_movements(points: List[Dict], places: Dict) -> Dict:
+    """Analyze location points to find visited places and movements."""
+    if not points:
+        return {"neighborhoods": [], "places": [], "summary": "No location data"}
+
+    neighborhoods_visited = set()
+    places_visited = set()
+    time_at_locations = defaultdict(float)
+
+    prev_point = None
+    for point in points:
+        lat, lon = point['lat'], point['lon']
+
+        # Check for known places
+        place = find_place_name(lat, lon, places)
+        if place:
+            places_visited.add(place)
+
+        # Find neighborhood
+        neighborhood = find_nearest_neighborhood(lat, lon)
+        neighborhoods_visited.add(neighborhood)
+
+        # Track time spent (rough estimate)
+        if prev_point:
+            try:
+                t1 = datetime.fromisoformat(prev_point['timestamp'].replace('Z', ''))
+                t2 = datetime.fromisoformat(point['timestamp'].replace('Z', ''))
+                duration = (t2 - t1).total_seconds() / 3600  # hours
+                if duration < 24:  # Sanity check
+                    time_at_locations[neighborhood] += duration
+            except:
+                pass
+
+        prev_point = point
+
+    # Sort neighborhoods by time spent
+    sorted_neighborhoods = sorted(
+        time_at_locations.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )[:5]  # Top 5
+
+    # Build summary
+    summary_parts = []
+    if places_visited:
+        summary_parts.append(f"Places: {', '.join(places_visited)}")
+    if sorted_neighborhoods:
+        hoods = [f"{n} ({h:.1f}h)" for n, h in sorted_neighborhoods if h > 0.1]
+        if hoods:
+            summary_parts.append(f"Areas: {', '.join(hoods)}")
+
+    return {
+        "neighborhoods": list(neighborhoods_visited),
+        "places": list(places_visited),
+        "top_areas": sorted_neighborhoods,
+        "summary": "; ".join(summary_parts) if summary_parts else "Stayed home"
+    }
+
+
+def build_map_prompt(analysis: Dict, timeframe: str, style: str) -> str:
+    """Build a prompt for Gemini to generate a stylized map."""
+
+    style_descriptions = {
+        "illustrated": "illustrated style with clean lines and soft colors, like a travel journal",
+        "watercolor": "loose watercolor painting style with flowing colors and soft edges",
+        "minimal": "minimalist style with simple shapes, muted colors, and clean design",
+        "hand-drawn": "hand-drawn sketch style with pencil textures and casual linework",
+        "vintage": "vintage map style with sepia tones, decorative borders, and old-world charm"
+    }
+
+    style_desc = style_descriptions.get(style, style_descriptions["illustrated"])
+
+    neighborhoods = analysis.get("neighborhoods", [])
+    places = analysis.get("places", [])
+    top_areas = analysis.get("top_areas", [])
+
+    # Build the location description
+    location_desc = []
+
+    if places:
+        location_desc.append(f"Key locations: {', '.join(places)}")
+
+    if top_areas:
+        main_areas = [area for area, hours in top_areas[:3]]
+        if main_areas:
+            location_desc.append(f"Main areas: {', '.join(main_areas)}")
+
+    if not location_desc:
+        location_desc.append("Crown Heights area of Brooklyn")
+
+    locations = ". ".join(location_desc)
+
+    # Build the full prompt
+    if timeframe == "today":
+        time_desc = "today's journey"
+    elif timeframe == "weekly":
+        time_desc = "this week's movements"
+    else:
+        time_desc = "recent travels"
+
+    prompt = f"""Create a {style_desc} map visualization of {time_desc} in Brooklyn, NYC.
+
+{locations}
+
+The map should:
+- Be a bird's eye view perspective
+- Show the general Brooklyn area with Prospect Park visible as a reference
+- Mark visited locations with simple icons or dots
+- Use a path or route line connecting the locations if multiple areas
+- Include a subtle compass rose or north indicator
+- Feel personal and journalistic, like from a travel diary
+- Be visually pleasing with good composition
+
+Do NOT include any text labels or street names - keep it purely visual."""
+
+    return prompt
+
+
+def generate_map(prompt: str, output: str, aspect: str = "4:3") -> bool:
+    """Call generate-image to create the map."""
+    if not os.path.exists(GENERATE_IMAGE):
+        print(f"Error: generate-image not found at {GENERATE_IMAGE}", file=sys.stderr)
+        return False
+
+    try:
+        result = subprocess.run(
+            [GENERATE_IMAGE, prompt, output, f"--aspect={aspect}"],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if result.returncode == 0 and os.path.exists(output):
+            return True
+        else:
+            print(f"Error generating image: {result.stderr}", file=sys.stderr)
+            return False
+
+    except subprocess.TimeoutExpired:
+        print("Error: Image generation timed out", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return False
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate AI-powered location map visualizations")
+    parser.add_argument('--type', choices=['today', 'weekly', 'month'], default='weekly',
+                        help='Timeframe for the map')
+    parser.add_argument('--style', choices=['illustrated', 'watercolor', 'minimal', 'hand-drawn', 'vintage'],
+                        default='illustrated', help='Visual style of the map')
+    parser.add_argument('--output', '-o', required=True, help='Output file path')
+    parser.add_argument('--aspect', default='4:3', help='Aspect ratio (default: 4:3)')
+    parser.add_argument('--dry-run', action='store_true', help='Show prompt without generating')
+
+    args = parser.parse_args()
+
+    # Determine days to look back
+    days = {'today': 1, 'weekly': 7, 'month': 30}.get(args.type, 7)
+
+    # Load data
+    places = load_places()
+    history = load_history(days=days)
+
+    if not history:
+        print(f"No location data for the past {days} days.", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Analyzing {len(history)} location points from the past {days} days...")
+
+    # Analyze movements
+    analysis = analyze_movements(history, places)
+    print(f"Summary: {analysis['summary']}")
+
+    # Build prompt
+    prompt = build_map_prompt(analysis, args.type, args.style)
+
+    if args.dry_run:
+        print("\n--- Generated Prompt ---")
+        print(prompt)
+        print("------------------------")
+        sys.exit(0)
+
+    # Ensure output directory exists
+    output_dir = os.path.dirname(args.output)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    print(f"Generating {args.style} map...")
+
+    if generate_map(prompt, args.output, args.aspect):
+        print(f"Map saved to {args.output}")
+        sys.exit(0)
+    else:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
