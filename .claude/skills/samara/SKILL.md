@@ -61,19 +61,37 @@ codesign -d -r- /Applications/Samara.app 2>&1 | head -5
 ### FDA Revoked After Update
 This happens if Team ID changed during rebuild:
 ```bash
-# Check current signature
-codesign -dv /Applications/Samara.app 2>&1 | grep TeamIdentifier
+# Check current signature - MUST show G4XVD3J52J
+codesign -d -r- /Applications/Samara.app 2>&1 | grep "subject.OU"
 
-# If Team ID is wrong, need to:
-# 1. Rebuild with correct team in Xcode
-# 2. Re-grant FDA in System Settings
+# If shows 7V9XLQ8YNQ or any other team: WRONG CERTIFICATE USED
+# Must rebuild properly and re-grant FDA
 ```
 
 ### Rebuild Samara
+
+> **CRITICAL**: ONLY use the update-samara script. NEVER copy from DerivedData.
+>
+> A Claude instance previously broke FDA by copying a Debug build from
+> `~/Library/Developer/Xcode/DerivedData/`. This used automatic signing
+> which picked the WRONG certificate and revoked all permissions.
+
+**The ONLY correct way to rebuild:**
 ```bash
 ~/.claude-mind/bin/update-samara
 ```
-This archives, exports, and installs the latest version.
+
+**FORBIDDEN (will break FDA):**
+- `cp -R ~/Library/Developer/Xcode/DerivedData/.../Samara.app /Applications/`
+- `xcodebuild -configuration Debug` for deployment
+- Any manual copy of Samara.app to /Applications
+
+**Verify after rebuild:**
+```bash
+codesign -d -r- /Applications/Samara.app 2>&1 | grep "subject.OU"
+# Must show: G4XVD3J52J
+# If shows: 7V9XLQ8YNQ - WRONG! FDA will be revoked
+```
 
 ## Diagnostic Report
 

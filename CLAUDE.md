@@ -249,27 +249,46 @@ Samara/
 
 ### Build Workflow
 
-Use Archive + Export for proper signing:
+> **CRITICAL WARNING**: ALWAYS use the update-samara script. NEVER copy from DerivedData.
+> A previous Claude instance broke FDA by copying a Debug build from DerivedData.
+> This used the wrong signing certificate and revoked all permissions.
+
+**The ONLY correct way to rebuild Samara:**
 
 ```bash
-# After modifying Swift code:
 ~/.claude-mind/bin/update-samara
 ```
 
-This script archives, exports, notarizes, and installs.
+This script handles:
+1. Archive with Release configuration
+2. Export with Developer ID signing (Team G4XVD3J52J)
+3. Notarization and stapling
+4. Safe installation to /Applications
+
+**FORBIDDEN actions (will break FDA):**
+- `cp -R ~/Library/Developer/Xcode/DerivedData/.../Samara.app /Applications/`
+- `xcodebuild -configuration Debug` for deployment
+- Any manual copy of Samara.app to /Applications
+
+**Verify after rebuild:**
+```bash
+codesign -d -r- /Applications/Samara.app 2>&1 | grep "subject.OU"
+# Must show: G4XVD3J52J (NOT 7V9XLQ8YNQ)
+```
 
 ### FDA Persistence
 
 Full Disk Access is tied to the app's **designated requirement**:
 - Bundle ID
-- Team ID
+- Team ID (must be G4XVD3J52J)
 - Certificate chain
 
 **FDA persists** across rebuilds if Team ID stays constant.
 
 **FDA gets revoked** if:
-- Team ID changes
+- Team ID changes (e.g., using wrong certificate)
 - Ad-hoc signing is used
+- Copying from DerivedData (uses automatic signing)
 - Bundle ID changes
 
 ---

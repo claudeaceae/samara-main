@@ -5,8 +5,10 @@
     <key>method</key>
     <string>developer-id</string>
     <key>teamID</key>
-    <string>YOUR_TEAM_ID</string>
+    <string>G4XVD3J52J</string>
     <key>signingStyle</key>
-    <string>automatic</string>
+    <string>manual</string>
+    <key>signingCertificate</key>
+    <string>Developer ID Application</string>
 </dict>
 </plist>

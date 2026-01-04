@@ -65,7 +65,7 @@ if [ ! -f "$EXPORT_OPTIONS" ]; then
     echo '    <key>method</key>'
     echo '    <string>developer-id</string>'
     echo '    <key>teamID</key>'
-    echo '    <string>YOUR_TEAM_ID</string>'
+    echo '    <string>G4XVD3J52J</string>  <!-- Replace with your Team ID -->'
     echo '</dict>'
     echo '</plist>'
     exit 1
