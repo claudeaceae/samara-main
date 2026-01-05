@@ -1,0 +1,84 @@
+#!/bin/bash
+# symlink-scripts: Convert runtime scripts to symlinks pointing to repo
+#
+# This is the most aggressive sync solution - after running this,
+# any changes to repo scripts are immediately reflected in runtime.
+#
+# Usage:
+#   symlink-scripts --dry-run    # Show what would be done
+#   symlink-scripts --apply      # Actually create symlinks
+#
+# Note: This preserves runtime-only scripts (not in repo) as regular files.
+
+set -e
+
+REPO_SCRIPTS="$HOME/Developer/samara-main/scripts"
+RUNTIME_SCRIPTS="$HOME/.claude-mind/bin"
+
+MODE="${1:---dry-run}"
+
+if [ "$MODE" != "--dry-run" ] && [ "$MODE" != "--apply" ]; then
+    echo "Usage: symlink-scripts [--dry-run|--apply]"
+    exit 1
+fi
+
+echo "=== Script Symlink Conversion ==="
+echo "Repo:    $REPO_SCRIPTS"
+echo "Runtime: $RUNTIME_SCRIPTS"
+echo "Mode:    $MODE"
+echo
+
+# For each script in the repo, check if runtime has a copy (not symlink)
+for repo_script in "$REPO_SCRIPTS"/*; do
+    [ -f "$repo_script" ] || continue
+    name=$(basename "$repo_script")
+    [ "$name" = "README.md" ] && continue
+
+    runtime_script="$RUNTIME_SCRIPTS/$name"
+
+    if [ -L "$runtime_script" ]; then
+        # Already a symlink
+        target=$(readlink "$runtime_script")
+        if [ "$target" = "$repo_script" ]; then
+            echo "[OK] $name - already symlinked correctly"
+        else
+            echo "[WARN] $name - symlink points to $target (expected $repo_script)"
+        fi
+    elif [ -f "$runtime_script" ]; then
+        # Regular file - check if identical
+        if diff -q "$repo_script" "$runtime_script" >/dev/null 2>&1; then
+            echo "[CONVERT] $name - identical, safe to symlink"
+            if [ "$MODE" = "--apply" ]; then
+                rm "$runtime_script"
+                ln -s "$repo_script" "$runtime_script"
+                echo "  -> Created symlink"
+            fi
+        else
+            echo "[DIFFERS] $name - files differ, review needed"
+            echo "  diff '$repo_script' '$runtime_script'"
+        fi
+    else
+        # Doesn't exist in runtime
+        echo "[MISSING] $name - not in runtime, creating symlink"
+        if [ "$MODE" = "--apply" ]; then
+            ln -s "$repo_script" "$runtime_script"
+            echo "  -> Created symlink"
+        fi
+    fi
+done
+
+echo
+echo "Runtime-only scripts (will remain as regular files):"
+for runtime_script in "$RUNTIME_SCRIPTS"/*; do
+    [ -f "$runtime_script" ] || continue
+    [ -L "$runtime_script" ] && continue
+    name=$(basename "$runtime_script")
+    if [ ! -f "$REPO_SCRIPTS/$name" ]; then
+        echo "  $name"
+    fi
+done
+
+if [ "$MODE" = "--dry-run" ]; then
+    echo
+    echo "This was a dry run. Use --apply to make changes."
+fi

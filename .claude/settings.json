@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [".claude/hooks/block-deriveddata-copy.sh"]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [".claude/hooks/check-drift-stop.sh"]
+      }
+    ]
+  }
+}

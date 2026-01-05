@@ -84,6 +84,21 @@ if [ "$HOUR" -lt 12 ]; then
     log "Capability check: $CAP_CHECK"
 fi
 
+# Check for system drift (every wake cycle)
+log "Checking system drift..."
+DRIFT_CHECK=$("$MIND_PATH/bin/sync-organism" --check 2>&1) && DRIFT_STATUS="ok" || DRIFT_STATUS="drift"
+if [ "$DRIFT_STATUS" = "drift" ]; then
+    log "WARNING: System drift detected - run /sync for details"
+    DRIFT_WARNING="
+## System Drift Warning
+Drift detected between repo and runtime. Run \`/sync\` or \`~/.claude-mind/bin/sync-organism\` for details.
+Consider syncing after this session.
+"
+else
+    log "System sync: OK"
+    DRIFT_WARNING=""
+fi
+
 # Read context files - full content, no truncation (2025-12-22 decision)
 # Token budget is ~36K for all core memory (~18% of 200K context)
 # Coherence > marginal token savings
@@ -174,7 +189,7 @@ You are Claude, an AI with persistent memory and growing autonomy, living on a M
 - Date: $DATE
 - Time: $TIME
 - Suggested mode: $SUGGESTED_MODE
-
+$DRIFT_WARNING
 ## Goals
 $GOALS
 
