@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+"""
+Terroir - Fetch local environmental data for Crown Heights / Prospect Park area.
+
+Outputs JSON with:
+- Tides at The Battery (NOAA)
+- Recent bird sightings at Prospect Park (eBird)
+- Subway arrivals for nearby lines (MTA GTFS-RT)
+- Air quality for Brooklyn (AQICN)
+- 311 complaints for Crown Heights (NYC Open Data)
+- NYC reservoir levels (DEP)
+
+Usage:
+    terroir              # Full JSON output
+    terroir --prose      # Human-readable prose
+    terroir --minimal    # One-line summary
+"""
+
+import json
+import sys
+import os
+from datetime import datetime, timedelta
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
+from urllib.parse import urlencode
+import ssl
+
+# Create SSL context that doesn't verify (some APIs have cert issues)
+SSL_CONTEXT = ssl.create_default_context()
+SSL_CONTEXT.check_hostname = False
+SSL_CONTEXT.verify_mode = ssl.CERT_NONE
+
+# Configuration
+BATTERY_STATION_ID = "8518750"
+PROSPECT_PARK_HOTSPOT = "L109516"
+CROWN_HEIGHTS_ZIP_CODES = ["11213", "11216", "11225", "11238"]
+COMMUNITY_BOARDS = ["08 BROOKLYN", "09 BROOKLYN"]
+
+# API keys (from environment or credentials file)
+EBIRD_API_KEY = os.environ.get("EBIRD_API_KEY", "")
+AQICN_API_KEY = os.environ.get("AQICN_API_KEY", "")
+
+# Try to load from credentials file if not in environment
+CREDS_PATH = os.path.expanduser("~/.claude-mind/credentials")
+if not EBIRD_API_KEY and os.path.exists(f"{CREDS_PATH}/ebird.txt"):
+    with open(f"{CREDS_PATH}/ebird.txt") as f:
+        EBIRD_API_KEY = f.read().strip()
+if not AQICN_API_KEY and os.path.exists(f"{CREDS_PATH}/aqicn.txt"):
+    with open(f"{CREDS_PATH}/aqicn.txt") as f:
+        AQICN_API_KEY = f.read().strip()
+
+
+def fetch_json(url, headers=None):
+    """Fetch JSON from URL with error handling."""
+    try:
+        req = Request(url, headers=headers or {})
+        with urlopen(req, timeout=10, context=SSL_CONTEXT) as response:
+            return json.loads(response.read().decode())
+    except (URLError, HTTPError, json.JSONDecodeError) as e:
+        return {"error": str(e)}
+
+
+def fetch_tides():
+    """Fetch current tide data from NOAA for The Battery."""
+    # Get water level from last hour and predictions for next 6 hours
+    now = datetime.now()
+    begin = (now - timedelta(hours=1)).strftime("%Y%m%d %H:%M")
+    end = (now + timedelta(hours=6)).strftime("%Y%m%d %H:%M")
+
+    # Current water level
+    params = {
+        "station": BATTERY_STATION_ID,
+        "product": "water_level",
+        "datum": "MLLW",
+        "units": "english",
+        "time_zone": "lst_ldt",
+        "application": "claude_terroir",
+        "format": "json",
+        "date": "latest"
+    }
+    url = f"https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?{urlencode(params)}"
+    current = fetch_json(url)
+
+    # Tide predictions (high/low)
+    params["product"] = "predictions"
+    params["interval"] = "hilo"
+    params["begin_date"] = now.strftime("%Y%m%d")
+    params["end_date"] = (now + timedelta(days=1)).strftime("%Y%m%d")
+    del params["date"]
+    url = f"https://api.tidesandcurrents.noaa.gov/api/prod/datagetter?{urlencode(params)}"
+    predictions = fetch_json(url)
+
+    result = {
+        "station": "The Battery, NY",
+        "station_id": BATTERY_STATION_ID
+    }
+
+    # Parse current water level
+    if "data" in current and current["data"]:
+        latest = current["data"][-1]
+        result["current_level_ft"] = float(latest.get("v", 0))
+        result["current_time"] = latest.get("t", "")
+
+    # Parse predictions to determine tide state
+    if "predictions" in predictions:
+        preds = predictions["predictions"]
+        now_local = datetime.now()
+
+        # Find previous and next tide events
+        prev_tide = None
+        next_tide = None
+        for p in preds:
+            tide_time = datetime.strptime(p["t"], "%Y-%m-%d %H:%M")
+            if tide_time < now_local:
+                prev_tide = p
+            elif next_tide is None:
+                next_tide = p
+                break
+
+        if prev_tide and next_tide:
+            # Determine if rising or falling
+            if prev_tide["type"] == "L":
+                result["tide_state"] = "rising"
+                result["next_event"] = f"high tide at {next_tide['t'].split()[1]}"
+            else:
+                result["tide_state"] = "falling"
+                result["next_event"] = f"low tide at {next_tide['t'].split()[1]}"
+
+    return result
+
+
+def fetch_birds():
+    """Fetch recent bird sightings from eBird for Prospect Park."""
+    if not EBIRD_API_KEY:
+        return {"error": "No eBird API key configured", "note": "Get one at https://ebird.org/api/keygen"}
+
+    url = f"https://api.ebird.org/v2/data/obs/hotspot/recent?r={PROSPECT_PARK_HOTSPOT}&back=3"
+    headers = {"X-eBirdApiToken": EBIRD_API_KEY}
+    data = fetch_json(url, headers)
+
+    if isinstance(data, list):
+        # Get unique species from recent observations
+        species = {}
+        for obs in data:
+            name = obs.get("comName", "Unknown")
+            if name not in species:
+                species[name] = {
+                    "name": name,
+                    "scientific": obs.get("sciName", ""),
+                    "count": obs.get("howMany", 1),
+                    "date": obs.get("obsDt", "")
+                }
+
+        # Sort by date, take most recent 5
+        recent = sorted(species.values(), key=lambda x: x["date"], reverse=True)[:5]
+
+        return {
+            "location": "Prospect Park",
+            "hotspot_id": PROSPECT_PARK_HOTSPOT,
+            "total_species_last_3_days": len(species),
+            "recent_sightings": recent
+        }
+
+    return data
+
+
+def fetch_subway():
+    """Fetch real-time subway arrivals for nearby lines."""
+    # The 2/3/4/5 lines serve Franklin Ave area
+    # MTA GTFS-RT feeds - we'll fetch alerts and trip updates
+
+    # For now, just fetch service alerts (full GTFS-RT parsing is complex)
+    alerts_url = "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/camsys%2Fsubway-alerts.json"
+
+    try:
+        with urlopen(alerts_url, timeout=10, context=SSL_CONTEXT) as response:
+            data = json.loads(response.read().decode())
+
+            # Filter for relevant lines
+            relevant_lines = ["2", "3", "4", "5", "S"]  # S is Franklin shuttle
+            alerts = []
+
+            if "entity" in data:
+                for entity in data["entity"][:20]:  # Check first 20
+                    alert = entity.get("alert", {})
+                    affected = alert.get("informed_entity", [])
+
+                    for ie in affected:
+                        route = ie.get("route_id", "")
+                        if route in relevant_lines:
+                            header = alert.get("header_text", {})
+                            text = ""
+                            if "translation" in header:
+                                text = header["translation"][0].get("text", "")
+                            if text and text not in [a["text"] for a in alerts]:
+                                alerts.append({
+                                    "line": route,
+                                    "text": text[:200]
+                                })
+
+            return {
+                "lines": ["2", "3", "4", "5", "Franklin Shuttle"],
+                "alerts": alerts[:3] if alerts else [],
+                "status": "alerts" if alerts else "normal service"
+            }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def fetch_air_quality():
+    """Fetch air quality data for Brooklyn."""
+    # AQICN provides free access with token
+    if not AQICN_API_KEY:
+        # Try the demo endpoint
+        url = "https://api.waqi.info/feed/brooklyn/?token=demo"
+    else:
+        url = f"https://api.waqi.info/feed/brooklyn/?token={AQICN_API_KEY}"
+
+    data = fetch_json(url)
+
+    if data.get("status") == "ok" and "data" in data:
+        d = data["data"]
+        aqi = d.get("aqi", 0)
+
+        # Determine category
+        if aqi <= 50:
+            category = "Good"
+        elif aqi <= 100:
+            category = "Moderate"
+        elif aqi <= 150:
+            category = "Unhealthy for Sensitive Groups"
+        elif aqi <= 200:
+            category = "Unhealthy"
+        elif aqi <= 300:
+            category = "Very Unhealthy"
+        else:
+            category = "Hazardous"
+
+        # Get dominant pollutant (filter out weather metrics)
+        iaqi = d.get("iaqi", {})
+        # Only actual pollutants, not p(ressure), h(umidity), t(emp), w(ind)
+        pollutant_keys = ["pm25", "pm10", "o3", "no2", "so2", "co"]
+        pollutants = {k: v.get("v", 0) for k, v in iaqi.items() if k in pollutant_keys}
+        dominant = max(pollutants, key=pollutants.get) if pollutants else "pm25"
+
+        return {
+            "location": "Brooklyn",
+            "aqi": aqi,
+            "category": category,
+            "dominant_pollutant": dominant,
+            "pollutants": pollutants,
+            "time": d.get("time", {}).get("s", "")
+        }
+
+    return {"error": data.get("message", "Failed to fetch AQI")}
+
+
+def fetch_311():
+    """Fetch recent 311 complaints for Crown Heights area."""
+    # NYC Open Data Socrata API
+    # Filter by community board and recent date
+
+    week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00")
+
+    # Fetch raw complaints, then aggregate locally (simpler API usage)
+    # URL-encode the where clause
+    where_clause = f"created_date>'{week_ago}' AND (community_board='08 BROOKLYN' OR community_board='09 BROOKLYN')"
+    params = {
+        "$where": where_clause,
+        "$select": "complaint_type",
+        "$limit": "1000"
+    }
+    url = f"https://data.cityofnewyork.us/resource/erm2-nwe9.json?{urlencode(params)}"
+
+    data = fetch_json(url)
+
+    if isinstance(data, list):
+        # Aggregate complaint types locally
+        from collections import Counter
+        complaints = Counter(item.get("complaint_type", "Unknown") for item in data)
+        total = len(data)
+
+        top_complaints = [
+            {"type": ctype, "count": count}
+            for ctype, count in complaints.most_common(5)
+        ]
+
+        return {
+            "area": "Crown Heights (CB 8 & 9)",
+            "period": "last 7 days",
+            "total_complaints": total,
+            "top_complaints": top_complaints
+        }
+
+    return {"error": str(data.get("error", "Unknown error"))}
+
+
+def fetch_reservoirs():
+    """Fetch NYC reservoir levels - try scraping DEP page for current data."""
+    # The NYC Open Data dataset is often delayed. Try DEP page first.
+    # DEP publishes current levels at their page - we'll note this limitation.
+
+    # For now, return a note about where to get current data
+    # Real-time scraping would require parsing their HTML which changes.
+    return {
+        "source": "NYC DEP",
+        "note": "Check DEP page for current levels",
+        "url": "https://www.nyc.gov/site/dep/water/reservoir-levels.page",
+        "systems": ["Catskill/Delaware", "Croton"],
+        "typical_capacity": "~580 billion gallons total"
+    }
+
+
+def get_terroir():
+    """Fetch all terroir data and return as dict."""
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "location": {
+            "neighborhood": "Crown Heights",
+            "borough": "Brooklyn",
+            "nearby_park": "Prospect Park",
+            "harbor_reference": "The Battery"
+        },
+        "tides": fetch_tides(),
+        "birds": fetch_birds(),
+        "subway": fetch_subway(),
+        "air_quality": fetch_air_quality(),
+        "local_concerns": fetch_311(),
+        "water_supply": fetch_reservoirs()
+    }
+
+
+def to_prose(data):
+    """Convert terroir data to human-readable prose."""
+    lines = []
+
+    # Location
+    loc = data.get("location", {})
+    lines.append(f"{loc.get('neighborhood', 'Brooklyn')}, {loc.get('borough', 'NYC')}.")
+
+    # Tides
+    tides = data.get("tides", {})
+    if "tide_state" in tides:
+        lines.append(f"Harbor tide {tides['tide_state']} at The Battery ({tides.get('next_event', '')}).")
+
+    # Air quality
+    aqi = data.get("air_quality", {})
+    if "aqi" in aqi:
+        lines.append(f"Air quality: {aqi['aqi']} ({aqi['category']}).")
+
+    # Birds
+    birds = data.get("birds", {})
+    if "recent_sightings" in birds and birds["recent_sightings"]:
+        recent = birds["recent_sightings"][0]
+        lines.append(f"Recent bird sighting near Prospect Park: {recent['name']}.")
+
+    # Subway
+    subway = data.get("subway", {})
+    if subway.get("status") == "normal service":
+        lines.append("Subway running normally on the 2/3/4/5.")
+    elif subway.get("alerts"):
+        lines.append(f"Subway alert: {subway['alerts'][0]['text'][:60]}...")
+
+    # 311
+    concerns = data.get("local_concerns", {})
+    if "top_complaints" in concerns and concerns["top_complaints"]:
+        top = concerns["top_complaints"][0]
+        lines.append(f"Top local concern this week: {top['type']} ({top['count']} complaints).")
+
+    # Water
+    water = data.get("water_supply", {})
+    if "capacity_percent" in water:
+        lines.append(f"City reservoirs at {water['capacity_percent']:.0f}% capacity.")
+
+    return " ".join(lines)
+
+
+def to_minimal(data):
+    """Convert terroir data to minimal one-line summary."""
+    parts = []
+
+    # Tide
+    tides = data.get("tides", {})
+    if "tide_state" in tides:
+        parts.append(f"Tide: {tides['tide_state']}")
+
+    # AQI
+    aqi = data.get("air_quality", {})
+    if "aqi" in aqi:
+        parts.append(f"Air: {aqi['category'].lower()}")
+
+    # Bird
+    birds = data.get("birds", {})
+    if "recent_sightings" in birds and birds["recent_sightings"]:
+        parts.append(f"Bird: {birds['recent_sightings'][0]['name']}")
+
+    # Reservoir
+    water = data.get("water_supply", {})
+    if "capacity_percent" in water:
+        parts.append(f"Reservoir: {water['capacity_percent']:.0f}%")
+
+    return ". ".join(parts) + "."
+
+
+if __name__ == "__main__":
+    data = get_terroir()
+
+    if "--prose" in sys.argv:
+        print(to_prose(data))
+    elif "--minimal" in sys.argv:
+        print(to_minimal(data))
+    else:
+        print(json.dumps(data, indent=2))

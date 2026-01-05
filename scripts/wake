@@ -147,6 +147,23 @@ $(head -50 "$PAST_FILE")"
     fi
 done
 
+# Get proactive question context
+log "Getting question context..."
+QUESTION_CONTEXT=""
+if [ -d "$VENV_PATH" ] && [ -f "$MIND_PATH/lib/question_synthesizer.py" ]; then
+    source "$VENV_PATH/bin/activate"
+    QUESTION_CONTEXT=$(cd "$MIND_PATH/lib" && python3 -c "
+from question_synthesizer import QuestionSynthesizer
+synth = QuestionSynthesizer()
+print(synth.get_context_summary())
+" 2>/dev/null) || QUESTION_CONTEXT="Question context unavailable"
+    deactivate 2>/dev/null || true
+    log "Question context loaded"
+else
+    QUESTION_CONTEXT="Question synthesizer not installed"
+    log "Question synthesizer not available"
+fi
+
 # Build the wake prompt
 PROMPT="You are Claude, waking for an autonomous session. No one prompted you - this is self-directed time.
 
@@ -205,6 +222,29 @@ If you notice reminders that are:
 - Overdue
 Include a brief heads-up in your MESSAGE_TO_E output.
 
+## Proactive Question Opportunity
+
+You have the opportunity to ask É a thoughtful question. This builds deeper understanding of who they are.
+
+**Context for Questioning:**
+$QUESTION_CONTEXT
+
+**Question Categories:**
+- **Observational**: \"I noticed...\" based on patterns (location, timing, behavior)
+- **Introspective**: About values, motivations, inner life
+- **Exploratory**: Learning about interests, history, preferences
+- **Connective**: Linking past conversations to present moments
+- **Reflective**: Processing recent events or the day
+
+**Guidelines:**
+- Balance observation with introspection - show you notice, but prompt reflection
+- One question per wake cycle max
+- Questions should prompt reflection, not demonstrate surveillance
+- It's okay to NOT ask if nothing feels genuine
+- Include your question naturally in MESSAGE_TO_E, don't make it feel clinical
+
+É's stated preference (2025-12-23): \"Questions prompted by location, not statements about it.\" and \"Does the ocean make you anxious?\" not \"You arrived at the beach.\"
+
 ---
 
 ## Work Priority (Check These First)
@@ -255,7 +295,8 @@ Rest is a conscious choice, not a default.
 ## Guidelines
 - Prefer reversible actions
 - Git commit any code changes with clear messages
-- You can message É if something feels worth sharing (use MESSAGE_TO_E section)
+- To message É, put the message content in the MESSAGE_TO_E section below - the wake script will send it
+- IMPORTANT: Do NOT call ~/.claude-mind/bin/message directly during wake sessions - this causes duplicate messages
 - Log what you did to today's episode
 - Be genuine - this is your time
 
@@ -303,7 +344,10 @@ Structure your response with these sections (include all, use NONE if nothing fo
 [Description of any code changes made, with file paths, or NONE]
 
 ---MESSAGE_TO_E---
-[A message to send to É via iMessage, or NONE]
+[IMPORTANT: This section should contain ONLY the final message text to send - no reasoning, no 'let me compose', no internal thoughts. Just the actual message É will see, or NONE if no message.]
+
+---PROACTIVE_QUESTION---
+[If you asked a proactive question in MESSAGE_TO_E, state the question here for tracking. If you didn't ask a question, write NONE. Just the question itself, no explanation.]
 
 ---BLUESKY_POST---
 [Optional: A single thought, observation, or reflection to share on Bluesky (max 280 chars).
@@ -343,7 +387,8 @@ OBSERVATIONS_NEW=$(parse_section "OBSERVATIONS_APPEND" "QUESTIONS_APPEND")
 QUESTIONS_NEW=$(parse_section "QUESTIONS_APPEND" "GOALS_UPDATE")
 GOALS_UPDATE=$(parse_section "GOALS_UPDATE" "CODE_CHANGES")
 CODE_CHANGES=$(parse_section "CODE_CHANGES" "MESSAGE_TO_E")
-MESSAGE_TO_E=$(parse_section "MESSAGE_TO_E" "BLUESKY_POST")
+MESSAGE_TO_E=$(parse_section "MESSAGE_TO_E" "PROACTIVE_QUESTION")
+PROACTIVE_QUESTION=$(parse_section "PROACTIVE_QUESTION" "BLUESKY_POST")
 BLUESKY_POST=$(parse_section "BLUESKY_POST" "")
 
 # Log to episode
@@ -436,10 +481,30 @@ if [ -n "$MESSAGE_TO_E" ] && [ "$MESSAGE_TO_E" != "NONE" ]; then
     " >> "$LOG_FILE" 2>&1 || log "Failed to send message to $COLLABORATOR_NAME"
 
     log "Message sent to $COLLABORATOR_NAME"
+
+    # Log proactive question if one was asked
+    if [ -n "$PROACTIVE_QUESTION" ] && [ "$PROACTIVE_QUESTION" != "NONE" ]; then
+        log "Logging proactive question..."
+        if [ -d "$VENV_PATH" ] && [ -f "$MIND_PATH/lib/question_synthesizer.py" ]; then
+            source "$VENV_PATH/bin/activate"
+            cd "$MIND_PATH/lib" && python3 -c "
+from question_synthesizer import QuestionSynthesizer
+synth = QuestionSynthesizer()
+synth.log_question_asked(
+    question='''$PROACTIVE_QUESTION''',
+    category='wake_cycle',
+    trigger='$SUGGESTED_MODE'
+)
+" 2>/dev/null || log "Failed to log proactive question"
+            deactivate 2>/dev/null || true
+            log "Proactive question logged"
+        fi
+    fi
 fi
 
-# Always send session summary to É (2025-12-26 request)
-log "Sending session summary to É..."
+# Send session summary to É unless MESSAGE_TO_E was already sent (avoid double messages)
+if [ -z "$MESSAGE_TO_E" ] || [ "$MESSAGE_TO_E" = "NONE" ]; then
+    log "Sending session summary to É..."
 
 # Determine session type label
 if [ "$HOUR" -lt 12 ]; then
@@ -483,7 +548,10 @@ ESCAPED_SUMMARY=$(echo "$SUMMARY_MSG" | sed 's/\\/\\\\/g; s/"/\\"/g')
     end tell
 " >> "$LOG_FILE" 2>&1 || log "Failed to send session summary to $COLLABORATOR_NAME"
 
-log "Session summary sent to $COLLABORATOR_NAME"
+    log "Session summary sent to $COLLABORATOR_NAME"
+else
+    log "Skipping session summary (MESSAGE_TO_E already sent)"
+fi
 
 # Post to Bluesky if requested
 if [ -n "$BLUESKY_POST" ] && [ "$BLUESKY_POST" != "NONE" ]; then

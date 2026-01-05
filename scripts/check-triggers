@@ -1,0 +1,87 @@
+#!/bin/bash
+# check-triggers - Evaluate triggers for proactive engagement
+# Runs every 15 minutes via launchd
+# Combines pattern, calendar, anomaly, and cross-temporal signals
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+VENV_PATH="$MIND_PATH/.venv"
+LOG_FILE="$MIND_PATH/logs/triggers.log"
+STATE_FILE="$MIND_PATH/state/last-evaluation.json"
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+log "=== Trigger check starting ==="
+
+# Activate virtual environment
+if [ ! -d "$VENV_PATH" ]; then
+    log "Error: Virtual environment not found"
+    exit 1
+fi
+
+source "$VENV_PATH/bin/activate"
+
+# Run evaluation
+cd "$MIND_PATH/lib"
+RESULT=$(python3 -c "
+from trigger_evaluator import TriggerEvaluator
+import json
+
+evaluator = TriggerEvaluator()
+result = evaluator.evaluate()
+print(json.dumps(result))
+" 2>/dev/null) || {
+    log "Error running trigger evaluator"
+    exit 1
+}
+
+# Save result to state file
+echo "$RESULT" > "$STATE_FILE"
+
+# Parse result
+SHOULD_ENGAGE=$(echo "$RESULT" | python3 -c "import sys, json; print(json.load(sys.stdin).get('should_engage', False))")
+CONFIDENCE=$(echo "$RESULT" | python3 -c "import sys, json; print(json.load(sys.stdin).get('confidence', 0))")
+REASON=$(echo "$RESULT" | python3 -c "import sys, json; print(json.load(sys.stdin).get('reason', 'unknown'))")
+ESCALATION=$(echo "$RESULT" | python3 -c "import sys, json; print(json.load(sys.stdin).get('escalation_level', 'log'))")
+TRIGGER_TYPE=$(echo "$RESULT" | python3 -c "import sys, json; print(json.load(sys.stdin).get('trigger_type', 'none'))")
+
+log "Evaluation: confidence=$CONFIDENCE, escalation=$ESCALATION, reason=$REASON"
+
+# Handle based on escalation level
+case "$ESCALATION" in
+    "blocked")
+        log "Engagement blocked by safeguards"
+        ;;
+    "log")
+        log "Low confidence, logging only"
+        ;;
+    "dream")
+        log "Medium-low confidence, adding to dream context"
+        # Append to a file that dream cycle will read
+        echo "[$(date '+%Y-%m-%d %H:%M')] $REASON (confidence: $CONFIDENCE)" >> "$MIND_PATH/state/pending-triggers.txt"
+        ;;
+    "wake")
+        log "Medium-high confidence, will include in next wake"
+        echo "[$(date '+%Y-%m-%d %H:%M')] $REASON (confidence: $CONFIDENCE)" >> "$MIND_PATH/state/pending-triggers.txt"
+        ;;
+    "engage")
+        log "High confidence, initiating proactive engagement"
+        # Call proactive-engage script
+        if [ -f "$MIND_PATH/bin/proactive-engage" ]; then
+            "$MIND_PATH/bin/proactive-engage" "$TRIGGER_TYPE" "$REASON" >> "$LOG_FILE" 2>&1 && \
+                log "Proactive engagement completed" || \
+                log "Proactive engagement failed"
+        else
+            log "proactive-engage script not found"
+        fi
+        ;;
+    *)
+        log "Unknown escalation level: $ESCALATION"
+        ;;
+esac
+
+log "=== Trigger check complete ==="

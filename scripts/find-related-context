@@ -1,0 +1,99 @@
+#!/bin/bash
+# find-related-context - Find semantically related past conversations
+# Called by Samara to add cross-temporal context to invocations
+#
+# Usage: find-related-context "current message or conversation snippet"
+# Output: Formatted markdown with related past context
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+VENV_PATH="$MIND_PATH/.venv"
+
+# Check for query
+if [ -z "$1" ]; then
+    echo "## Related Past Context"
+    echo "No query provided."
+    exit 0
+fi
+
+QUERY="$1"
+MAX_RESULTS="${2:-3}"
+
+# Activate virtual environment
+if [ ! -d "$VENV_PATH" ]; then
+    echo "## Related Past Context"
+    echo "Chroma not available."
+    exit 0
+fi
+
+source "$VENV_PATH/bin/activate"
+
+# Query Chroma and format results
+cd "$MIND_PATH/lib"
+python3 << EOF
+import sys
+sys.path.insert(0, '.')
+
+from chroma_helper import MemoryIndex
+from datetime import datetime
+
+query = """$QUERY"""
+max_results = $MAX_RESULTS
+today = datetime.now().strftime("%Y-%m-%d")
+
+try:
+    index = MemoryIndex()
+    results = index.search(query, n_results=max_results + 2)  # Extra to filter today
+
+    if not results:
+        print("## Related Past Context")
+        print("No related past conversations found.")
+        sys.exit(0)
+
+    # Filter out today's entries and very low relevance
+    filtered = []
+    for r in results:
+        date = r.get("metadata", {}).get("date", "")
+        distance = r.get("distance", 1.0)
+
+        # Skip today (we already have that context)
+        if date == today:
+            continue
+
+        # Skip low relevance (distance > 0.8)
+        if distance > 0.8:
+            continue
+
+        filtered.append(r)
+
+    if not filtered:
+        print("## Related Past Context")
+        print("No strongly related past conversations found.")
+        sys.exit(0)
+
+    # Format output
+    print("## Related Past Context")
+    print()
+    print("*Semantically similar past conversations:*")
+    print()
+
+    for i, r in enumerate(filtered[:max_results]):
+        metadata = r.get("metadata", {})
+        date = metadata.get("date", "unknown")
+        source = metadata.get("source", "unknown")
+        text = r.get("text", "")[:300]
+        distance = r.get("distance", 0)
+        relevance = max(0, round((1 - distance) * 100))
+
+        print(f"### {date} ({source}, {relevance}% match)")
+        print()
+        # Clean up the text for display
+        text = text.replace("**É:**", "É:").replace("**Claude:**", "Claude:")
+        print(f"> {text}...")
+        print()
+
+except Exception as e:
+    print("## Related Past Context")
+    print(f"Error searching: {str(e)[:100]}")
+EOF

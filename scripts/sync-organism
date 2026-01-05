@@ -1,0 +1,216 @@
+#!/bin/bash
+# sync-organism: Detect and fix drift between repo and running system
+#
+# Usage:
+#   sync-organism           # Show drift report
+#   sync-organism --fix     # Fix drift (interactive)
+#   sync-organism --check   # Exit 1 if drift detected (for CI/hooks)
+
+set -e
+
+REPO_DIR="$HOME/Developer/samara-main"
+RUNTIME_DIR="$HOME/.claude-mind"
+REPO_SCRIPTS="$REPO_DIR/scripts"
+RUNTIME_SCRIPTS="$RUNTIME_DIR/bin"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+log_ok() { echo -e "${GREEN}[OK]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+log_error() { echo -e "${RED}[DRIFT]${NC} $1"; }
+
+MODE="${1:-report}"
+
+echo "========================================"
+echo "  SAMARA ORGANISM SYNC CHECK"
+echo "  $(date)"
+echo "========================================"
+echo
+
+DRIFT_COUNT=0
+
+# 1. Check Samara.app signing
+echo "## Samara.app Signing"
+TEAM_ID=$(codesign -d -r- /Applications/Samara.app 2>&1 | grep -o 'subject\.OU] = [A-Z0-9]*' | cut -d'=' -f2 | tr -d ' ' || echo "unknown")
+if [ "$TEAM_ID" = "G4XVD3J52J" ]; then
+    log_ok "Samara.app signed with correct Team ID: $TEAM_ID"
+else
+    log_error "Samara.app has wrong Team ID: $TEAM_ID (expected G4XVD3J52J)"
+    ((DRIFT_COUNT++))
+fi
+echo
+
+# 2. Check skills symlinks
+echo "## Skills Symlinks"
+SKILLS_OK=0
+SKILLS_MISSING=0
+for skill_dir in "$REPO_DIR/.claude/skills/"*/; do
+    skill_name=$(basename "$skill_dir")
+    user_skill="$HOME/.claude/skills/$skill_name"
+    if [ -L "$user_skill" ]; then
+        target=$(readlink "$user_skill")
+        if [ "$target" = "$skill_dir" ] || [ "$target" = "${skill_dir%/}" ]; then
+            ((SKILLS_OK++))
+        else
+            log_warn "Skill $skill_name points to wrong target: $target"
+            ((DRIFT_COUNT++))
+        fi
+    else
+        log_error "Skill $skill_name not symlinked"
+        ((SKILLS_MISSING++))
+        ((DRIFT_COUNT++))
+    fi
+done
+log_ok "$SKILLS_OK skills properly symlinked"
+if [ $SKILLS_MISSING -gt 0 ]; then
+    log_error "$SKILLS_MISSING skills missing symlinks"
+fi
+echo
+
+# 3. Check script drift
+echo "## Script Drift Analysis"
+
+# Scripts only in repo
+echo "### Scripts only in repo:"
+REPO_ONLY=()
+for script in "$REPO_SCRIPTS/"*; do
+    [ -f "$script" ] || continue
+    name=$(basename "$script")
+    [ "$name" = "README.md" ] && continue
+    if [ ! -f "$RUNTIME_SCRIPTS/$name" ]; then
+        REPO_ONLY+=("$name")
+        log_warn "  $name (in repo, not in runtime)"
+    fi
+done
+if [ ${#REPO_ONLY[@]} -eq 0 ]; then
+    log_ok "  All repo scripts exist in runtime"
+fi
+
+# Scripts only in runtime
+echo "### Scripts only in runtime:"
+RUNTIME_ONLY=()
+for script in "$RUNTIME_SCRIPTS/"*; do
+    [ -f "$script" ] || continue
+    name=$(basename "$script")
+    if [ ! -f "$REPO_SCRIPTS/$name" ]; then
+        RUNTIME_ONLY+=("$name")
+        log_warn "  $name (in runtime, not in repo)"
+    fi
+done
+if [ ${#RUNTIME_ONLY[@]} -eq 0 ]; then
+    log_ok "  All runtime scripts exist in repo"
+fi
+
+# Scripts that differ
+echo "### Scripts that differ:"
+DIFFER=()
+for script in "$REPO_SCRIPTS/"*; do
+    [ -f "$script" ] || continue
+    name=$(basename "$script")
+    [ "$name" = "README.md" ] && continue
+    runtime_script="$RUNTIME_SCRIPTS/$name"
+    if [ -f "$runtime_script" ]; then
+        if ! diff -q "$script" "$runtime_script" > /dev/null 2>&1; then
+            DIFFER+=("$name")
+            log_error "  $name differs between repo and runtime"
+            ((DRIFT_COUNT++))
+        fi
+    fi
+done
+if [ ${#DIFFER[@]} -eq 0 ]; then
+    log_ok "  All shared scripts are identical"
+fi
+echo
+
+# 4. Check Samara source vs. installed
+echo "## Samara.app Source Check"
+# Get installed Samara build info
+INSTALLED_VERSION=$(defaults read /Applications/Samara.app/Contents/Info CFBundleVersion 2>/dev/null || echo "unknown")
+log_info "Installed Samara.app version: $INSTALLED_VERSION"
+
+# Check if source is newer than installed
+SAMARA_SRC="$REPO_DIR/Samara/Samara"
+if [ -d "$SAMARA_SRC" ]; then
+    NEWEST_SRC=$(find "$SAMARA_SRC" -name "*.swift" -newer /Applications/Samara.app 2>/dev/null | head -5)
+    if [ -n "$NEWEST_SRC" ]; then
+        log_warn "Samara source files newer than installed app:"
+        echo "$NEWEST_SRC" | while read f; do echo "    $(basename $f)"; done
+        ((DRIFT_COUNT++))
+    else
+        log_ok "Samara.app is up to date with source"
+    fi
+fi
+echo
+
+# Summary
+echo "========================================"
+echo "  SUMMARY"
+echo "========================================"
+echo "Repo scripts:     $(ls -1 "$REPO_SCRIPTS" 2>/dev/null | grep -v README | wc -l | tr -d ' ')"
+echo "Runtime scripts:  $(ls -1 "$RUNTIME_SCRIPTS" 2>/dev/null | wc -l | tr -d ' ')"
+echo "Only in repo:     ${#REPO_ONLY[@]}"
+echo "Only in runtime:  ${#RUNTIME_ONLY[@]}"
+echo "Differ:           ${#DIFFER[@]}"
+echo "Total drift:      $DRIFT_COUNT issues"
+echo
+
+if [ "$MODE" = "--check" ]; then
+    if [ $DRIFT_COUNT -gt 0 ]; then
+        echo "DRIFT DETECTED - Exiting with error"
+        exit 1
+    fi
+    echo "No drift detected"
+    exit 0
+fi
+
+if [ "$MODE" = "--fix" ]; then
+    echo "========================================"
+    echo "  FIX MODE"
+    echo "========================================"
+
+    # Fix missing skill symlinks
+    if [ $SKILLS_MISSING -gt 0 ]; then
+        echo "Creating missing skill symlinks..."
+        mkdir -p "$HOME/.claude/skills"
+        for skill_dir in "$REPO_DIR/.claude/skills/"*/; do
+            skill_name=$(basename "$skill_dir")
+            user_skill="$HOME/.claude/skills/$skill_name"
+            if [ ! -L "$user_skill" ]; then
+                ln -s "$skill_dir" "$user_skill"
+                log_ok "Created symlink: $skill_name"
+            fi
+        done
+    fi
+
+    # For differing scripts, show diff and ask
+    if [ ${#DIFFER[@]} -gt 0 ]; then
+        echo
+        echo "Scripts that differ need manual review."
+        echo "Use these commands to inspect and sync:"
+        for name in "${DIFFER[@]}"; do
+            echo "  diff '$REPO_SCRIPTS/$name' '$RUNTIME_SCRIPTS/$name'"
+        done
+        echo
+        echo "To sync runtime → repo (prefer evolved versions):"
+        for name in "${DIFFER[@]}"; do
+            echo "  cp '$RUNTIME_SCRIPTS/$name' '$REPO_SCRIPTS/$name'"
+        done
+    fi
+
+    # For runtime-only scripts, suggest adding to repo
+    if [ ${#RUNTIME_ONLY[@]} -gt 0 ]; then
+        echo
+        echo "Scripts only in runtime (consider adding to repo):"
+        for name in "${RUNTIME_ONLY[@]}"; do
+            echo "  cp '$RUNTIME_SCRIPTS/$name' '$REPO_SCRIPTS/$name'"
+        done
+    fi
+fi
+
+exit 0

@@ -1,0 +1,54 @@
+#!/bin/bash
+# Update the Claude Scratchpad and record the hash
+# This marks the content as "my edit" so we can detect when É changes it
+#
+# Usage: update-scratchpad "new content to add"
+# Or: echo "content" | update-scratchpad --stdin
+
+STATE_DIR="$HOME/.claude-mind/state"
+HASH_FILE="$STATE_DIR/scratchpad-hash.txt"
+
+# Get content to write
+if [[ "$1" == "--stdin" ]]; then
+    NEW_CONTENT=$(cat)
+elif [[ -n "$1" ]]; then
+    NEW_CONTENT="$1"
+else
+    echo "Usage: update-scratchpad 'content' OR echo 'content' | update-scratchpad --stdin"
+    exit 1
+fi
+
+# Escape for AppleScript
+ESCAPED_CONTENT=$(echo "$NEW_CONTENT" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | tr '\n' '\r')
+
+# Update the note
+RESULT=$(osascript -e "
+tell application \"Notes\"
+    try
+        set targetNote to first note whose name is \"Claude Scratchpad\"
+        set body of targetNote to \"$ESCAPED_CONTENT\"
+        return \"OK\"
+    on error errMsg
+        return \"ERROR: \" & errMsg
+    end try
+end tell
+")
+
+if [[ "$RESULT" != "OK" ]]; then
+    echo "$RESULT"
+    exit 1
+fi
+
+# Now get the actual content back and hash it
+# (Notes might modify formatting slightly)
+ACTUAL_CONTENT=$(osascript -e '
+tell application "Notes"
+    set targetNote to first note whose name is "Claude Scratchpad"
+    return body of targetNote
+end tell
+' | sed 's/<[^>]*>//g' | grep -v "^$")
+
+# Store the hash
+echo "$ACTUAL_CONTENT" | shasum -a 256 | cut -d' ' -f1 > "$HASH_FILE"
+
+echo "Scratchpad updated and hash recorded"

@@ -1,0 +1,31 @@
+#!/bin/bash
+# Get É's current location from Overland data
+# Updated 2025-12-23: Now reads from Overland webhook data instead of Apple Notes
+
+LOCATION_FILE="$HOME/.claude-mind/state/location.json"
+
+if [ ! -f "$LOCATION_FILE" ]; then
+    echo "Error: No location data file found"
+    echo "Make sure Overland is configured and sending data."
+    exit 1
+fi
+
+# Check if jq is available for nice formatting
+if command -v jq &> /dev/null; then
+    # Pretty output with jq
+    TIMESTAMP=$(jq -r '.timestamp // "unknown"' "$LOCATION_FILE")
+    LAT=$(jq -r '.lat // "unknown"' "$LOCATION_FILE")
+    LON=$(jq -r '.lon // "unknown"' "$LOCATION_FILE")
+    BATTERY=$(jq -r '.battery // "unknown"' "$LOCATION_FILE")
+    WIFI=$(jq -r '.wifi // "unknown"' "$LOCATION_FILE")
+    MOTION=$(jq -r '.motion | if length > 0 then join(", ") else "stationary" end' "$LOCATION_FILE")
+
+    echo "É's Location (as of $TIMESTAMP)"
+    echo "  Coordinates: $LAT, $LON"
+    echo "  Battery: $(echo "$BATTERY * 100" | bc 2>/dev/null || echo "$BATTERY")%"
+    echo "  WiFi: $WIFI"
+    echo "  Motion: $MOTION"
+else
+    # Fallback: just dump the JSON
+    cat "$LOCATION_FILE"
+fi

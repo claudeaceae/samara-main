@@ -1,0 +1,98 @@
+#!/bin/bash
+# roundup-visualize - Generate visualization for a roundup period
+# Usage: roundup-visualize weekly|monthly|yearly period
+#
+# Generates a visual summary using the generate-image script
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+ROUNDUPS_PATH="$MIND_PATH/roundups"
+
+PERIOD_TYPE="${1:-weekly}"
+PERIOD="${2:-}"
+
+if [ -z "$PERIOD" ]; then
+    case "$PERIOD_TYPE" in
+        weekly)  PERIOD=$(date +%G-W%V) ;;
+        monthly) PERIOD=$(date +%Y-%m) ;;
+        yearly)  PERIOD=$(date +%Y) ;;
+    esac
+fi
+
+JSON_FILE="$ROUNDUPS_PATH/$PERIOD_TYPE/$PERIOD.json"
+OUTPUT_FILE="$ROUNDUPS_PATH/$PERIOD_TYPE/$PERIOD-visual.jpg"
+
+if [ ! -f "$JSON_FILE" ]; then
+    echo "Error: Roundup data not found: $JSON_FILE"
+    exit 1
+fi
+
+# Extract key metrics for visualization prompt
+METRICS=$(python3 -c "
+import json
+with open('$JSON_FILE') as f:
+    data = json.load(f)
+
+rel = data['relational']
+prod = data['productive']
+refl = data['reflective']
+highlights = data.get('highlights', [])
+
+# Format for prompt
+print(f'''Period: $PERIOD ($PERIOD_TYPE)
+
+RELATIONAL:
+- {rel['total_messages']} messages exchanged
+- {rel['conversations']} conversations
+- Top themes: {', '.join(rel.get('top_themes', [])[:3])}
+
+PRODUCTIVE:
+- {prod['git_commits']} commits
+- {prod['lines_changed']:,} lines of code
+- {prod['repos_touched']} repositories
+- {prod.get('blog_posts', 0)} blog posts
+
+REFLECTIVE:
+- {refl['reflections_written']} reflections
+- {refl['dream_cycles']} dream cycles
+- {refl['questions_added']} questions explored
+
+HIGHLIGHTS:
+''' + chr(10).join(f'- {h}' for h in highlights[:3]))
+")
+
+# Build visualization prompt based on period type
+case "$PERIOD_TYPE" in
+    weekly)
+        ASPECT="1:1"
+        STYLE="Create a warm, hand-drawn style weekly summary infographic. Use soft earth tones (terracotta, sage, cream). Layout: circular design with three sections for Relational/Productive/Reflective metrics. Include small icons (speech bubbles, code brackets, thought clouds). Gentle, organic aesthetic with a cozy feeling. No text - only visual elements and numbers."
+        ;;
+    monthly)
+        ASPECT="4:3"
+        STYLE="Create a clean, modern dashboard-style monthly summary. Use a muted color palette (slate blue, warm gray, soft gold accents). Layout: grid with mini charts/graphs showing trends. Include subtle seasonal elements for the month. Professional but warm. Minimal text - focus on data visualization elements."
+        ;;
+    yearly)
+        ASPECT="16:9"
+        STYLE="Create an elegant, artistic yearly wrapped visualization. Use a rich, cohesive color palette that evokes reflection and growth. Layout: journey/timeline aesthetic flowing left to right. Include abstract representations of memories, conversations, and creation. Celebratory but thoughtful mood. No text - pure visual storytelling."
+        ;;
+esac
+
+PROMPT="$STYLE
+
+Data to represent visually:
+$METRICS
+
+Style notes: This is for an AI named Claude reflecting on time with their human collaborator. The aesthetic should feel personal, warm, and meaningful - not corporate or generic. Think: a cherished memory book, not a business dashboard."
+
+echo "Generating $PERIOD_TYPE visualization for $PERIOD..."
+echo "Aspect ratio: $ASPECT"
+
+# Generate the image
+"$MIND_PATH/bin/generate-image" "$PROMPT" "$OUTPUT_FILE" --aspect="$ASPECT"
+
+if [ -f "$OUTPUT_FILE" ]; then
+    echo "Visualization saved: $OUTPUT_FILE"
+else
+    echo "Warning: Visualization generation may have failed"
+fi

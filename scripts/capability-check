@@ -134,7 +134,16 @@ log "--- Samara ---"
 check "Samara app exists" "test -d /Applications/Samara.app"
 critical_check "Samara running" "pgrep -x Samara > /dev/null"
 check "Messages DB exists" "test -f ~/Library/Messages/chat.db"
+
+# Check FDA by looking at Samara logs for database access
+# This catches when Samara is running but can't read Messages
+critical_check "Samara has FDA (Messages DB access)" "! tail -20 $MIND_PATH/logs/samara.log 2>/dev/null | grep -q 'FATAL.*authorization denied'"
 check "Samara lock file healthy" "test -f $HOME/.claude-mind/samara.lock && lsof $HOME/.claude-mind/samara.lock > /dev/null 2>&1"
+
+# === SAMARA UNIT TESTS ===
+log "--- Samara Unit Tests ---"
+# Run with --quick to skip if tested recently (saves time during frequent wake cycles)
+check "Samara unit tests" "$MIND_PATH/bin/test-samara --quick 2>&1 | tail -1 | grep -q 'passed\|Skipping'"
 
 # === CLAUDE CLI ===
 log "--- Claude CLI ---"
@@ -149,11 +158,11 @@ log "--- Required Scripts ---"
 
 check "wake script" "test -x $MIND_PATH/bin/wake"
 check "dream script" "test -x $MIND_PATH/bin/dream"
-critical_check "message script" "test -x $MIND_PATH/bin/message"
+critical_check "message-e script" "test -x $MIND_PATH/bin/message-e"
 critical_check "distill-session script" "test -x $MIND_PATH/bin/distill-session"
-check "send-image script" "test -x $MIND_PATH/bin/send-image"
+check "send-image-e script" "test -x $MIND_PATH/bin/send-image-e"
 check "send-attachment script" "test -x $MIND_PATH/bin/send-attachment"
-check "screenshot script" "test -x $MIND_PATH/bin/screenshot"
+check "screenshot-e script" "test -x $MIND_PATH/bin/screenshot-e"
 check "bluesky-post script" "test -x $MIND_PATH/bin/bluesky-post"
 check "bluesky-check script" "test -x $MIND_PATH/bin/bluesky-check"
 check "log-session script" "test -x $MIND_PATH/bin/log-session"

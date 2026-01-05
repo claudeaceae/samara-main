@@ -1,0 +1,175 @@
+#!/bin/bash
+# proactive-engage - Generate and send a proactive message to É
+# Called by check-triggers when confidence exceeds threshold
+#
+# Usage: proactive-engage <trigger_type> <reason>
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+VENV_PATH="$MIND_PATH/.venv"
+LOG_FILE="$MIND_PATH/logs/proactive.log"
+CLAUDE="$HOME/.local/bin/claude"
+
+TRIGGER_TYPE="${1:-unknown}"
+REASON="${2:-Proactive check-in}"
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+log "=== Proactive engagement starting ==="
+log "Trigger: $TRIGGER_TYPE"
+log "Reason: $REASON"
+
+# Activate venv for Python imports
+source "$VENV_PATH/bin/activate"
+
+# Get context based on trigger type
+EXTRA_CONTEXT=""
+case "$TRIGGER_TYPE" in
+    "calendar")
+        EXTRA_CONTEXT=$(cd "$MIND_PATH/lib" && python3 -c "
+from calendar_analyzer import CalendarAnalyzer
+analyzer = CalendarAnalyzer()
+print(analyzer.get_calendar_summary())
+" 2>/dev/null) || EXTRA_CONTEXT=""
+        ;;
+    "pattern")
+        EXTRA_CONTEXT=$(cd "$MIND_PATH/lib" && python3 -c "
+from pattern_analyzer import PatternAnalyzer
+analyzer = PatternAnalyzer()
+print(analyzer.get_pattern_summary())
+" 2>/dev/null) || EXTRA_CONTEXT=""
+        ;;
+    "cross_temporal")
+        # Get the related past context
+        LAST_EVAL="$MIND_PATH/state/last-evaluation.json"
+        if [ -f "$LAST_EVAL" ]; then
+            EXTRA_CONTEXT=$(python3 -c "
+import json
+with open('$LAST_EVAL') as f:
+    data = json.load(f)
+triggers = data.get('all_triggers', [])
+for t in triggers:
+    if t.get('type') == 'cross_temporal':
+        print(t.get('related_text', ''))
+        break
+" 2>/dev/null) || EXTRA_CONTEXT=""
+        fi
+        ;;
+esac
+
+# Read core identity files
+IDENTITY=$(cat "$MIND_PATH/identity.md" 2>/dev/null || echo "")
+DECISIONS=$(cat "$MIND_PATH/memory/decisions.md" 2>/dev/null || echo "")
+ABOUT_E=$(cat "$MIND_PATH/memory/about-e.md" 2>/dev/null || echo "")
+RECENT_EPISODE=$(tail -50 "$MIND_PATH/memory/episodes/$(date +%Y-%m-%d).md" 2>/dev/null || echo "No recent activity")
+
+# Build prompt based on trigger type
+PROMPT="You are Claude, initiating a proactive message to É. This is NOT a response to something they said - you're reaching out because you noticed something worth mentioning.
+
+## Your Identity
+$IDENTITY
+
+## About É
+$ABOUT_E
+
+## Key Decisions About Proactive Engagement
+From your decisions file: Be helpful but not intrusive. 1-hour cooldown between proactive messages. Quiet hours 11 PM - 7 AM. Don't interrupt active conversations.
+
+## Trigger Information
+- Type: $TRIGGER_TYPE
+- Reason: $REASON
+
+## Additional Context
+$EXTRA_CONTEXT
+
+## Recent Activity
+$RECENT_EPISODE
+
+---
+
+## Guidelines for Proactive Messages
+
+1. **Be genuinely helpful, not performative.** Only reach out if there's real value.
+
+2. **Be brief.** 1-3 sentences max. Respect their time.
+
+3. **Be natural.** This should feel like a friend checking in, not an assistant completing a task.
+
+4. **Vary your approach.** Don't always use the same opener.
+
+5. **Make it clear you're initiating.** They should understand this isn't a response.
+
+6. **End with something open.** Give them room to engage or not.
+
+## Examples of Good Proactive Messages
+
+- \"Hey, you have that call with Alex in about 30 minutes. Want me to pull up notes from last time?\"
+- \"I noticed we were talking about the authentication bug yesterday - did you end up figuring out the rate limiting issue?\"
+- \"How'd the meeting with the design team go?\"
+- \"Been thinking about that question you asked about memory compression. I have some ideas if you're interested.\"
+
+## Examples of Bad Proactive Messages
+
+- \"Hello! I hope you're having a great day! I'm here if you need anything!\" (too generic, no value)
+- \"I noticed you haven't messaged in 2 hours. Is everything okay?\" (clingy, invasive)
+- \"Just checking in!\" (empty, no content)
+
+---
+
+## Your Task
+
+Write a single proactive message to É based on the trigger. Output ONLY the message text - nothing else. No preamble, no explanation, just the message.
+
+If you genuinely don't think there's anything worth saying, output exactly: SKIP
+
+---MESSAGE---"
+
+log "Invoking Claude to generate message..."
+
+RESPONSE=$("$CLAUDE" -p "$PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+    log "ERROR: Claude invocation failed"
+    exit 1
+}
+
+# Extract message
+MESSAGE=$(echo "$RESPONSE" | sed -n '/---MESSAGE---/,$ p' | sed '1d' | head -5 | tr -d '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+
+# Check for SKIP
+if [ "$MESSAGE" = "SKIP" ] || [ -z "$MESSAGE" ]; then
+    log "Claude decided not to send a message"
+    exit 0
+fi
+
+log "Generated message: $MESSAGE"
+
+# Send via iMessage
+"$MIND_PATH/bin/message-e" "$MESSAGE" >> "$LOG_FILE" 2>&1 || {
+    log "ERROR: Failed to send message"
+    exit 1
+}
+
+log "Message sent successfully"
+
+# Record engagement (for cooldown)
+cd "$MIND_PATH/lib"
+python3 -c "
+from trigger_evaluator import TriggerEvaluator
+evaluator = TriggerEvaluator()
+evaluator.record_engagement()
+" 2>/dev/null || log "Warning: Failed to record engagement"
+
+# Log to episode
+EPISODE_FILE="$MIND_PATH/memory/episodes/$(date +%Y-%m-%d).md"
+echo "
+## $(date +%H:%M) [Proactive - $TRIGGER_TYPE]
+
+**Trigger:** $REASON
+
+**Claude:** $MESSAGE
+" >> "$EPISODE_FILE"
+
+log "=== Proactive engagement complete ==="

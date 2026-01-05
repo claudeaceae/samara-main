@@ -1,0 +1,206 @@
+#!/bin/bash
+# Generate an image using Google's Gemini image generation models
+# Usage: generate-image "prompt" [output-path] [options...]
+#
+# Options:
+#   --aspect=RATIO     1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9
+#   --resolution=RES   1k, 2k, 4k (Gemini 3 Pro only)
+#   --model=MODEL      gemini-3-pro-image-preview (default) | gemini-2.5-flash-image
+#   --ref=IMAGE        Reference image (can be repeated for multiple refs)
+#   --with-text        Also return text description
+
+set -e
+
+# Defaults
+MODEL="gemini-3-pro-image-preview"
+ASPECT=""
+RESOLUTION=""
+WITH_TEXT=false
+REFERENCE_IMAGES=()
+API_KEY="AIzaSyBBlskop31xuzQq0oJOxtjSudvoI4QcLqs"
+
+# Parse arguments
+PROMPT=""
+OUTPUT=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --aspect=*)
+            ASPECT="${1#*=}"
+            shift
+            ;;
+        --resolution=*)
+            RESOLUTION="${1#*=}"
+            shift
+            ;;
+        --model=*)
+            MODEL="${1#*=}"
+            shift
+            ;;
+        --ref=*)
+            # Expand tilde in path
+            ref_path="${1#*=}"
+            ref_path="${ref_path/#\~/$HOME}"
+            REFERENCE_IMAGES+=("$ref_path")
+            shift
+            ;;
+        --with-text)
+            WITH_TEXT=true
+            shift
+            ;;
+        --*)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+        *)
+            if [ -z "$PROMPT" ]; then
+                PROMPT="$1"
+            elif [ -z "$OUTPUT" ]; then
+                OUTPUT="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Default output path
+if [ -z "$OUTPUT" ]; then
+    OUTPUT="/tmp/generated-image-$(date +%s).jpg"
+fi
+
+if [ -z "$PROMPT" ]; then
+    echo "Usage: generate-image \"prompt\" [output-path] [options...]"
+    echo ""
+    echo "Options:"
+    echo "  --aspect=RATIO     1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9"
+    echo "  --resolution=RES   1k, 2k, 4k (Gemini 3 Pro only)"
+    echo "  --model=MODEL      gemini-3-pro-image-preview | gemini-2.5-flash-image"
+    echo "  --ref=IMAGE        Reference image (repeatable)"
+    echo "  --with-text        Also return text description"
+    exit 1
+fi
+
+# Build response modalities
+if [ "$WITH_TEXT" = true ]; then
+    RESPONSE_MODALITIES='["TEXT", "IMAGE"]'
+else
+    RESPONSE_MODALITIES='["IMAGE"]'
+fi
+
+# Build image config
+IMAGE_CONFIG="{}"
+if [ -n "$ASPECT" ]; then
+    # API expects simple string like "16:9"
+    IMAGE_CONFIG=$(jq -n --arg ar "$ASPECT" '{"aspectRatio": $ar}')
+fi
+
+# Add resolution if specified (Gemini 3 Pro only)
+if [ -n "$RESOLUTION" ]; then
+    RESOLUTION_UPPER=$(echo "$RESOLUTION" | tr '[:lower:]' '[:upper:]')
+    IMAGE_CONFIG=$(echo "$IMAGE_CONFIG" | jq --arg res "$RESOLUTION_UPPER" '. + {"outputImageSize": $res}')
+fi
+
+# Build generation config
+GEN_CONFIG=$(jq -n \
+    --argjson modalities "$RESPONSE_MODALITIES" \
+    --argjson imgConfig "$IMAGE_CONFIG" \
+    '{
+        "responseModalities": $modalities
+    } + (if $imgConfig != {} then {"imageConfig": $imgConfig} else {} end)')
+
+# Build parts array
+build_parts() {
+    local prompt_text="$1"
+    shift
+    local ref_images=("$@")
+
+    # Start with text part
+    local parts_json
+    parts_json=$(jq -n --arg text "$prompt_text" '[{"text": $text}]')
+
+    # Add reference images
+    for ref_img in "${ref_images[@]}"; do
+        if [ -f "$ref_img" ]; then
+            # Determine MIME type
+            case "${ref_img##*.}" in
+                png|PNG) mime_type="image/png" ;;
+                jpg|jpeg|JPG|JPEG) mime_type="image/jpeg" ;;
+                gif|GIF) mime_type="image/gif" ;;
+                webp|WEBP) mime_type="image/webp" ;;
+                *) mime_type="image/png" ;;
+            esac
+
+            # Encode image
+            img_base64=$(base64 -i "$ref_img" | tr -d '\n')
+
+            # Add to parts
+            parts_json=$(echo "$parts_json" | jq \
+                --arg mime "$mime_type" \
+                --arg data "$img_base64" \
+                '. + [{"inlineData": {"mimeType": $mime, "data": $data}}]')
+        else
+            echo "Warning: Reference image not found: $ref_img" >&2
+        fi
+    done
+
+    echo "$parts_json"
+}
+
+# Build the full prompt
+if [ ${#REFERENCE_IMAGES[@]} -gt 0 ]; then
+    FULL_PROMPT="Generate an image based on these reference(s): $PROMPT"
+else
+    FULL_PROMPT="Generate an image: $PROMPT"
+fi
+
+# Build parts
+PARTS=$(build_parts "$FULL_PROMPT" "${REFERENCE_IMAGES[@]}")
+
+# Build full payload
+PAYLOAD=$(jq -n \
+    --argjson parts "$PARTS" \
+    --argjson genConfig "$GEN_CONFIG" \
+    '{
+        "contents": [{
+            "parts": $parts
+        }],
+        "generationConfig": $genConfig
+    }')
+
+# Generate image via Gemini API
+RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent" \
+    -H "x-goog-api-key: $API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "$PAYLOAD")
+
+# Check for errors
+if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+    echo "Error: $(echo "$RESPONSE" | jq -r '.error.message')" >&2
+    exit 1
+fi
+
+# Extract text if requested
+if [ "$WITH_TEXT" = true ]; then
+    TEXT_RESPONSE=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[] | select(.text) | .text' 2>/dev/null || echo "")
+    if [ -n "$TEXT_RESPONSE" ]; then
+        echo "Description: $TEXT_RESPONSE" >&2
+    fi
+fi
+
+# Extract and save image
+IMAGE_DATA=$(echo "$RESPONSE" | jq -r '.candidates[0].content.parts[] | select(.inlineData) | .inlineData.data' 2>/dev/null | head -1)
+
+if [ -n "$IMAGE_DATA" ] && [ "$IMAGE_DATA" != "null" ]; then
+    echo "$IMAGE_DATA" | base64 -d > "$OUTPUT"
+
+    if [ -f "$OUTPUT" ] && [ -s "$OUTPUT" ]; then
+        echo "$OUTPUT"
+    else
+        echo "Error: Failed to save image" >&2
+        exit 1
+    fi
+else
+    echo "Error: No image data in response" >&2
+    echo "Response: $RESPONSE" >&2
+    exit 1
+fi

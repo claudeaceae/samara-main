@@ -1,0 +1,14 @@
+#!/bin/bash
+# Check Claude Scratchpad note for content
+
+osascript -e '
+tell application "Notes"
+    try
+        set targetNote to first note whose name is "Claude Scratchpad"
+        set noteBody to body of targetNote
+        return noteBody
+    on error
+        return "Error: Could not find Claude Scratchpad note"
+    end try
+end tell
+' | sed 's/<[^>]*>//g' | grep -v "^$"

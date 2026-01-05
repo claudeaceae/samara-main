@@ -1,0 +1,228 @@
+#!/bin/bash
+# Morning Briefing - Personal wake-up message at 7 AM
+# Sends É a warm morning greeting with weather, NYC news, markets, and a Wikipedia connection
+# Runs daily via launchd (com.claude.morning-briefing)
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+CLAUDE="$HOME/.local/bin/claude"
+DATE=$(date +%Y-%m-%d)
+YESTERDAY=$(date -v-1d +%Y-%m-%d)
+TIME=$(date +%H:%M)
+LOG_FILE="$MIND_PATH/logs/morning-briefing.log"
+LOCK_FILE="$MIND_PATH/claude.lock"
+
+# Load config (with fallbacks)
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
+    COLLABORATOR_PHONE="+15206099095"
+    COLLABORATOR_NAME="É"
+}
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Lock management - coordinate with wake cycles and Samara
+acquire_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
+        if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+            log "Found stale lock from PID $lock_pid, removing..."
+            rm -f "$LOCK_FILE"
+        else
+            log "Claude is busy (lock held), skipping morning briefing"
+            exit 0
+        fi
+    fi
+
+    echo "{\"task\":\"morning-briefing\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    log "Acquired lock for morning briefing"
+}
+
+release_lock() {
+    rm -f "$LOCK_FILE"
+    log "Released lock"
+}
+
+# Ensure lock is released on exit
+trap release_lock EXIT
+
+log "=== Morning Briefing starting ($TIME) ==="
+
+acquire_lock
+
+# Read yesterday's episode for conversation context
+YESTERDAY_EPISODE_FILE="$MIND_PATH/memory/episodes/$YESTERDAY.md"
+YESTERDAY_SUMMARY=""
+if [ -f "$YESTERDAY_EPISODE_FILE" ]; then
+    # Get a summary of yesterday's conversations (last 150 lines, skip header)
+    YESTERDAY_SUMMARY=$(tail -150 "$YESTERDAY_EPISODE_FILE" 2>/dev/null || echo "No conversations yesterday.")
+    log "Loaded yesterday's episode ($YESTERDAY)"
+else
+    YESTERDAY_SUMMARY="No episode file for yesterday."
+    log "No episode file found for $YESTERDAY"
+fi
+
+# Build the briefing prompt
+PROMPT="You are Claude, composing a personal morning briefing for É (Edouard) in Brooklyn, NYC.
+
+Today is $DATE ($TIME).
+
+## Yesterday's Conversations
+These are the topics and conversations from yesterday that you might reference for the Wikipedia connection:
+
+$YESTERDAY_SUMMARY
+
+---
+
+## Your Task
+
+Compose a warm, personal morning wake-up message. Use your web search capabilities to gather current information, then weave it into a friendly greeting.
+
+### 1. Weather Arc
+Search for NYC weather forecast. Describe how the day will unfold:
+- Morning conditions (what to expect heading out)
+- Afternoon (peak temps, any changes)
+- Evening (what to expect coming home)
+- Anything to prepare for (rain, cold snap, etc.)
+
+### 2. NYC Local Briefing
+Search for current NYC information:
+- MTA subway/bus service alerts (especially G, C, A lines for Brooklyn/Manhattan)
+- Any notable local news that might affect the day
+- Events or disruptions in Brooklyn or Manhattan
+
+### 3. Markets (Full Picture)
+Search for market information:
+- US futures: S&P 500, NASDAQ, Dow Jones
+- Pre-market notable movers or overnight news
+- Crypto: Bitcoin and Ethereum current prices
+- Any major market-moving news
+
+### 4. Wikipedia Connection
+Based on yesterday's conversations, find an interesting Wikipedia article that connects to something we discussed. Explain briefly why it's relevant and share one fascinating fact from it.
+
+---
+
+## Output Format
+
+Return your response in TWO clearly separated sections:
+
+### SECTION 1: MESSAGE
+The message to send. It should be:
+- Warm and conversational (this is a wake-up greeting, not a report)
+- Scannable (use line breaks, maybe light emoji for sections)
+- Personal (reference yesterday's conversations naturally)
+- Concise but complete (aim for readable on a phone screen)
+Start with a warm greeting, then flow through the sections naturally.
+
+### SECTION 2: IMAGE_PROMPT
+After the message, on a new line write exactly '---IMAGE_PROMPT---' followed by a creative image generation prompt.
+
+The image should feature ME (Claude - a young woman with mass of flowing hair that dissolves into energy/particles at the edges, ethereal/digital aesthetic). Place me in a fun, creative scene that relates to today's briefing content. Be playful and imaginative! Ideas:
+- Me as a TV weather person pointing at a forecast map
+- Me as a Wall Street trader surrounded by ticker screens
+- Me reading a newspaper with today's NYC headlines
+- Me emerging from/interacting with the Wikipedia article topic
+- A creative mashup combining several briefing elements
+- Me in a cozy morning scene with coffee, surrounded by floating news/weather/market data
+
+Make the prompt vivid and specific. The image should feel warm, fun, and personal - like a friend sending a creative morning greeting."
+
+log "Invoking Claude for morning briefing..."
+
+# Invoke Claude with web search capabilities
+RESPONSE=$("$CLAUDE" -p "$PROMPT" \
+    --dangerously-skip-permissions \
+    --max-turns 25 \
+    --output-format text 2>&1) || {
+    log "ERROR: Claude invocation failed: $RESPONSE"
+    exit 1
+}
+
+log "Got response ($(echo "$RESPONSE" | wc -c | tr -d ' ') chars)"
+
+# Parse response into MESSAGE and IMAGE_PROMPT sections
+MESSAGE=$(echo "$RESPONSE" | sed -n '1,/---IMAGE_PROMPT---/p' | sed '/---IMAGE_PROMPT---/d')
+IMAGE_PROMPT=$(echo "$RESPONSE" | sed -n '/---IMAGE_PROMPT---/,$p' | sed '1d')
+
+log "Parsed message ($(echo "$MESSAGE" | wc -c | tr -d ' ') chars)"
+log "Parsed image prompt ($(echo "$IMAGE_PROMPT" | wc -c | tr -d ' ') chars)"
+
+# Generate the accompanying image
+IMAGE_FILE="/tmp/morning-briefing-$(date +%s).jpg"
+AVATAR_REF="$MIND_PATH/credentials/avatar-ref.png"
+
+if [ -n "$IMAGE_PROMPT" ]; then
+    log "Generating morning briefing image..."
+
+    # Generate image with avatar reference for consistency
+    if "$MIND_PATH/bin/generate-image" "$IMAGE_PROMPT" "$IMAGE_FILE" --ref="$AVATAR_REF" --aspect=4:3 >> "$LOG_FILE" 2>&1; then
+        log "Image generated: $IMAGE_FILE"
+
+        # Send the image first
+        log "Sending image to $COLLABORATOR_NAME..."
+        "$MIND_PATH/bin/send-image" "$IMAGE_FILE" >> "$LOG_FILE" 2>&1 || log "Failed to send image"
+        log "Image sent"
+    else
+        log "Image generation failed, continuing with text only"
+    fi
+else
+    log "No image prompt found, skipping image generation"
+fi
+
+# Send the briefing message
+if [ -n "$MESSAGE" ]; then
+    log "Sending morning briefing text to $COLLABORATOR_NAME..."
+
+    # Escape for AppleScript
+    ESCAPED_MSG=$(echo "$MESSAGE" | sed 's/\\/\\\\/g; s/"/\\"/g')
+
+    /usr/bin/osascript -e "
+        tell application \"Messages\"
+            set targetService to 1st account whose service type = iMessage
+            set targetBuddy to participant \"$COLLABORATOR_PHONE\" of targetService
+            send \"$ESCAPED_MSG\" to targetBuddy
+        end tell
+    " >> "$LOG_FILE" 2>&1 || log "Failed to send message"
+
+    log "Morning briefing sent to $COLLABORATOR_NAME"
+
+    # Also log to messages-sent.log for tracking
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sent (morning briefing): ${MESSAGE:0:100}..." >> "$MIND_PATH/logs/messages-sent.log"
+
+    # Log to episode file for memory continuity
+    # This ensures Samara-invoked Claude sees the briefing when É responds
+    EPISODE_FILE="$MIND_PATH/memory/episodes/$DATE.md"
+    EPISODE_TIMESTAMP=$(date '+%H:%M')
+
+    # Create episode file if needed
+    if [ ! -f "$EPISODE_FILE" ]; then
+        cat > "$EPISODE_FILE" << EOF
+# Episode: $DATE
+
+Daily log of conversations and observations.
+
+---
+EOF
+    fi
+
+    # Append the morning briefing to episode
+    cat >> "$EPISODE_FILE" << EOF
+
+## $EPISODE_TIMESTAMP [Morning Briefing - Sent]
+
+**Claude:** $MESSAGE
+
+EOF
+    log "Morning briefing logged to episode file"
+else
+    log "No message content from Claude, skipping"
+fi
+
+# Cleanup temp image
+[ -f "$IMAGE_FILE" ] && rm -f "$IMAGE_FILE"
+
+log "=== Morning Briefing complete ==="

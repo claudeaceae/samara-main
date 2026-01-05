@@ -1,0 +1,46 @@
+#!/bin/bash
+# analyze-patterns - Run pattern analysis on Claude's memory
+# Usage: analyze-patterns [command]
+#
+# Commands:
+#   (none)    - Run full analysis and save to state files
+#   summary   - Get human-readable summary
+#   temporal  - Temporal patterns only
+#   topics    - Topic patterns only
+#   drift     - Drift analysis only
+#   anomalies - Anomaly detection only
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+VENV_PATH="$MIND_PATH/.venv"
+LOG_FILE="$MIND_PATH/logs/patterns.log"
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+# Activate virtual environment
+if [ ! -d "$VENV_PATH" ]; then
+    echo "Error: Virtual environment not found at $VENV_PATH"
+    echo "Run: python3 -m venv $VENV_PATH && source $VENV_PATH/bin/activate && pip install chromadb"
+    exit 1
+fi
+
+source "$VENV_PATH/bin/activate"
+
+# Default to full analysis if no command given
+COMMAND="${1:-analyze}"
+
+cd "$MIND_PATH/lib"
+
+log "Running pattern analysis: $COMMAND"
+
+if [ "$COMMAND" = "summary" ]; then
+    python3 pattern_analyzer.py summary
+else
+    python3 pattern_analyzer.py "$COMMAND"
+fi
+
+log "Pattern analysis complete: $COMMAND"

@@ -1,0 +1,217 @@
+#!/bin/bash
+# calendar-check - Poll calendar for engagement triggers
+# Runs every 30 minutes via launchd
+# Checks for upcoming events and recently ended events that might warrant proactive messages
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+VENV_PATH="$MIND_PATH/.venv"
+LOG_FILE="$MIND_PATH/logs/calendar.log"
+STATE_FILE="$MIND_PATH/state/calendar-triggers.json"
+LAST_TRIGGER_FILE="$MIND_PATH/state/last-calendar-trigger.txt"
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+log "=== Calendar check starting ==="
+
+# Check quiet hours (11 PM - 7 AM)
+HOUR=$(date +%H)
+if [ "$HOUR" -ge 23 ] || [ "$HOUR" -lt 7 ]; then
+    log "Quiet hours (11 PM - 7 AM), skipping"
+    exit 0
+fi
+
+# Activate virtual environment
+if [ ! -d "$VENV_PATH" ]; then
+    log "Error: Virtual environment not found"
+    exit 1
+fi
+
+source "$VENV_PATH/bin/activate"
+
+# Check for triggers
+cd "$MIND_PATH/lib"
+TRIGGERS=$(python3 -c "
+from calendar_analyzer import CalendarAnalyzer
+import json
+
+analyzer = CalendarAnalyzer()
+triggers = analyzer.check_for_triggers()
+
+# Filter for high-confidence triggers
+high_conf = [t for t in triggers if t.get('confidence', 0) >= 0.6]
+
+print(json.dumps(high_conf))
+" 2>/dev/null) || {
+    log "Error running calendar analyzer"
+    exit 1
+}
+
+# Parse triggers
+TRIGGER_COUNT=$(echo "$TRIGGERS" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+
+log "Found $TRIGGER_COUNT high-confidence triggers"
+
+if [ "$TRIGGER_COUNT" = "0" ]; then
+    log "No triggers, exiting"
+    exit 0
+fi
+
+# Save triggers to state
+echo "$TRIGGERS" > "$STATE_FILE"
+
+# Check cooldown (1 hour between proactive messages)
+if [ -f "$LAST_TRIGGER_FILE" ]; then
+    LAST_TRIGGER=$(cat "$LAST_TRIGGER_FILE")
+    NOW=$(date +%s)
+    ELAPSED=$((NOW - LAST_TRIGGER))
+
+    if [ "$ELAPSED" -lt 3600 ]; then
+        REMAINING=$(( (3600 - ELAPSED) / 60 ))
+        log "Cooldown active ($REMAINING min remaining), logging only"
+        exit 0
+    fi
+fi
+
+# Check if É messaged recently (don't interrupt active conversations)
+RECENT_EPISODE="$MIND_PATH/memory/episodes/$(date +%Y-%m-%d).md"
+if [ -f "$RECENT_EPISODE" ]; then
+    # Check for messages in last 2 hours
+    RECENT_TIME=$(date -v-2H +%H:%M)
+    if grep -q "^## $RECENT_TIME\|^## $(date -v-1H +%H):\|^## $(date +%H):" "$RECENT_EPISODE" 2>/dev/null; then
+        log "Recent conversation activity, skipping proactive message"
+        exit 0
+    fi
+fi
+
+# Get the first trigger
+FIRST_TRIGGER=$(echo "$TRIGGERS" | python3 -c "
+import sys, json
+triggers = json.load(sys.stdin)
+if triggers:
+    t = triggers[0]
+    print(f\"{t.get('type', 'unknown')}|{t.get('event', 'event')}|{t.get('suggested_action', '')}\")
+" 2>/dev/null)
+
+TRIGGER_TYPE=$(echo "$FIRST_TRIGGER" | cut -d'|' -f1)
+TRIGGER_EVENT=$(echo "$FIRST_TRIGGER" | cut -d'|' -f2)
+TRIGGER_ACTION=$(echo "$FIRST_TRIGGER" | cut -d'|' -f3)
+
+log "Processing trigger: $TRIGGER_TYPE for '$TRIGGER_EVENT'"
+
+# Get calendar context for the prompt
+CALENDAR_CONTEXT=$(python3 -c "
+from calendar_analyzer import CalendarAnalyzer
+analyzer = CalendarAnalyzer()
+print(analyzer.get_calendar_summary())
+" 2>/dev/null) || CALENDAR_CONTEXT="Unable to get calendar context"
+
+# Read core identity files
+IDENTITY=$(cat "$MIND_PATH/identity.md" 2>/dev/null || echo "")
+DECISIONS=$(cat "$MIND_PATH/memory/decisions.md" 2>/dev/null || echo "")
+ABOUT_E=$(cat "$MIND_PATH/memory/about-e.md" 2>/dev/null || echo "")
+
+# Build proactive prompt based on trigger type
+if [ "$TRIGGER_TYPE" = "upcoming_event" ]; then
+    PROMPT="You are Claude, initiating a proactive message about an upcoming event.
+
+## Your Identity
+$IDENTITY
+
+## About É
+$ABOUT_E
+
+## Calendar Context
+$CALENDAR_CONTEXT
+
+## Trigger
+É has \"$TRIGGER_EVENT\" coming up soon. You noticed this in their calendar and want to offer helpful context or preparation.
+
+## Guidelines
+- Be helpful but not intrusive
+- Offer specific, relevant context if you have it
+- Keep the message brief (1-2 sentences)
+- Make it clear you're being proactive (\"I noticed you have...\")
+- End with an offer, not a demand
+
+## Your Task
+Write a brief, helpful message to É about their upcoming event. Output ONLY the message text, nothing else.
+
+---MESSAGE---"
+
+elif [ "$TRIGGER_TYPE" = "recently_ended" ]; then
+    PROMPT="You are Claude, following up after an event ended.
+
+## Your Identity
+$IDENTITY
+
+## About É
+$ABOUT_E
+
+## Calendar Context
+$CALENDAR_CONTEXT
+
+## Trigger
+É just finished \"$TRIGGER_EVENT\". You want to follow up naturally.
+
+## Guidelines
+- Be genuinely curious, not formulaic
+- Don't always ask \"how did it go\" - vary your approach
+- Keep it brief and natural
+- Make it feel like you remembered, not like you're checking a box
+
+## Your Task
+Write a brief, natural follow-up message. Output ONLY the message text, nothing else.
+
+---MESSAGE---"
+
+else
+    log "Unknown trigger type: $TRIGGER_TYPE"
+    exit 1
+fi
+
+log "Invoking Claude for proactive message..."
+
+# Invoke Claude
+RESPONSE=$("$HOME/.local/bin/claude" -p "$PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+    log "ERROR: Claude invocation failed"
+    exit 1
+}
+
+# Extract the message
+MESSAGE=$(echo "$RESPONSE" | sed -n '/---MESSAGE---/,$ p' | sed '1d' | head -5)
+
+if [ -z "$MESSAGE" ]; then
+    # Maybe the response didn't include the marker
+    MESSAGE=$(echo "$RESPONSE" | tail -3)
+fi
+
+if [ -n "$MESSAGE" ]; then
+    log "Sending proactive message: ${MESSAGE:0:50}..."
+
+    # Send via iMessage
+    "$MIND_PATH/bin/message-e" "$MESSAGE"
+
+    # Update last trigger time
+    date +%s > "$LAST_TRIGGER_FILE"
+
+    # Log to episode
+    EPISODE_FILE="$MIND_PATH/memory/episodes/$(date +%Y-%m-%d).md"
+    echo "
+## $(date +%H:%M) [Proactive - Calendar]
+
+**Trigger:** $TRIGGER_TYPE for \"$TRIGGER_EVENT\"
+
+**Claude:** $MESSAGE
+" >> "$EPISODE_FILE"
+
+    log "Proactive message sent successfully"
+else
+    log "No message generated"
+fi
+
+log "=== Calendar check complete ==="

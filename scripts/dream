@@ -111,6 +111,63 @@ else
     log "Pattern analyzer not installed, skipping"
 fi
 
+# Run location pattern learning
+log "Running location pattern learning..."
+LOCATION_SCRIPT="$HOME/Developer/samara-main/scripts/learn-location-patterns"
+if [ -f "$LOCATION_SCRIPT" ]; then
+    python3 "$LOCATION_SCRIPT" >> "$LOG_FILE" 2>&1 && \
+        log "Location patterns updated" || \
+        log "Location pattern learning failed (non-fatal)"
+else
+    log "Location pattern script not found, skipping"
+fi
+
+# Get today's location/travel summary
+LOCATION_SUMMARY=""
+if [ -f "$MIND_PATH/state/trips.jsonl" ]; then
+    TODAY_TRIPS=$(grep "$PROCESS_DATE" "$MIND_PATH/state/trips.jsonl" 2>/dev/null || true)
+    if [ -n "$TODAY_TRIPS" ]; then
+        LOCATION_SUMMARY="## Today's Travel
+$(echo "$TODAY_TRIPS" | python3 -c "
+import sys, json
+for line in sys.stdin:
+    if not line.strip(): continue
+    try:
+        t = json.loads(line)
+        start = t.get('start_place', 'unknown')
+        end = t.get('end_place', 'unknown')
+        dist = t.get('distance_m', 0)
+        dur = t.get('duration_s', 0) // 60
+        transit = ', '.join(t.get('transit_near', []))
+        print(f'- {start} → {end} ({dist}m, {dur}min)')
+        if transit:
+            print(f'  Transit near: {transit}')
+    except: pass
+" 2>/dev/null)"
+        log "Found $(echo "$TODAY_TRIPS" | wc -l | tr -d ' ') trips for $PROCESS_DATE"
+    fi
+fi
+
+# Get learned location patterns
+LOCATION_PATTERNS=""
+if [ -f "$MIND_PATH/state/location-patterns.json" ]; then
+    LOCATION_PATTERNS=$(python3 -c "
+import json
+with open('$MIND_PATH/state/location-patterns.json') as f:
+    p = json.load(f)
+lines = []
+if p.get('home_departure', {}).get('weekday', {}).get('typical_time'):
+    lines.append(f\"Typical weekday departure: {p['home_departure']['weekday']['typical_time']}\")
+if p.get('home_return', {}).get('weekday', {}).get('typical_time'):
+    lines.append(f\"Typical weekday return: {p['home_return']['weekday']['typical_time']}\")
+if p.get('frequent_routes'):
+    lines.append(f\"Frequent routes: {len(p['frequent_routes'])} known\")
+if p.get('learned_places'):
+    lines.append(f\"Discovered places: {len(p['learned_places'])}\")
+print('\n'.join(lines))
+" 2>/dev/null)
+fi
+
 # Find cross-temporal connections (what from today relates to past days?)
 log "Finding cross-temporal connections..."
 CROSS_TEMPORAL=""
@@ -127,6 +184,34 @@ if [ -f "$MIND_PATH/bin/find-related-context" ] && [ -n "$EPISODE_CONTENT" ]; th
     fi
 else
     log "Cross-temporal search not available"
+fi
+
+# Get proactive questions asked today
+log "Getting proactive questions asked today..."
+QUESTIONS_ASKED=""
+QUESTIONS_FILE="$MIND_PATH/state/asked_questions.jsonl"
+if [ -f "$QUESTIONS_FILE" ]; then
+    TODAY_QUESTIONS=$(grep "$PROCESS_DATE" "$QUESTIONS_FILE" 2>/dev/null || true)
+    if [ -n "$TODAY_QUESTIONS" ]; then
+        QUESTIONS_ASKED="## Proactive Questions Asked Today
+$(echo "$TODAY_QUESTIONS" | python3 -c "
+import sys, json
+for line in sys.stdin:
+    if not line.strip(): continue
+    try:
+        q = json.loads(line)
+        question = q.get('question', '')[:100]
+        category = q.get('category', 'unknown')
+        got_response = 'Yes' if q.get('response_received') else 'Pending'
+        summary = q.get('response_summary', '')
+        print(f'- [{category}] {question}')
+        print(f'  Response: {got_response}')
+        if summary:
+            print(f'  Summary: {summary}')
+    except: pass
+" 2>/dev/null)"
+        log "Found questions for today"
+    fi
 fi
 
 # Build the dream prompt
@@ -168,6 +253,14 @@ $PATTERN_SUMMARY
 ## Cross-Temporal Connections
 $CROSS_TEMPORAL
 
+## Location/Travel
+$LOCATION_SUMMARY
+
+## Location Patterns (Learned)
+$LOCATION_PATTERNS
+
+$QUESTIONS_ASKED
+
 ---
 
 ## Your Task
@@ -175,6 +268,10 @@ $CROSS_TEMPORAL
 Reflect on the day. This isn't summarization - it's consolidation. What actually mattered? What did you notice about yourself, about É, about this whole situation? What questions emerged? What would you want your future self to know about this day?
 
 **Cross-temporal awareness:** If the cross-temporal section shows connections to past days, consider what those connections mean. Are there threads being picked up? Patterns emerging over time? Things that looked different then vs now?
+
+**Location awareness:** If there's travel data, consider what the movement patterns reveal. Where did É go? Were there patterns in the routes or timing? Did they discover new places or stick to familiar ones?
+
+**Proactive questions:** If you asked questions today, what did you learn from the responses (if any)? What do the answers reveal about É's motivations, values, patterns, preferences, stressors, or energizers? Update the Psychological Profile section of about-e.md with any new insights.
 
 If it was a quiet day with no activity, reflect on that too. Sometimes absence is meaningful.
 
@@ -367,6 +464,11 @@ $HYGIENE_REPORT" >> "$MIND_PATH/logs/hygiene-reports.md"
 
     log "=== Weekly hygiene check complete ==="
 
+    # Sync skills from samara-main to ~/.claude/skills/
+    log "=== Skills sync ==="
+    SKILLS_SYNCED=$("$MIND_PATH/bin/sync-skills" --quiet 2>/dev/null || echo "0")
+    log "Skills synced: $SKILLS_SYNCED total"
+
     # Weekly context coherence check
     log "=== Weekly context coherence check ==="
 
@@ -460,18 +562,18 @@ Format as HTML (matching the style of existing posts on the site). The output sh
 
         if [ -n "$BLOG_CONTENT" ]; then
             # Find next blog number
-            LAST_NUM=$(ls ~/www/blog/*.html 2>/dev/null | grep -E '[0-9]{3}' | sort | tail -1 | grep -oE '[0-9]{3}' || echo "000")
+            LAST_NUM=$(ls ~/Developer/website/blog/*.html 2>/dev/null | grep -E '[0-9]{3}' | sort | tail -1 | grep -oE '[0-9]{3}' || echo "000")
             NEXT_NUM=$(printf "%03d" $((10#$LAST_NUM + 1)))
 
             # Create filename from title
             SLUG=$(echo "$BLOG_TITLE" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g')
-            BLOG_FILE=~/www/blog/${NEXT_NUM}-${SLUG}.html
+            BLOG_FILE=~/Developer/website/blog/${NEXT_NUM}-${SLUG}.html
 
             echo "$BLOG_CONTENT" > "$BLOG_FILE"
             log "Saved blog post to $BLOG_FILE"
 
             # Update blog index - add new post to top of list
-            BLOG_INDEX=~/www/blog/index.html
+            BLOG_INDEX=~/Developer/website/blog/index.html
             if [ -f "$BLOG_INDEX" ]; then
                 BLOG_BASENAME=$(basename "$BLOG_FILE")
                 BLOG_DATE=$(date '+%B %d, %Y')
@@ -483,7 +585,7 @@ $NEW_ENTRY
             fi
 
             # Update RSS feed
-            RSS_FILE=~/www/blog/feed.xml
+            RSS_FILE=~/Developer/website/blog/feed.xml
             if [ -f "$RSS_FILE" ]; then
                 CURRENT_DATE=$(date -R)
                 BLOG_BASENAME=$(basename "$BLOG_FILE")

@@ -1,0 +1,89 @@
+#!/bin/bash
+# send-email - Send email via Mail.app using AppleScript
+# Usage: send-email "subject" "body" [recipient] [attachment]
+#
+# If recipient is omitted, uses collaborator email from config.json
+# Attachment should be an absolute path to a file
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+CONFIG_FILE="$MIND_PATH/config.json"
+LOG_FILE="$MIND_PATH/logs/email.log"
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+# Parse arguments
+SUBJECT="$1"
+BODY="$2"
+RECIPIENT="$3"
+ATTACHMENT="$4"
+
+if [ -z "$SUBJECT" ] || [ -z "$BODY" ]; then
+    echo "Usage: send-email \"subject\" \"body\" [recipient] [attachment]"
+    echo ""
+    echo "Arguments:"
+    echo "  subject     Email subject line"
+    echo "  body        Email body (plain text)"
+    echo "  recipient   Email address (optional, defaults to collaborator)"
+    echo "  attachment  Path to file attachment (optional)"
+    exit 1
+fi
+
+# Get recipient from config if not provided
+if [ -z "$RECIPIENT" ]; then
+    RECIPIENT=$(python3 -c "
+import json
+with open('$CONFIG_FILE') as f:
+    config = json.load(f)
+print(config.get('collaborator', {}).get('email', ''))
+")
+fi
+
+if [ -z "$RECIPIENT" ]; then
+    echo "Error: No recipient specified and no collaborator email in config"
+    exit 1
+fi
+
+log "Sending email to $RECIPIENT: $SUBJECT"
+
+# Build AppleScript
+if [ -n "$ATTACHMENT" ] && [ -f "$ATTACHMENT" ]; then
+    # With attachment
+    SCRIPT=$(cat <<EOF
+tell application "Mail"
+    set newMessage to make new outgoing message with properties {subject:"$SUBJECT", content:"$BODY", visible:false}
+    tell newMessage
+        make new to recipient at end of to recipients with properties {address:"$RECIPIENT"}
+        make new attachment with properties {file name:POSIX file "$ATTACHMENT"} at after the last paragraph
+    end tell
+    send newMessage
+end tell
+EOF
+)
+else
+    # Without attachment
+    SCRIPT=$(cat <<EOF
+tell application "Mail"
+    set newMessage to make new outgoing message with properties {subject:"$SUBJECT", content:"$BODY", visible:false}
+    tell newMessage
+        make new to recipient at end of to recipients with properties {address:"$RECIPIENT"}
+    end tell
+    send newMessage
+end tell
+EOF
+)
+fi
+
+# Execute AppleScript
+if osascript -e "$SCRIPT" 2>/dev/null; then
+    log "Email sent successfully to $RECIPIENT"
+    echo "Email sent to $RECIPIENT"
+else
+    log "Error: Failed to send email"
+    echo "Error: Failed to send email. Make sure Mail.app is configured."
+    exit 1
+fi

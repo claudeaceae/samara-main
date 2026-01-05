@@ -1,0 +1,149 @@
+#!/bin/bash
+# message-watchdog - Detect message sending failures and alert via fallback channels
+#
+# Usage: message-watchdog check   - Check if Messages is responsive
+#        message-watchdog status  - Show current status
+#        message-watchdog alert "msg"  - Send alert via working channels
+#
+# This script tests AppleScript responsiveness and falls back to alternative
+# channels (Bluesky, email notes) when primary channel is blocked.
+
+set -e
+
+MIND_DIR="$HOME/.claude-mind"
+LOG_FILE="$MIND_DIR/logs/message-watchdog.log"
+STATUS_FILE="$MIND_DIR/cache/messages-status.txt"
+BLUESKY_SCRIPT="$MIND_DIR/bin/bluesky-post"
+
+# Ensure directories exist
+mkdir -p "$MIND_DIR/logs" "$MIND_DIR/cache"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+# Test if Messages.app responds to AppleScript read commands
+test_messages_read() {
+    timeout 10 osascript -e 'tell application "Messages" to get name' >/dev/null 2>&1
+}
+
+# Test if Messages.app responds to a minimal send attempt (to self)
+# This doesn't actually send, just tests AppleScript responsiveness
+test_messages_send_responsiveness() {
+    # Try to get chat list - this exercises the send path without sending
+    timeout 10 osascript -e 'tell application "Messages" to get id of every chat' >/dev/null 2>&1
+}
+
+# Check if Bluesky is available as fallback
+test_bluesky() {
+    [ -x "$BLUESKY_SCRIPT" ] && [ -f "$MIND_DIR/credentials/bluesky.json" ]
+}
+
+# Get current status
+get_status() {
+    local messages_read="UNKNOWN"
+    local messages_send="UNKNOWN"
+    local bluesky="UNKNOWN"
+
+    if test_messages_read; then
+        messages_read="OK"
+    else
+        messages_read="BLOCKED"
+    fi
+
+    if test_messages_send_responsiveness; then
+        messages_send="OK"
+    else
+        messages_send="BLOCKED"
+    fi
+
+    if test_bluesky; then
+        bluesky="AVAILABLE"
+    else
+        bluesky="UNAVAILABLE"
+    fi
+
+    echo "messages_read=$messages_read"
+    echo "messages_send=$messages_send"
+    echo "bluesky=$bluesky"
+}
+
+# Save status to file
+save_status() {
+    local status
+    status=$(get_status)
+    echo "$status" > "$STATUS_FILE"
+    echo "timestamp=$(date '+%Y-%m-%d %H:%M:%S')" >> "$STATUS_FILE"
+}
+
+# Check previous failures and alert if needed
+check_consecutive_failures() {
+    local failure_count_file="$MIND_DIR/cache/messages-failure-count.txt"
+    local count=0
+
+    if [ -f "$failure_count_file" ]; then
+        count=$(cat "$failure_count_file" 2>/dev/null || echo "0")
+    fi
+
+    if ! test_messages_send_responsiveness; then
+        count=$((count + 1))
+        echo "$count" > "$failure_count_file"
+        log "Messages send blocked, consecutive failures: $count"
+
+        # Alert after 3 consecutive failures
+        if [ "$count" -eq 3 ]; then
+            alert_via_fallback "Messages.app has been unresponsive for 3 consecutive checks. iMessage sending is blocked."
+        fi
+    else
+        if [ "$count" -gt 0 ]; then
+            log "Messages send recovered after $count failures"
+        fi
+        echo "0" > "$failure_count_file"
+    fi
+}
+
+# Send alert via fallback channel (Bluesky)
+alert_via_fallback() {
+    local message="$1"
+
+    if test_bluesky; then
+        log "Alerting via Bluesky: $message"
+        "$BLUESKY_SCRIPT" "[Alert] $message" 2>/dev/null && log "Bluesky alert sent" || log "Bluesky alert failed"
+    else
+        log "No fallback channels available for alert: $message"
+    fi
+}
+
+# Main command handling
+case "${1:-status}" in
+    check)
+        save_status
+        check_consecutive_failures
+        cat "$STATUS_FILE"
+        ;;
+    status)
+        if [ -f "$STATUS_FILE" ]; then
+            cat "$STATUS_FILE"
+        else
+            get_status
+        fi
+        ;;
+    alert)
+        if [ -z "$2" ]; then
+            echo "Usage: message-watchdog alert \"message\""
+            exit 1
+        fi
+        alert_via_fallback "$2"
+        ;;
+    test)
+        echo "Testing message channels..."
+        echo ""
+        echo "Messages read: $(test_messages_read && echo 'OK' || echo 'BLOCKED')"
+        echo "Messages send: $(test_messages_send_responsiveness && echo 'OK' || echo 'BLOCKED')"
+        echo "Bluesky: $(test_bluesky && echo 'AVAILABLE' || echo 'UNAVAILABLE')"
+        ;;
+    *)
+        echo "Usage: message-watchdog {check|status|alert|test}"
+        exit 1
+        ;;
+esac

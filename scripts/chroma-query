@@ -1,0 +1,29 @@
+#!/bin/bash
+# chroma-query - Search Claude's memory using semantic similarity
+# Usage: chroma-query "search text" [n_results]
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+VENV_PATH="$MIND_PATH/.venv"
+
+if [ -z "$1" ]; then
+    echo "Usage: chroma-query \"search text\" [n_results]"
+    echo ""
+    echo "Examples:"
+    echo "  chroma-query \"coffee shops\""
+    echo "  chroma-query \"conversations about memory\" 10"
+    exit 1
+fi
+
+# Activate virtual environment
+if [ ! -d "$VENV_PATH" ]; then
+    echo "Error: Virtual environment not found at $VENV_PATH"
+    exit 1
+fi
+
+source "$VENV_PATH/bin/activate"
+
+# Run the query
+cd "$MIND_PATH"
+python3 "$MIND_PATH/lib/chroma_helper.py" query "$@"

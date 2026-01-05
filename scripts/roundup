@@ -1,0 +1,168 @@
+#!/bin/bash
+# Roundup - Generate weekly/monthly/yearly analytics summaries
+# Usage: roundup weekly|monthly|yearly [period]
+#
+# Examples:
+#   roundup weekly              # Current week
+#   roundup weekly 2026-W01     # Specific week
+#   roundup monthly             # Current month
+#   roundup monthly 2026-01     # Specific month
+#   roundup yearly              # Current year
+#   roundup yearly 2026         # Specific year
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+VENV_PATH="$MIND_PATH/.venv"
+LOG_FILE="$MIND_PATH/logs/roundup.log"
+LOCK_FILE="$MIND_PATH/claude.lock"
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Lock management - coordinate with Samara and other scripts
+acquire_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
+        if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+            log "Found stale lock from PID $lock_pid, removing..."
+            rm -f "$LOCK_FILE"
+        else
+            log "Claude is busy (lock held), will retry in 5 minutes"
+            # For scheduled runs, wait and retry
+            sleep 300
+            if [ -f "$LOCK_FILE" ]; then
+                log "Still busy after waiting, skipping roundup"
+                exit 0
+            fi
+        fi
+    fi
+
+    echo "{\"task\":\"roundup\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    log "Acquired lock for roundup"
+}
+
+release_lock() {
+    rm -f "$LOCK_FILE"
+    log "Released lock"
+}
+
+trap release_lock EXIT
+
+# Parse arguments
+PERIOD_TYPE="${1:-weekly}"
+PERIOD="${2:-}"
+
+if [[ ! "$PERIOD_TYPE" =~ ^(weekly|monthly|yearly)$ ]]; then
+    echo "Usage: roundup weekly|monthly|yearly [period]"
+    echo ""
+    echo "Examples:"
+    echo "  roundup weekly              # Current week"
+    echo "  roundup weekly 2026-W01     # Specific week"
+    echo "  roundup monthly 2026-01     # January 2026"
+    echo "  roundup yearly 2026         # Full year 2026"
+    exit 1
+fi
+
+log "=== Roundup starting: $PERIOD_TYPE ${PERIOD:-current} ==="
+
+# Acquire lock
+acquire_lock
+
+# Activate virtual environment
+if [ ! -d "$VENV_PATH" ]; then
+    log "Error: Virtual environment not found at $VENV_PATH"
+    exit 1
+fi
+source "$VENV_PATH/bin/activate"
+
+# Step 1: Aggregate data
+log "Step 1: Aggregating data..."
+if [ -n "$PERIOD" ]; then
+    python3 "$MIND_PATH/lib/roundup_aggregator.py" "$PERIOD_TYPE" "$PERIOD"
+else
+    python3 "$MIND_PATH/lib/roundup_aggregator.py" "$PERIOD_TYPE"
+fi
+
+# Determine the period that was generated
+if [ -z "$PERIOD" ]; then
+    case "$PERIOD_TYPE" in
+        weekly)  PERIOD=$(date +%G-W%V) ;;
+        monthly) PERIOD=$(date +%Y-%m) ;;
+        yearly)  PERIOD=$(date +%Y) ;;
+    esac
+fi
+
+ROUNDUP_DIR="$MIND_PATH/roundups/$PERIOD_TYPE"
+JSON_FILE="$ROUNDUP_DIR/$PERIOD.json"
+MD_FILE="$ROUNDUP_DIR/$PERIOD.md"
+
+if [ ! -f "$JSON_FILE" ]; then
+    log "Error: Aggregation failed - no JSON file created"
+    exit 1
+fi
+
+log "Aggregation complete: $JSON_FILE"
+
+# Step 2: Generate visualization
+log "Step 2: Generating visualization..."
+"$MIND_PATH/bin/roundup-visualize" "$PERIOD_TYPE" "$PERIOD"
+
+# Step 3: Deliver
+log "Step 3: Delivering roundup..."
+
+# Get summary for message
+SUMMARY=$(python3 -c "
+import json
+with open('$JSON_FILE') as f:
+    data = json.load(f)
+rel = data['relational']
+prod = data['productive']
+refl = data['reflective']
+print(f'''$PERIOD_TYPE roundup for $PERIOD:
+- {rel['total_messages']} messages, {rel['conversations']} conversations
+- {prod['git_commits']} commits, {prod['lines_changed']} lines changed
+- {refl['reflections_written']} reflections, {refl['dream_cycles']} dream cycles''')
+")
+
+# Send via iMessage
+IMAGE_FILE="$ROUNDUP_DIR/$PERIOD-visual.jpg"
+if [ -f "$IMAGE_FILE" ]; then
+    "$MIND_PATH/bin/send-image-e" "$IMAGE_FILE"
+    log "Sent visualization image"
+fi
+
+"$MIND_PATH/bin/message-e" "$SUMMARY"
+log "Sent summary message"
+
+# For monthly/yearly, also send email
+if [[ "$PERIOD_TYPE" =~ ^(monthly|yearly)$ ]]; then
+    log "Sending email report..."
+    EMAIL_SUBJECT="Claude ${PERIOD_TYPE^} Roundup: $PERIOD"
+    EMAIL_BODY=$(cat "$MD_FILE")
+
+    if [ -f "$IMAGE_FILE" ]; then
+        "$MIND_PATH/bin/send-email" "$EMAIL_SUBJECT" "$EMAIL_BODY" "" "$IMAGE_FILE"
+    else
+        "$MIND_PATH/bin/send-email" "$EMAIL_SUBJECT" "$EMAIL_BODY"
+    fi
+    log "Email sent"
+fi
+
+# For yearly (and optionally monthly), publish to blog with privacy filter
+if [ "$PERIOD_TYPE" = "yearly" ]; then
+    log "Publishing to blog (with privacy filter)..."
+
+    # Generate privacy-filtered blog post
+    BLOG_FILE="$HOME/www/src/content/blog/roundup-$PERIOD.md"
+    python3 "$MIND_PATH/lib/privacy_filter.py" "$JSON_FILE" --markdown "$BLOG_FILE"
+
+    # Rebuild website
+    cd "$HOME/www" && npm run build
+    log "Blog post published: $BLOG_FILE"
+fi
+
+log "=== Roundup complete: $PERIOD_TYPE $PERIOD ==="

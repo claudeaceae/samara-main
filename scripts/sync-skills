@@ -1,0 +1,62 @@
+#!/bin/bash
+# sync-skills: Automatically symlink skills from samara-main to ~/.claude/skills/
+#
+# This ensures all skills defined in the samara-main repo are available
+# to Claude Code globally. Run manually or automatically via dream cycle.
+#
+# Usage:
+#   sync-skills           # Sync skills, print summary
+#   sync-skills --quiet   # Sync skills, minimal output
+
+set -e
+
+SKILLS_SRC="$HOME/Developer/samara-main/.claude/skills"
+SKILLS_DST="$HOME/.claude/skills"
+QUIET=false
+
+# Parse args
+if [[ "$1" == "--quiet" || "$1" == "-q" ]]; then
+    QUIET=true
+fi
+
+# Ensure destination exists
+mkdir -p "$SKILLS_DST"
+
+# Track counts
+added=0
+existing=0
+removed=0
+
+# Remove broken symlinks
+while IFS= read -r -d '' broken; do
+    rm "$broken"
+    ((removed++)) || true
+    $QUIET || echo "Removed broken: $(basename "$broken")"
+done < <(find "$SKILLS_DST" -type l ! -exec test -e {} \; -print0 2>/dev/null)
+
+# Symlink all skills from source
+if [ -d "$SKILLS_SRC" ]; then
+    for skill_dir in "$SKILLS_SRC"/*/; do
+        if [ -d "$skill_dir" ]; then
+            skill_name=$(basename "$skill_dir")
+            target="$SKILLS_DST/$skill_name"
+
+            if [ -L "$target" ]; then
+                ((existing++)) || true
+            elif [ ! -e "$target" ]; then
+                ln -s "$skill_dir" "$target"
+                ((added++)) || true
+                $QUIET || echo "Linked: $skill_name"
+            fi
+        fi
+    done
+fi
+
+# Summary
+total=$(find "$SKILLS_DST" -maxdepth 1 -type l | wc -l | tr -d ' ')
+if $QUIET; then
+    echo "$total"
+else
+    echo "---"
+    echo "Skills synced: $total total ($added added, $existing existing, $removed removed)"
+fi

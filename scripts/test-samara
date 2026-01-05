@@ -1,0 +1,100 @@
+#!/bin/bash
+# Samara Unit Tests - Run the test suite for Samara's core components
+#
+# Usage: test-samara [--verbose] [--quick]
+#
+# Runs during capability-check to verify Samara internals work correctly.
+# Tests: SessionManager, TaskLock, MessageQueue
+#
+# Options:
+#   --verbose   Show full xcodebuild output
+#   --quick     Skip test if Samara was built recently (< 1 hour)
+
+MIND_PATH="$HOME/.claude-mind"
+SAMARA_PROJECT="$HOME/Developer/samara-main/Samara"
+LOG_FILE="$MIND_PATH/logs/test-samara.log"
+
+# Parse arguments
+VERBOSE=""
+QUICK=""
+for arg in "$@"; do
+    case $arg in
+        --verbose) VERBOSE="true" ;;
+        --quick) QUICK="true" ;;
+    esac
+done
+
+# Quick mode: skip if recently tested
+if [[ -n "$QUICK" ]]; then
+    LAST_TEST="$MIND_PATH/logs/.last-samara-test"
+    if [[ -f "$LAST_TEST" ]]; then
+        LAST_TIME=$(cat "$LAST_TEST")
+        NOW=$(date +%s)
+        DIFF=$((NOW - LAST_TIME))
+        if [[ $DIFF -lt 3600 ]]; then
+            echo "Skipping tests (ran $((DIFF / 60)) minutes ago, use without --quick to force)"
+            exit 0
+        fi
+    fi
+fi
+
+log() {
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+    echo "$msg" >> "$LOG_FILE"
+    echo "$msg"
+}
+
+mkdir -p "$(dirname "$LOG_FILE")"
+echo "" >> "$LOG_FILE"
+echo "======================================" >> "$LOG_FILE"
+log "Starting Samara unit tests..."
+
+# Check project exists
+if [[ ! -d "$SAMARA_PROJECT" ]]; then
+    log "ERROR: Samara project not found at $SAMARA_PROJECT"
+    exit 1
+fi
+
+# Run tests
+log "Building and running tests..."
+
+if [[ -n "$VERBOSE" ]]; then
+    xcodebuild -project "$SAMARA_PROJECT/Samara.xcodeproj" \
+        -scheme SamaraTests \
+        -destination 'platform=macOS' \
+        test 2>&1 | tee -a "$LOG_FILE"
+    RESULT=${PIPESTATUS[0]}
+else
+    OUTPUT=$(xcodebuild -project "$SAMARA_PROJECT/Samara.xcodeproj" \
+        -scheme SamaraTests \
+        -destination 'platform=macOS' \
+        test 2>&1)
+    RESULT=$?
+    echo "$OUTPUT" >> "$LOG_FILE"
+
+    # Extract test summary
+    PASSED=$(echo "$OUTPUT" | grep -c "passed on")
+    FAILED=$(echo "$OUTPUT" | grep -c "failed on")
+
+    if [[ $RESULT -eq 0 ]]; then
+        log "All $PASSED tests passed"
+    else
+        log "Tests: $PASSED passed, $FAILED failed"
+        # Show failures
+        echo "$OUTPUT" | grep "failed on" | while read line; do
+            log "  FAIL: $line"
+        done
+    fi
+fi
+
+# Record last test time
+mkdir -p "$(dirname "$MIND_PATH/logs/.last-samara-test")"
+date +%s > "$MIND_PATH/logs/.last-samara-test"
+
+if [[ $RESULT -eq 0 ]]; then
+    log "Samara tests completed successfully"
+    exit 0
+else
+    log "Samara tests FAILED"
+    exit 1
+fi

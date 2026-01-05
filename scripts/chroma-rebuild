@@ -1,0 +1,31 @@
+#!/bin/bash
+# chroma-rebuild - Full rebuild of Chroma semantic index
+# This rebuilds the index from scratch using all markdown files
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+VENV_PATH="$MIND_PATH/.venv"
+LOG_FILE="$MIND_PATH/logs/chroma.log"
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+log "Starting Chroma index rebuild..."
+
+# Activate virtual environment
+if [ ! -d "$VENV_PATH" ]; then
+    log "Error: Virtual environment not found at $VENV_PATH"
+    exit 1
+fi
+
+source "$VENV_PATH/bin/activate"
+
+# Run the rebuild
+cd "$MIND_PATH"
+python3 "$MIND_PATH/lib/chroma_helper.py" rebuild
+
+log "Chroma index rebuild complete"

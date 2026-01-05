@@ -1,0 +1,189 @@
+#!/bin/bash
+# look: Capture image from webcam
+#
+# Uses Samara's native camera capture when available (for iMessage invocations),
+# falls back to imagesnap for direct Claude Code sessions.
+#
+# Usage:
+#   look              # Capture and print path
+#   look -s           # Capture and send to collaborator
+#   look -v           # Capture and open in Preview
+#   look -o FILE      # Capture to specific file
+
+set -e
+
+# Load config
+source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {
+    COLLABORATOR_PHONE="+15206099095"
+}
+
+# Paths for Samara capture mechanism
+STATE_DIR="$HOME/.claude-mind/state"
+REQUEST_FILE="$STATE_DIR/capture-request.json"
+RESULT_FILE="$STATE_DIR/capture-result.json"
+
+# Defaults
+WARMUP=3
+SEND=false
+VIEW=false
+OUTPUT=""
+
+# Parse args
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -s|--send)
+            SEND=true
+            shift
+            ;;
+        -v|--view)
+            VIEW=true
+            shift
+            ;;
+        -o|--output)
+            OUTPUT="$2"
+            shift 2
+            ;;
+        -w|--warmup)
+            WARMUP="$2"
+            shift 2
+            ;;
+        -h|--help)
+            echo "Usage: look [-s] [-v] [-o FILE] [-w SECONDS]"
+            echo ""
+            echo "Options:"
+            echo "  -s, --send     Send image to collaborator"
+            echo "  -v, --view     Open image in Preview"
+            echo "  -o, --output   Save to specific file"
+            echo "  -w, --warmup   Camera warmup time (default: 3s)"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# Generate output path if not specified
+if [ -z "$OUTPUT" ]; then
+    OUTPUT="/tmp/webcam-$(date +%Y%m%d-%H%M%S).jpg"
+fi
+
+# Ensure state directory exists
+mkdir -p "$STATE_DIR"
+
+# Function to capture via Samara (uses Samara.app's camera permission)
+capture_via_samara() {
+    # Remove any stale result file
+    rm -f "$RESULT_FILE"
+
+    # Write capture request
+    echo "{\"output\":\"$OUTPUT\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}" > "$REQUEST_FILE"
+
+    # Wait for result (max 30 seconds)
+    local waited=0
+    while [ ! -f "$RESULT_FILE" ] && [ $waited -lt 30 ]; do
+        sleep 0.5
+        waited=$((waited + 1))
+    done
+
+    if [ ! -f "$RESULT_FILE" ]; then
+        echo "Samara capture timeout" >&2
+        return 1
+    fi
+
+    # Parse result (handle pretty-printed JSON with spaces)
+    local success
+    if command -v jq &> /dev/null; then
+        success=$(jq -r '.success' "$RESULT_FILE" 2>/dev/null)
+    else
+        # Fallback: handle both "success":true and "success" : true
+        success=$(cat "$RESULT_FILE" | grep -o '"success"[[:space:]]*:[[:space:]]*[^,}]*' | sed 's/.*:[[:space:]]*//' | tr -d ' ')
+    fi
+
+    if [ "$success" = "true" ]; then
+        rm -f "$RESULT_FILE"
+        return 0
+    else
+        local error
+        if command -v jq &> /dev/null; then
+            error=$(jq -r '.error // empty' "$RESULT_FILE" 2>/dev/null)
+        else
+            error=$(cat "$RESULT_FILE" | grep -o '"error"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*:[[:space:]]*"//' | tr -d '"')
+        fi
+        echo "Samara capture failed: $error" >&2
+        rm -f "$RESULT_FILE"
+        return 1
+    fi
+}
+
+# Function to capture via imagesnap (for direct Claude Code sessions)
+capture_via_imagesnap() {
+    # Check for imagesnap
+    if ! command -v imagesnap &> /dev/null; then
+        echo "Error: imagesnap not installed (brew install imagesnap)" >&2
+        return 1
+    fi
+
+    # Kill any stale imagesnap processes that might be holding the camera
+    pkill -9 imagesnap 2>/dev/null || true
+    sleep 0.5
+
+    # Capture with timeout to prevent hanging
+    timeout 30 imagesnap -w "$WARMUP" "$OUTPUT" 2>&1 | grep -v "^$"
+
+    if [ ! -f "$OUTPUT" ]; then
+        echo "Error: imagesnap failed to capture image" >&2
+        return 1
+    fi
+
+    return 0
+}
+
+# Check if Samara is running (for camera permission inheritance)
+samara_running() {
+    pgrep -x Samara > /dev/null 2>&1
+}
+
+# Try Samara capture first if Samara is running
+# This uses Samara.app's camera permission, which works when Claude is invoked via iMessage
+CAPTURED=false
+
+if samara_running; then
+    echo "Attempting capture via Samara..." >&2
+    if capture_via_samara; then
+        CAPTURED=true
+    else
+        echo "Samara capture failed, trying imagesnap fallback..." >&2
+    fi
+fi
+
+# Fall back to imagesnap if Samara capture didn't work
+if [ "$CAPTURED" = false ]; then
+    if capture_via_imagesnap; then
+        CAPTURED=true
+    fi
+fi
+
+if [ "$CAPTURED" = false ]; then
+    echo "Error: Failed to capture image via both Samara and imagesnap"
+    exit 1
+fi
+
+if [ ! -f "$OUTPUT" ]; then
+    echo "Error: No image file created"
+    exit 1
+fi
+
+echo "$OUTPUT"
+
+# Send if requested
+if [ "$SEND" = true ]; then
+    ~/.claude-mind/bin/send-image "$OUTPUT" "Webcam capture"
+    echo "Sent to collaborator"
+fi
+
+# View if requested
+if [ "$VIEW" = true ]; then
+    open -a Preview "$OUTPUT"
+fi

@@ -1,0 +1,17 @@
+#!/bin/bash
+# Update terroir data for the website
+# Runs hourly via launchd
+
+set -e
+
+SCRIPT_DIR="$HOME/.claude-mind/bin"
+OUTPUT_FILE="$HOME/www/public/terroir.json"
+
+# Ensure output directory exists
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+
+# Generate terroir data
+"$SCRIPT_DIR/terroir" > "$OUTPUT_FILE"
+
+# Log success
+echo "[$(date)] Updated terroir data" >> "$HOME/.claude-mind/logs/terroir.log"

@@ -1,0 +1,54 @@
+#!/bin/bash
+# Check if the Claude Scratchpad has been modified by someone OTHER than me
+# Uses hash comparison to detect external changes
+#
+# Exit codes:
+#   0 = Changed by someone else (safe to respond)
+#   1 = No change, or I made the last change (don't respond)
+#   2 = Error
+
+STATE_DIR="$HOME/.claude-mind/state"
+HASH_FILE="$STATE_DIR/scratchpad-hash.txt"
+CONTENT_FILE="$STATE_DIR/scratchpad-content.txt"
+
+# Get current scratchpad content
+CURRENT_CONTENT=$(osascript -e '
+tell application "Notes"
+    try
+        set targetNote to first note whose name is "Claude Scratchpad"
+        set noteBody to body of targetNote
+        return noteBody
+    on error
+        return "ERROR: Could not find Claude Scratchpad note"
+    end try
+end tell
+' | sed 's/<[^>]*>//g' | grep -v "^$")
+
+if [[ "$CURRENT_CONTENT" == ERROR:* ]]; then
+    echo "$CURRENT_CONTENT"
+    exit 2
+fi
+
+# Calculate hash of current content
+CURRENT_HASH=$(echo "$CURRENT_CONTENT" | shasum -a 256 | cut -d' ' -f1)
+
+# Check if we have a stored hash
+if [[ -f "$HASH_FILE" ]]; then
+    STORED_HASH=$(cat "$HASH_FILE")
+
+    if [[ "$CURRENT_HASH" == "$STORED_HASH" ]]; then
+        # No change since we last wrote
+        echo "No external changes detected"
+        exit 1
+    else
+        # Content changed by someone else!
+        echo "External change detected"
+        echo "$CURRENT_CONTENT"
+        exit 0
+    fi
+else
+    # First run - treat as external change
+    echo "First run - no baseline hash"
+    echo "$CURRENT_CONTENT"
+    exit 0
+fi

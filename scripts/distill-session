@@ -1,0 +1,89 @@
+#!/bin/bash
+# Distill an iMessage session into episode memory
+# Called by Samara when a session expires
+# Usage: distill-session <session-id> < conversation-log
+#
+# This receives conversation content via stdin and summarizes it for memory.
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+LOG_FILE="$MIND_PATH/logs/distillation.log"
+CLAUDE_PATH="$HOME/.local/bin/claude"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+SESSION_ID="${1:-unknown}"
+log "Distilling session: $SESSION_ID"
+
+# Read conversation from stdin
+CONVERSATION=$(cat)
+
+# Skip if no meaningful content
+if [ ${#CONVERSATION} -lt 50 ]; then
+    log "Conversation too short (${#CONVERSATION} chars), skipping"
+    exit 0
+fi
+
+log "Processing conversation (${#CONVERSATION} chars)..."
+
+# Build the summarization prompt
+PROMPT=$(cat <<'PROMPT_EOF'
+Summarize this iMessage conversation for memory consolidation. Write 2-5 bullet points capturing:
+- What was discussed
+- Any decisions or plans made
+- Key information exchanged
+- Context for future reference
+
+Be specific and concrete. Write in first person ("É asked me to...", "We discussed...").
+
+Conversation:
+%CONVERSATION%
+
+Output ONLY the bullet points, no preamble.
+PROMPT_EOF
+)
+
+# Substitute conversation (limit to 30k chars)
+CONVERSATION_ESCAPED=$(printf '%s' "$CONVERSATION" | head -c 30000)
+PROMPT="${PROMPT//%CONVERSATION%/$CONVERSATION_ESCAPED}"
+
+# Invoke Claude for summarization (haiku for speed and cost)
+log "Invoking Claude Haiku for summary..."
+SUMMARY=$("$CLAUDE_PATH" -p "$PROMPT" --output-format text --model haiku 2>/dev/null || echo "")
+
+if [ -z "$SUMMARY" ]; then
+    log "Summary generation failed, using fallback"
+    SUMMARY="- iMessage session with É (summary generation failed)"
+fi
+
+log "Generated summary: ${SUMMARY:0:100}..."
+
+# Write to today's episode
+TODAY=$(date +%Y-%m-%d)
+EPISODE_FILE="$MIND_PATH/memory/episodes/$TODAY.md"
+
+# Create episode file if needed
+if [ ! -f "$EPISODE_FILE" ]; then
+    cat > "$EPISODE_FILE" << EOF
+# Episode: $TODAY
+
+Daily log of conversations and observations.
+
+---
+EOF
+fi
+
+# Add session summary to episode
+TIMESTAMP=$(date '+%H:%M')
+cat >> "$EPISODE_FILE" << EOF
+
+## $TIMESTAMP [iMessage Session Closed]
+
+$SUMMARY
+
+EOF
+
+log "Session distillation written to episode: $EPISODE_FILE"
