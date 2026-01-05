@@ -11,6 +11,8 @@ final class LocationTracker {
         case stationary = "stationary"
         case leavingHome = "leaving_home"
         case arrivingHome = "arriving_home"
+        case leavingWork = "leaving_work"
+        case arrivingWork = "arriving_work"
         case nearTransit = "near_transit"
         case lingering = "lingering"
         case patternDeviation = "pattern_deviation"
@@ -159,8 +161,8 @@ final class LocationTracker {
     /// Distance threshold for "significant movement" (2 km)
     private let significantMovementThreshold: Double = 2000
 
-    /// Distance threshold for detecting home departure (300 meters)
-    private let homeDepartureThreshold: Double = 300
+    /// Distance threshold for detecting home departure (75 meters - about 1 short NYC block)
+    private let homeDepartureThreshold: Double = 75
 
     /// Distance threshold for transit proximity (100 meters)
     private let transitProximityThreshold: Double = 100
@@ -180,7 +182,8 @@ final class LocationTracker {
     private var places: [Place] = []  // from places.json
     private var subwayStations: [SubwayStation] = []
     private var patterns: LocationPatterns?  // learned patterns
-    private var wasAtHome: Bool = false  // for detecting departure
+    private var wasAtHome: Bool = false  // for detecting departure from home
+    private var wasAtWork: Bool = false  // for detecting departure from work
     private var lastTransitAlert: String?  // prevent re-alerting same station
     private var lastPatternDeviationAlert: Date?  // prevent repeated deviation alerts
 
@@ -216,11 +219,45 @@ final class LocationTracker {
                 log("Initialized wasAtHome=\(wasAtHome) from last location", level: .debug, component: "LocationTracker")
             }
         }
+
+        // Initialize work state from last known location if not loaded from state
+        if let work = findPlace(named: "work"), let last = locationHistory.last {
+            let isCurrentlyAtWork = last.distance(toLat: work.lat, lon: work.lon) < work.radius
+            // Only override if state wasn't loaded (wasAtWork defaults to false)
+            if !wasAtWork && isCurrentlyAtWork {
+                wasAtWork = isCurrentlyAtWork
+                log("Initialized wasAtWork=\(wasAtWork) from last location", level: .debug, component: "LocationTracker")
+            }
+        }
     }
 
     // MARK: - Public Interface
 
-    /// Process a location update from the note and determine if we should message
+    /// Process a location update from the file watcher (primary method)
+    func processLocation(_ update: LocationUpdate) -> LocationAnalysis {
+        // Convert LocationUpdate to LocationEntry
+        let location = LocationEntry(
+            timestamp: update.timestamp,
+            latitude: update.latitude,
+            longitude: update.longitude,
+            address: update.wifi ?? "Unknown",  // Use WiFi name as a proxy for location context
+            altitude: update.altitude
+        )
+
+        // Store in history
+        appendToHistory(location)
+
+        // Check if we should message
+        let analysis = analyzeLocation(location)
+
+        // Update state
+        lastKnownLocation = location
+
+        return analysis
+    }
+
+    /// Process a location update from the note (DEPRECATED - use processLocation instead)
+    @available(*, deprecated, message: "Use processLocation(_:) with LocationUpdate instead")
     func processLocationUpdate(noteContent: String) -> LocationAnalysis {
         guard let location = parseLocation(from: noteContent) else {
             log("Could not parse location from note", level: .debug, component: "LocationTracker")
@@ -363,6 +400,16 @@ final class LocationTracker {
             return result
         }
 
+        // Check 1.6: Leaving work
+        if let result = checkLeavingWork(location) {
+            return result
+        }
+
+        // Check 1.7: Arriving at work
+        if let result = checkArrivingWork(location) {
+            return result
+        }
+
         // Check 2: Near transit (subway station)
         if let result = checkNearTransit(location) {
             return result
@@ -476,6 +523,59 @@ final class LocationTracker {
                 reason: "Welcome back!",
                 currentLocation: location,
                 triggerType: .arrivingHome
+            )
+        }
+
+        return nil
+    }
+
+    /// Check if leaving work
+    private func checkLeavingWork(_ location: LocationEntry) -> LocationAnalysis? {
+        guard let work = findPlace(named: "work") else { return nil }
+
+        let distanceFromWork = location.distance(toLat: work.lat, lon: work.lon)
+        let isNowAway = distanceFromWork > homeDepartureThreshold  // reuse same threshold
+
+        // Trigger: was at work, now away
+        if wasAtWork && isNowAway {
+            wasAtWork = false
+            saveTrackerState()
+            lastMessageTime = Date()
+            log("Leaving work detected - wasAtWork=\(wasAtWork)", level: .info, component: "LocationTracker")
+            return LocationAnalysis(
+                shouldMessage: true,
+                reason: "Heading home?",
+                currentLocation: location,
+                triggerType: .leavingWork
+            )
+        }
+
+        // Update work state when leaving
+        if isNowAway {
+            wasAtWork = false
+        }
+
+        return nil
+    }
+
+    /// Check if arriving at work
+    private func checkArrivingWork(_ location: LocationEntry) -> LocationAnalysis? {
+        guard let work = findPlace(named: "work") else { return nil }
+
+        let distanceFromWork = location.distance(toLat: work.lat, lon: work.lon)
+        let isNowAtWork = distanceFromWork < work.radius
+
+        // Trigger: was away, now at work
+        if !wasAtWork && isNowAtWork {
+            wasAtWork = true
+            saveTrackerState()
+            lastMessageTime = Date()
+            log("Arriving at work detected - wasAtWork=\(wasAtWork)", level: .info, component: "LocationTracker")
+            return LocationAnalysis(
+                shouldMessage: true,
+                reason: "Made it to work!",
+                currentLocation: location,
+                triggerType: .arrivingWork
             )
         }
 
@@ -815,6 +915,7 @@ final class LocationTracker {
 
     private struct TrackerState: Codable {
         var wasAtHome: Bool
+        var wasAtWork: Bool?  // Optional for backwards compatibility
         var lastMessageTime: Date?
         var lastTransitAlert: String?
     }
@@ -831,9 +932,10 @@ final class LocationTracker {
             decoder.dateDecodingStrategy = .iso8601
             let state = try decoder.decode(TrackerState.self, from: data)
             wasAtHome = state.wasAtHome
+            wasAtWork = state.wasAtWork ?? false
             lastMessageTime = state.lastMessageTime
             lastTransitAlert = state.lastTransitAlert
-            log("Loaded tracker state: wasAtHome=\(wasAtHome)", level: .debug, component: "LocationTracker")
+            log("Loaded tracker state: wasAtHome=\(wasAtHome), wasAtWork=\(wasAtWork)", level: .debug, component: "LocationTracker")
         } catch {
             log("Error loading tracker state: \(error)", level: .warn, component: "LocationTracker")
         }
@@ -842,6 +944,7 @@ final class LocationTracker {
     private func saveTrackerState() {
         let state = TrackerState(
             wasAtHome: wasAtHome,
+            wasAtWork: wasAtWork,
             lastMessageTime: lastMessageTime,
             lastTransitAlert: lastTransitAlert
         )
@@ -853,7 +956,7 @@ final class LocationTracker {
         do {
             let data = try encoder.encode(state)
             try data.write(to: URL(fileURLWithPath: statePath))
-            log("Saved tracker state: wasAtHome=\(wasAtHome)", level: .debug, component: "LocationTracker")
+            log("Saved tracker state: wasAtHome=\(wasAtHome), wasAtWork=\(wasAtWork)", level: .debug, component: "LocationTracker")
         } catch {
             log("Error saving tracker state: \(error)", level: .warn, component: "LocationTracker")
         }

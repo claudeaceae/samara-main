@@ -253,15 +253,46 @@ Samara/
     │   └── NoteWatcher.swift
     ├── Actions/
     │   ├── ClaudeInvoker.swift # Invokes Claude Code
-    │   └── MessageSender.swift
+    │   ├── MessageSender.swift
+    │   └── MessageBus.swift    # Unified output channel
     └── Mind/
         ├── SessionManager.swift
         ├── TaskLock.swift
         ├── MessageQueue.swift
         ├── QueueProcessor.swift
         ├── MemoryContext.swift
-        └── EpisodeLogger.swift
+        ├── EpisodeLogger.swift
+        └── TaskRouter.swift    # Parallel task isolation
 ```
+
+### Response Sanitization (Critical for Multi-Stream Conversations)
+
+**Background:** In complex group chat scenarios with multiple concurrent requests (webcam + web fetch + conversation), internal thinking traces and session IDs can leak into user-visible messages. This was discovered on 2026-01-05 when session IDs like `1767301033-68210` appeared in messages.
+
+**Three-Layer Defense:**
+
+1. **Output Sanitization** (`ClaudeInvoker.swift`):
+   - `sanitizeResponse()` strips internal content before any message is sent
+   - Filters: `<thinking>` blocks, session ID patterns, XML markers
+   - Filtered content is logged at DEBUG level for diagnosis
+   - **Critical**: `parseJsonOutput()` never falls back to raw output
+
+2. **MessageBus Coordination** (`MessageBus.swift`):
+   - ALL outbound messages route through single channel
+   - Source tags (iMessage, Location, Wake, Alert) added to episode logs
+   - Prevents uncoordinated fire-and-forget sends
+
+3. **TaskRouter Isolation** (`TaskRouter.swift`):
+   - Classifies batched messages by task type
+   - Isolates webcam/web fetch/skill tasks from conversation session
+   - Prevents cross-contamination between concurrent streams
+
+**Testing:** Run `SamaraTests/SanitizationTests.swift` to verify sanitization logic.
+
+**If leaks recur:**
+1. Check `~/.claude-mind/logs/samara.log` for "Filtered from response" DEBUG entries
+2. Verify MessageBus is used for all sends (no direct `sender.send()` calls)
+3. Consider if new task types need classification in TaskRouter
 
 ### Build Workflow
 

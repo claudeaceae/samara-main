@@ -108,4 +108,48 @@ final class EpisodeLogger {
             fileHandle.closeFile()
         }
     }
+
+    /// Logs an outbound message (from Claude to user)
+    /// Used by MessageBus to track all outgoing communications
+    /// - Parameters:
+    ///   - message: The outbound message content
+    ///   - source: The source channel type (e.g., "iMessage", "Location", "Wake", "Alert")
+    func logOutbound(_ message: String, source: String) {
+        let now = Date()
+        let dateString = dateFormatter.string(from: now)
+        let timeString = timeFormatter.string(from: now)
+
+        let episodePath = (episodesPath as NSString).appendingPathComponent("\(dateString).md")
+
+        // Create episode file with header if it doesn't exist
+        if !FileManager.default.fileExists(atPath: episodePath) {
+            let header = """
+                # Episode: \(dateString)
+
+                Daily log of conversations and observations.
+
+                ---
+
+                """
+            try? header.write(toFile: episodePath, atomically: true, encoding: .utf8)
+        }
+
+        let entry = """
+
+            ## \(timeString) [\(source)]
+
+            **Claude:** \(message)
+
+            """
+
+        if let fileHandle = FileHandle(forWritingAtPath: episodePath) {
+            fileHandle.seekToEndOfFile()
+            if let data = entry.data(using: .utf8) {
+                fileHandle.write(data)
+            }
+            fileHandle.closeFile()
+        }
+
+        log("Logged outbound [\(source)] to \(dateString).md", level: .debug, component: "EpisodeLogger")
+    }
 }

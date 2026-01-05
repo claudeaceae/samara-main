@@ -45,6 +45,15 @@ final class ClaudeInvoker {
         return result.response
     }
 
+    /// Invoke Claude in ISOLATED mode - no session state, fresh context
+    /// Use this for parallel tasks (webcam, web fetch) that shouldn't share session with conversation
+    /// This prevents cross-contamination of internal state between concurrent task streams
+    func invokeIsolated(messages: [Message], context: String, targetHandles: Set<String> = []) throws -> ClaudeInvocationResult {
+        log("Isolated invocation for \(messages.count) message(s)", level: .info, component: "ClaudeInvoker")
+        // No session ID = fresh context, no cross-contamination
+        return try invokeBatch(messages: messages, context: context, resumeSessionId: nil, targetHandles: targetHandles)
+    }
+
     /// Core invocation method with retry tracking to prevent infinite loops
     private func invokeWithPrompt(_ fullPrompt: String, resumeSessionId: String?, retryCount: Int) throws -> ClaudeInvocationResult {
         // Guard against infinite retry loops
@@ -244,27 +253,105 @@ final class ClaudeInvoker {
         return parseJsonOutput(output)
     }
 
+    /// Sanitize Claude's response, stripping internal traces that shouldn't be visible to users
+    /// Returns (sanitized response, filtered content for debug logging)
+    private func sanitizeResponse(_ text: String) -> (sanitized: String, filtered: String?) {
+        var result = text
+        var filtered: [String] = []
+
+        // Strip <thinking>...</thinking> blocks (extended thinking traces)
+        let thinkingPattern = #"<thinking>[\s\S]*?</thinking>"#
+        if let regex = try? NSRegularExpression(pattern: thinkingPattern, options: []) {
+            let range = NSRange(result.startIndex..., in: result)
+            let matches = regex.matches(in: result, options: [], range: range)
+            for match in matches.reversed() {
+                if let matchRange = Range(match.range, in: result) {
+                    filtered.append("THINKING: \(result[matchRange])")
+                }
+            }
+            result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: "")
+        }
+
+        // Strip <*>...</*> blocks (internal XML markers)
+        let antmlPattern = #"<[^>]+>[\s\S]*?</[^>]+>"#
+        if let regex = try? NSRegularExpression(pattern: antmlPattern, options: []) {
+            let range = NSRange(result.startIndex..., in: result)
+            let matches = regex.matches(in: result, options: [], range: range)
+            for match in matches.reversed() {
+                if let matchRange = Range(match.range, in: result) {
+                    filtered.append("ANTML: \(result[matchRange])")
+                }
+            }
+            result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: "")
+        }
+
+        // Strip session ID patterns (10 digits - 5 digits) that leak from task coordination
+        let sessionIdPattern = #"\d{10}-\d{5}"#
+        if let regex = try? NSRegularExpression(pattern: sessionIdPattern, options: []) {
+            let range = NSRange(result.startIndex..., in: result)
+            let matches = regex.matches(in: result, options: [], range: range)
+            for match in matches.reversed() {
+                if let matchRange = Range(match.range, in: result) {
+                    filtered.append("SESSION_ID: \(result[matchRange])")
+                }
+            }
+            result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: "")
+        }
+
+        // Strip any remaining XML-like tags that look internal
+        let genericTagPattern = #"<[a-z_]+:[^>]+>[\s\S]*?</[a-z_]+:[^>]+>"#
+        if let regex = try? NSRegularExpression(pattern: genericTagPattern, options: []) {
+            let range = NSRange(result.startIndex..., in: result)
+            let matches = regex.matches(in: result, options: [], range: range)
+            for match in matches.reversed() {
+                if let matchRange = Range(match.range, in: result) {
+                    filtered.append("INTERNAL_TAG: \(result[matchRange])")
+                }
+            }
+            result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: "")
+        }
+
+        // Clean up any resulting double spaces or empty lines
+        result = result.replacingOccurrences(of: "  +", with: " ", options: .regularExpression)
+        result = result.replacingOccurrences(of: "\n\n\n+", with: "\n\n", options: .regularExpression)
+
+        let filteredContent = filtered.isEmpty ? nil : filtered.joined(separator: "\n---\n")
+        return (result.trimmingCharacters(in: .whitespacesAndNewlines), filteredContent)
+    }
+
     /// Parse Claude's JSON output to extract response text and session ID
+    /// Uses strict validation - does NOT fall back to raw output (which may contain thinking traces)
     private func parseJsonOutput(_ output: String) -> ClaudeInvocationResult {
         // Claude's JSON output format has "result" and "session_id" fields
         guard let data = output.data(using: .utf8) else {
-            return ClaudeInvocationResult(response: output.trimmingCharacters(in: .whitespacesAndNewlines), sessionId: nil)
+            log("Failed to convert output to UTF-8 data", level: .error, component: "ClaudeInvoker")
+            return ClaudeInvocationResult(response: "[Processing error - invalid encoding]", sessionId: nil)
         }
 
         do {
-            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                let response = json["result"] as? String ?? output
-                let sessionId = json["session_id"] as? String
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let result = json["result"] as? String {
+                // Sanitize the response to strip any internal traces
+                let (sanitized, filtered) = sanitizeResponse(result)
+
+                // Log filtered content for debugging (helps diagnose future leaks)
+                if let filteredContent = filtered {
+                    log("Filtered from response:\n\(filteredContent)", level: .debug, component: "ClaudeInvoker")
+                }
+
                 return ClaudeInvocationResult(
-                    response: response.trimmingCharacters(in: .whitespacesAndNewlines),
-                    sessionId: sessionId
+                    response: sanitized,
+                    sessionId: json["session_id"] as? String
                 )
             }
         } catch {
-            log("Failed to parse JSON output: \(error)", level: .warn, component: "ClaudeInvoker")
+            log("JSON parsing failed: \(error)", level: .error, component: "ClaudeInvoker")
         }
 
-        return ClaudeInvocationResult(response: output.trimmingCharacters(in: .whitespacesAndNewlines), sessionId: nil)
+        // CRITICAL: Do NOT fall back to raw output - it may contain thinking traces
+        // Return an error placeholder instead
+        log("No valid 'result' field in JSON output - refusing to return raw output", level: .error, component: "ClaudeInvoker")
+        return ClaudeInvocationResult(response: "[Processing error - please try again]", sessionId: nil)
     }
 
     /// Builds prompt for a batch of messages

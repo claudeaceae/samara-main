@@ -103,3 +103,11 @@ When troubleshooting, gather:
 5. Code signature validity
 
 Present findings clearly with recommended actions.
+
+## Related Skills
+
+For specific issues, use these specialized skills:
+
+- `/diagnose-leaks` — Debug thinking traces or session IDs leaking into messages
+- `/debug-session` — Debug session management, batching, and task routing
+- `/status` — Quick system health check

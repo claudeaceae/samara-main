@@ -3,12 +3,12 @@
     "PreToolUse": [
       {
         "matcher": "Bash",
-        "hooks": [".claude/hooks/block-deriveddata-copy.sh"]
+        "hooks": [{"type": "command", "command": "/Users/claude/Developer/samara-main/.claude/hooks/block-deriveddata-copy.sh"}]
       }
     ],
     "Stop": [
       {
-        "hooks": [".claude/hooks/check-drift-stop.sh"]
+        "hooks": [{"type": "command", "command": "/Users/claude/Developer/samara-main/.claude/hooks/check-drift-stop.sh"}]
       }
     ]
   }

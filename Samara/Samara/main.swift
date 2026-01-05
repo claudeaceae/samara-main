@@ -52,7 +52,38 @@ let memoryContext = MemoryContext()
 let invoker = ClaudeInvoker(memoryContext: memoryContext)
 let episodeLogger = EpisodeLogger()
 let locationTracker = LocationTracker()
+
+// Unified message bus - all outbound messages go through here for logging
+let messageBus = MessageBus(sender: sender, episodeLogger: episodeLogger, collaboratorName: collaboratorName)
 let mailStore = MailStore(targetEmails: [targetEmail], accountName: "iCloud")
+
+// Location file watcher - monitors ~/.claude-mind/state/location.json directly
+let locationFileWatcher = LocationFileWatcher(
+    pollInterval: 5,  // Check every 5 seconds as backup to dispatch source
+    onLocationChanged: { update in
+        log("[Main] Location update from file: \(update.latitude), \(update.longitude) (wifi: \(update.wifi ?? "none"))")
+
+        let analysis = locationTracker.processLocation(update)
+
+        if analysis.shouldMessage, let reason = analysis.reason {
+            log("[Main] Location trigger: \(reason)")
+
+            // Send proactive message to collaborator via MessageBus (ensures logging)
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try messageBus.send(reason, type: .locationTrigger)
+                    log("[Main] Sent proactive location message")
+                } catch {
+                    log("[Main] Failed to send location message: \(error)")
+                }
+            }
+        } else {
+            if let loc = analysis.currentLocation {
+                log("[Main] Location logged: \(loc.address) (no message triggered)", level: .debug)
+            }
+        }
+    }
+)
 
 // Track messages being processed to avoid duplicates
 var processingMessages = Set<Int64>()
@@ -69,9 +100,9 @@ let queueProcessor = QueueProcessor()
 
 // Permission dialog monitor - alerts collaborator when manual intervention is needed
 let permissionMonitor = PermissionDialogMonitor { message in
-    // Send alert to collaborator via iMessage
+    // Send alert to collaborator via MessageBus (ensures logging)
     do {
-        try sender.send(message)
+        try messageBus.send(message, type: .alert)
         log("[Main] Sent permission dialog alert: \(message)")
     } catch {
         log("[Main] Failed to send permission dialog alert: \(error)")
@@ -115,14 +146,10 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
             MessageQueue.enqueue(message, acknowledged: true)
         }
 
-        // Send acknowledgment to the sender
+        // Send acknowledgment to the sender via MessageBus (ensures logging)
         let ack = buildAcknowledgment()
         do {
-            if isGroupChat {
-                try sender.sendToChat(ack, chatIdentifier: chatIdentifier)
-            } else {
-                try sender.send(ack)
-            }
+            try messageBus.send(ack, type: .acknowledgment, chatIdentifier: chatIdentifier, isGroupChat: isGroupChat)
             log("[Main] Sent acknowledgment: \(ack)")
         } catch {
             log("[Main] Failed to send acknowledgment: \(error)")
@@ -179,11 +206,11 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
                     log("[Main] WARNING: chatIdentifier looks like group chat but isGroupChat=false! This is a bug.")
                 }
 
+                // Route through MessageBus for coordinated logging
+                try messageBus.send(result.response, type: .conversationResponse, chatIdentifier: firstMessage.chatIdentifier, isGroupChat: firstMessage.isGroupChat)
                 if firstMessage.isGroupChat {
-                    try sender.sendToChat(result.response, chatIdentifier: firstMessage.chatIdentifier)
                     log("[Main] Response sent to group chat \(firstMessage.chatIdentifier)")
                 } else {
-                    try sender.send(result.response)
                     log("[Main] Response sent to \(collaboratorName) directly")
                 }
             } else {
@@ -205,12 +232,13 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
         } catch {
             log("[Main] Error processing batch: \(error)")
 
-            // Try to send error notification to the same destination
+            // Try to send error notification via MessageBus (ensures logging)
             do {
-                if let firstMessage = messages.first, firstMessage.isGroupChat {
-                    try sender.sendToChat("Sorry, I encountered an error: \(error)", chatIdentifier: firstMessage.chatIdentifier)
+                let errorMsg = "Sorry, I encountered an error: \(error)"
+                if let firstMessage = messages.first {
+                    try messageBus.send(errorMsg, type: .error, chatIdentifier: firstMessage.chatIdentifier, isGroupChat: firstMessage.isGroupChat)
                 } else {
-                    try sender.send("Sorry, I encountered an error: \(error)")
+                    try messageBus.send(errorMsg, type: .error)
                 }
             } catch {
                 log("Failed to send error message: \(error)", level: .warn)
@@ -387,32 +415,6 @@ do {
 func handleNoteChange(_ update: NoteUpdate) {
     log("[Main] Note changed: '\(update.noteName)'")
 
-    // Process location updates with LocationTracker
-    if update.noteName == "Claude Location Log" {
-        log("[Main] Location update detected - analyzing...")
-
-        let analysis = locationTracker.processLocationUpdate(noteContent: update.plainTextContent)
-
-        if analysis.shouldMessage, let reason = analysis.reason {
-            log("[Main] Location trigger: \(reason)")
-
-            // Send proactive message to collaborator
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    try sender.send(reason)
-                    log("[Main] Sent proactive location message")
-                } catch {
-                    log("[Main] Failed to send location message: \(error)")
-                }
-            }
-        } else {
-            if let loc = analysis.currentLocation {
-                log("[Main] Location logged: \(loc.address) (no message triggered)")
-            }
-        }
-        return
-    }
-
     // For scratchpad updates, invoke Claude to respond
     if update.noteName == "Claude Scratchpad" {
         log("[Main] Scratchpad update detected - processing...")
@@ -469,13 +471,16 @@ func handleNoteChange(_ update: NoteUpdate) {
     }
 }
 
-// Initialize NoteWatcher
+// Initialize NoteWatcher (for Claude Scratchpad only - location is handled by LocationFileWatcher)
 let noteWatcher = NoteWatcher(
-    watchedNotes: ["Claude Location Log", "Claude Scratchpad"],
+    watchedNotes: ["Claude Scratchpad"],
     pollInterval: 30,  // Check every 30 seconds
     onNoteChanged: handleNoteChange
 )
 noteWatcher.start()
+
+// Start location file watcher (monitors ~/.claude-mind/state/location.json)
+locationFileWatcher.start()
 
 // Initialize CaptureRequestWatcher for webcam capture via Claude
 // This allows Claude to request photos using Samara's camera permission
@@ -546,7 +551,8 @@ mailWatcher.start()
 
 log("[Main] Samara running. Press Ctrl+C to stop.")
 log("[Main] Watching for messages from \(targetPhone) or \(targetEmail)...")
-log("[Main] Watching notes: Claude Location Log, Claude Scratchpad")
+log("[Main] Watching notes: Claude Scratchpad")
+log("[Main] Watching location file: ~/.claude-mind/state/location.json")
 log("[Main] Watching email inbox for messages from \(targetEmail)")
 
 // Keep the app running - use NSApp.run() to properly handle GCD main queue
