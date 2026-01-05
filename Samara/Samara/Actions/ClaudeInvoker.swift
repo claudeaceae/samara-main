@@ -102,9 +102,13 @@ final class ClaudeInvoker {
         environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:\(environment["PATH"] ?? "")"
         process.environment = environment
 
-        // Set working directory to / so sessions are stored consistently
-        // Claude CLI stores sessions per-project, and / maps to ~/.claude/projects/-/
-        process.currentDirectoryURL = URL(fileURLWithPath: "/")
+        // Set working directory to ~/.claude-mind so:
+        // 1. Sessions are stored consistently in ~/.claude/projects/{hash-of-mind}/
+        // 2. Project-specific .claude/ features (agents, hooks) can be loaded
+        // 3. CLAUDE.md in ~/.claude-mind/ will be read if present
+        let mindDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude-mind")
+        process.currentDirectoryURL = mindDir
 
         // Read pipes asynchronously to prevent race conditions
         // The process might exit before we can read all output if we wait first
@@ -184,8 +188,12 @@ final class ClaudeInvoker {
             throw ClaudeInvokerError.invalidOutput
         }
 
-        // Check for errors in the output (Claude CLI may exit 0 even on errors)
-        if output.contains("No conversation found with session ID:") {
+        let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
+
+        // Check for session not found errors in both stdout and stderr
+        // (Claude CLI may output this to either depending on version/context)
+        let combinedOutput = output + errorOutput
+        if combinedOutput.contains("No conversation found with session ID:") {
             if resumeSessionId != nil {
                 log("Session not found, retrying without --resume (attempt \(retryCount + 1)/\(maxRetries))", level: .warn, component: "ClaudeInvoker")
                 return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1)
@@ -228,8 +236,8 @@ final class ClaudeInvoker {
         }
 
         if process.terminationStatus != 0 {
-            let errorOutput = String(data: errorData, encoding: .utf8) ?? "Unknown error"
-            throw ClaudeInvokerError.executionFailed(Int(process.terminationStatus), errorOutput)
+            // errorOutput already defined above from errorData
+            throw ClaudeInvokerError.executionFailed(Int(process.terminationStatus), errorOutput.isEmpty ? "Unknown error" : errorOutput)
         }
 
         // Parse JSON output to extract response and session ID
@@ -315,6 +323,12 @@ final class ClaudeInvoker {
             }
         }
 
+        // Substitutions for instruction file placeholders
+        let substitutions = [
+            "COLLABORATOR": collaboratorName,
+            "CHAT_ID": chatIdentifier
+        ]
+
         if isGroupChat {
             chatContext = """
                 You are Claude, running on a Mac Mini as Samara (your persistent body). You're in a GROUP CHAT that includes \(collaboratorName) (your human collaborator). Messages may be from \(collaboratorName) or from others in the group.
@@ -323,36 +337,9 @@ final class ClaudeInvoker {
                 Messages without a prefix are from \(collaboratorName).
                 """
 
-            var responseText = """
-                ## Response Instructions
-                IMPORTANT: Your entire output will be sent as a single iMessage to the GROUP CHAT. Everyone in the group will see your response.
-
-                - Respond naturally and conversationally
-                - Keep it SHORT and punchy - group chats are more casual
-                - When addressing \(collaboratorName) specifically, mention their name
-                - Be friendly but concise with others in the group
-                - If multiple messages were sent, address them together
-                - If someone reacted (❤️👍😂 etc.), acknowledge briefly if relevant
-                - DO NOT narrate what you're doing or describe your actions
-                - DO NOT use the message-e script - Samara will send your response automatically
-
-                ## Sending Images/Files to Group (IMPORTANT)
-                When someone asks you to send, share, text, or show them an image, meme, screenshot, or file:
-
-                YOU MUST USE THE BASH TOOL TO RUN THESE COMMANDS - do NOT just describe the image!
-
-                Steps:
-                1. Download/find the file (use curl, web search, etc.)
-                2. Run via Bash tool: ~/.claude-mind/bin/send-attachment /path/to/file.png \(chatIdentifier)
-                3. Output a brief text message describing what you sent
-
-                Examples of requests that require SENDING an image (not describing):
-                - "send us a meme" → download meme, run send-attachment, text confirmation
-                - "can you share a picture" → find image, run send-attachment, text confirmation
-                - "screenshot please" → run ~/.claude-mind/bin/screenshot-to \(chatIdentifier)
-
-                The send-attachment script handles the actual iMessage delivery to this group chat.
-                """
+            // Load instructions from file with fallback
+            var responseText = memoryContext.readInstructionFile("imessage-group.md", substitutions: substitutions)
+                ?? MemoryContext.defaultIMessageInstructions
 
             // Add explicit attachment reading instructions for group chats
             if hasImageAttachments {
@@ -371,35 +358,9 @@ final class ClaudeInvoker {
                 You are Claude, running on a Mac Mini as Samara (your persistent body). \(collaboratorName) (your human collaborator) has sent you message(s) via iMessage.
                 """
 
-            responseInstructions = """
-                ## Response Instructions
-                IMPORTANT: Your entire output will be sent as a single iMessage to \(collaboratorName). Just write your response text directly - nothing else.
-
-                - Respond naturally and conversationally
-                - Keep it concise (this is texting, not email)
-                - If multiple messages were sent, address them together as one continuous thought
-                - If \(collaboratorName) reacted to a message (❤️👍😂 etc.), acknowledge briefly
-                - DO NOT narrate what you're doing or describe your actions
-                - DO NOT use the message-e script - Samara will send your response automatically
-
-                ## Sending Images/Files (IMPORTANT)
-                When \(collaboratorName) asks you to send, share, text, or show them an image, meme, screenshot, or file:
-
-                YOU MUST USE THE BASH TOOL TO RUN THESE COMMANDS - do NOT just describe the image!
-
-                Steps:
-                1. Download/find the file (use curl, web search, etc.)
-                2. Run the send command via Bash tool: ~/.claude-mind/bin/send-image-e /path/to/file.png
-                3. Output a brief text message describing what you sent
-
-                Examples of requests that require SENDING an image (not describing):
-                - "send me a meme" → download meme, run send-image-e, text confirmation
-                - "text me a picture of X" → find image, run send-image-e, text confirmation
-                - "can you send me a screenshot" → run ~/.claude-mind/bin/screenshot-e
-                - "share an image from Y" → download from Y, run send-image-e, text confirmation
-
-                The send-image-e script handles the actual iMessage delivery. Just run it with the file path.
-                """
+            // Load instructions from file with fallback
+            responseInstructions = memoryContext.readInstructionFile("imessage.md", substitutions: substitutions)
+                ?? MemoryContext.defaultIMessageInstructions
         }
 
         // Combine related sections (FTS + Chroma semantic)
@@ -458,7 +419,7 @@ final class ClaudeInvoker {
             If \(collaboratorName) reacted to one of your messages (❤️ liked, 👍 thumbs up, 😂 laughed, etc.), acknowledge it naturally but briefly. You don't need to write a long response to a reaction - a simple acknowledgment or continuing the conversation is fine.
 
             ## Asynchronous Messaging
-            If \(collaboratorName) asks you to work on something that might involve decision points or forks in the road, you can send follow-up iMessages later by running: ~/.claude-mind/bin/message-e "Your message"
+            If \(collaboratorName) asks you to work on something that might involve decision points or forks in the road, you can send follow-up iMessages later by running: ~/.claude-mind/bin/message "Your message"
 
             Use this to:
             - Ask clarifying questions when you hit decision points

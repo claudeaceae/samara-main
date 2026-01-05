@@ -96,7 +96,7 @@ final class Logger {
         log(message, level: .error, component: component)
 
         // Send iMessage alert
-        let alertScript = "\(mindPath)/bin/message-e"
+        let alertScript = "\(mindPath)/bin/message"
         guard FileManager.default.fileExists(atPath: alertScript) else {
             log("Alert script not found at \(alertScript)", level: .warn, component: "Logger")
             return

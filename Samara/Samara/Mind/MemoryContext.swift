@@ -180,6 +180,36 @@ final class MemoryContext {
         return "memory/episodes/\(today).md"
     }
 
+    // MARK: - Instruction File Loading
+
+    /// Reads an instruction file and substitutes placeholders
+    /// - Parameters:
+    ///   - filename: Name of the file in instructions/ directory (e.g., "imessage.md")
+    ///   - substitutions: Dictionary of placeholder -> value pairs (e.g., ["COLLABORATOR": "É"])
+    /// - Returns: File content with placeholders substituted, or nil if file not found
+    func readInstructionFile(_ filename: String, substitutions: [String: String] = [:]) -> String? {
+        guard var content = readFile("instructions/\(filename)") else {
+            return nil
+        }
+
+        // Apply substitutions for placeholders like {{COLLABORATOR}}
+        for (placeholder, value) in substitutions {
+            content = content.replacingOccurrences(of: "{{\(placeholder)}}", with: value)
+        }
+
+        return content
+    }
+
+    /// Default iMessage instructions as fallback if file loading fails
+    static let defaultIMessageInstructions = """
+        ## Response Instructions
+        Your entire output will be sent as an iMessage. Respond naturally and concisely.
+        - Keep responses brief (this is texting)
+        - DO NOT narrate actions or use the message script
+        - To send images: ~/.claude-mind/bin/send-image /path/to/file
+        - To take photos: ~/.claude-mind/bin/look -s
+        """
+
     /// Builds location awareness summary from state files
     private func buildLocationSummary() -> String? {
         var lines: [String] = []

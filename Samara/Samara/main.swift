@@ -477,6 +477,12 @@ let noteWatcher = NoteWatcher(
 )
 noteWatcher.start()
 
+// Initialize CaptureRequestWatcher for webcam capture via Claude
+// This allows Claude to request photos using Samara's camera permission
+let captureWatcher = CaptureRequestWatcher()
+captureWatcher.start()
+log("[Main] Capture request watcher started")
+
 // Email handler - invokes Claude for emails from collaborator
 func handleEmail(_ email: Email) {
     log("[Main] Processing email from \(email.sender): \(email.subject)")
@@ -499,7 +505,7 @@ func handleEmail(_ email: Email) {
                 ## Instructions
                 - Respond to the email content
                 - Be conversational but appropriate for email
-                - If they ask you to text them, send an iMessage using the message-e script
+                - If they ask you to text them, send an iMessage using the message script
                 - You can reply via email using osascript to send through Mail.app
 
                 To reply via email:
@@ -512,7 +518,7 @@ func handleEmail(_ email: Email) {
                 end tell'
 
                 To also text \(collaboratorName):
-                ~/.claude-mind/bin/message-e "Your message here"
+                ~/.claude-mind/bin/message "Your message here"
                 """
 
             let result = try invoker.invoke(prompt: prompt, context: context, attachmentPaths: [])
