@@ -130,56 +130,67 @@ done
    - Shows drift report
    - Can be run from wake cycles
 
-## Recommendations
+## Implementation Status (2026-01-05)
 
-### 1. Create `sync-organism` Script
+All recommendations have been implemented:
 
-A script that:
-- Syncs scripts: repo ↔ runtime (with diff review)
-- Validates symlinks for skills
-- Rebuilds Samara if source changed
-- Reports any drift
+### ✅ 1. Created `sync-organism` Script
 
-### 2. Add Drift Check to Wake Cycle
+Located at `scripts/sync-organism`. Detects drift and reports:
+- Samara.app signing verification (correct Team ID)
+- Skills symlink status
+- Script differences between repo and runtime
+- Samara source vs. installed app
 
-During wake cycles, detect and warn about drift:
-```bash
-# In wake script
-if [ "$(diff -q ~/Developer/samara-main/scripts/wake ~/.claude-mind/bin/wake)" ]; then
-    echo "WARNING: wake script has drifted from repo"
-fi
-```
+### ✅ 2. Added Drift Check to Wake Cycle
 
-### 3. Document Expected Divergence
+Every wake cycle now runs `sync-organism --check` and injects a warning into Claude's prompt if drift is detected. See `scripts/wake` lines 87-100.
 
-Some files SHOULD diverge:
-- `config.json` - Instance-specific
-- `memory/*` - Accumulates per-instance
-- `state/*` - Runtime state
-- `logs/*` - Instance logs
+### ✅ 3. Documented Expected Divergence
 
-Some files should NOT diverge:
+See CLAUDE.md "Keeping the System in Sync" section.
+
+**Should diverge (instance-specific):**
+- `config.json`
+- `memory/*`
+- `state/*`
+- `logs/*`
+
+**Should NOT diverge (now symlinked):**
 - Scripts (`bin/*`)
-- Skills (already symlinked)
-- Samara source code
+- Skills (`.claude/skills/`)
+- Hooks (`.claude/hooks/`)
 
-### 4. Consider Runtime as Submodule
+### ✅ 4. Scripts Now Symlinked
 
-Make `~/.claude-mind/` a git repo that references `samara-main`:
+All 48 scripts are symlinked from runtime to repo:
 ```
-~/.claude-mind/
-├── .git/              # Track instance-specific changes
-├── _samara/           # Submodule → ~/Developer/samara-main/
-├── bin/ → _samara/scripts/
-├── memory/            # Instance data (tracked)
-└── state/             # Runtime state (gitignored)
+~/.claude-mind/bin/wake → ~/Developer/samara-main/scripts/wake
 ```
+
+Use `symlink-scripts --apply` after adding new scripts to repo.
+
+### ✅ 5. Claude Code Hooks
+
+- `PreToolUse` hook blocks dangerous DerivedData copies
+- `Stop` hook warns about drift at session end
 
 ## Conclusion
 
-The separation between repo and runtime is intentional but the sync mechanism is broken. Skills work because they're symlinked. Scripts don't work because they're copied. The fix is to either:
+The separation between repo and runtime is intentional and now properly managed:
 
-1. Symlink scripts like skills, OR
-2. Create robust bidirectional sync tooling
+| Component | Sync Method | Status |
+|-----------|-------------|--------|
+| Skills | Symlinked to repo | ✅ Working |
+| Scripts | Symlinked to repo | ✅ Working (fixed 2026-01-05) |
+| Hooks | Symlinked via `.claude/` | ✅ Working |
+| Samara.app | `update-samara` script | ✅ Working |
+| Memory files | Not synced (intentional) | ✅ Correct |
 
-The camera incident was a symptom of a larger architectural gap. Fixing this prevents future drift.
+The TCC camera permission incident was a symptom of a larger architectural gap. That gap has now been fully addressed through:
+1. Native AVFoundation camera capture in Samara
+2. Symlinked scripts eliminating drift
+3. Automated drift detection in wake cycles
+4. Comprehensive documentation in CLAUDE.md
+
+Future organisms born from this repo will inherit these safeguards.
