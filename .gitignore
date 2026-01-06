@@ -14,9 +14,28 @@ __pycache__/
 xcuserdata/
 *.xcscmblueprint
 DerivedData/
+*.pbxuser
+*.perspectivev3
+*.mode1v3
+*.mode2v3
+
+# Swift Package Manager
+.build/
+.swiftpm/
 
 # Dependencies
 node_modules/
+
+# Editor directories
+.idea/
+.vscode/
+*.swp
+*~
+
+# Environment files
+.env
+.env.*
+!.env.example
 
 # Logs (keep structure, ignore contents)
 *.log
