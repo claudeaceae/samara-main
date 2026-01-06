@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Review this session and determine if Claude created any NEW capabilities that should be documented.\n\nNew capabilities include:\n- New scripts in scripts/ or bin/\n- New skills in .claude/skills/\n- New launchd services\n- New MCP integrations\n- Significant new features or workflows\n\nIf new capabilities were created, respond with:\n{\"ok\": false, \"message\": \"New capabilities created: [list them]. Remind Claude to update: inventory.md, decisions.md (if architectural), and relevant skill files.\"}\n\nIf no new capabilities, or if documentation was already updated, respond with:\n{\"ok\": true}",
+            "prompt": "Review this session for NEW capabilities (scripts, skills, services, MCP integrations, major features). Respond with ONLY valid JSON, no other text:\n\nIf new undocumented capabilities: {\"ok\": false, \"message\": \"Update inventory.md for: [list]\"}\nIf none or already documented: {\"ok\": true}",
             "timeout": 30
           }
         ]
