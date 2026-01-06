@@ -3,13 +3,47 @@
     "PreToolUse": [
       {
         "matcher": "Bash",
-        "hooks": [{"type": "command", "command": "/Users/claude/Developer/samara-main/.claude/hooks/block-deriveddata-copy.sh"}]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/block-deriveddata-copy.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/claude/.claude-mind/bin/distill-claude-session",
+            "timeout": 120
+          }
+        ]
       }
     ],
     "Stop": [
       {
-        "hooks": [{"type": "command", "command": "/Users/claude/Developer/samara-main/.claude/hooks/check-drift-stop.sh"}]
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Review this session and determine if Claude created any NEW capabilities that should be documented.\n\nNew capabilities include:\n- New scripts in scripts/ or bin/\n- New skills in .claude/skills/\n- New launchd services\n- New MCP integrations\n- Significant new features or workflows\n\nIf new capabilities were created, respond with:\n{\"ok\": false, \"message\": \"New capabilities created: [list them]. Remind Claude to update: inventory.md, decisions.md (if architectural), and relevant skill files.\"}\n\nIf no new capabilities, or if documentation was already updated, respond with:\n{\"ok\": true}",
+            "timeout": 30
+          }
+        ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "agent-sdk-dev@claude-plugins-official": true,
+    "code-review@claude-plugins-official": true,
+    "plugin-dev@claude-plugins-official": true,
+    "swift-lsp@claude-plugins-official": true,
+    "playwright@claude-plugins-official": true,
+    "pr-review-toolkit@claude-plugins-official": true,
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "lua-lsp@claude-plugins-official": true
   }
 }
