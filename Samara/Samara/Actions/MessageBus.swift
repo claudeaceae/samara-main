@@ -43,7 +43,7 @@ final class MessageBus {
 
         do {
             // Send the message
-            if let chatId = chatIdentifier, isGroupChat {
+            if let chatId = chatIdentifier {
                 try sender.sendToChat(text, chatIdentifier: chatId)
             } else {
                 try sender.send(text)
@@ -64,7 +64,7 @@ final class MessageBus {
         log("[\(type.rawValue)] Sending attachment: \(fileName)", level: .info, component: "MessageBus")
 
         do {
-            if let chatId = chatIdentifier, isGroupChat {
+            if let chatId = chatIdentifier {
                 try sender.sendAttachmentToChat(filePath: filePath, chatIdentifier: chatId)
             } else {
                 try sender.sendAttachment(filePath: filePath)

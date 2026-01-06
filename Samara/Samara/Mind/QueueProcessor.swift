@@ -1,6 +1,7 @@
 import Foundation
 
-/// Monitors the task lock and processes queued messages when the lock is released
+/// Monitors task locks and processes queued messages when chat-specific locks are released
+/// With per-chat locking, we can process each chat's queue independently
 final class QueueProcessor {
 
     /// Polling interval for checking the lock status
@@ -51,19 +52,57 @@ final class QueueProcessor {
             Thread.sleep(forTimeInterval: pollInterval)
 
             // Check for stale locks and clean them up
-            if TaskLock.isStale() {
-                log("Detected stale lock, releasing...", level: .warn, component: "QueueProcessor")
-                TaskLock.release()
-            }
+            TaskLock.cleanupStaleLocks()
 
-            // If not locked and queue has messages, process them
-            if !TaskLock.isLocked() && !MessageQueue.isEmpty() {
-                processQueue()
+            // Check each chat's queue independently
+            if !MessageQueue.isEmpty() {
+                processQueuePerChat()
             }
         }
     }
 
-    /// Process all queued messages by reinjecting them into the session manager
+    /// Process queued messages per-chat, only processing chats whose locks are free
+    private func processQueuePerChat() {
+        guard let sessionManager = sessionManager else {
+            log("No session manager set, cannot process queue", level: .error, component: "QueueProcessor")
+            return
+        }
+
+        // Get all chats that have queued messages
+        let queuedChats = MessageQueue.queuedChats()
+        if queuedChats.isEmpty { return }
+
+        log("Checking \(queuedChats.count) chat(s) with queued messages", level: .debug, component: "QueueProcessor")
+
+        for chatId in queuedChats {
+            let scope = LockScope.conversation(chatIdentifier: chatId)
+
+            // Only process if THIS chat's lock is free
+            if !TaskLock.isLocked(scope: scope) {
+                log("Chat \(chatId.prefix(12))... is unlocked, processing queued messages", level: .info, component: "QueueProcessor")
+                processQueueForChat(chatId, sessionManager: sessionManager)
+            } else {
+                log("Chat \(chatId.prefix(12))... still locked, skipping", level: .debug, component: "QueueProcessor")
+            }
+        }
+    }
+
+    /// Process queued messages for a specific chat
+    private func processQueueForChat(_ chatIdentifier: String, sessionManager: SessionManager) {
+        let queuedMessages = MessageQueue.dequeue(forChat: chatIdentifier)
+        if queuedMessages.isEmpty { return }
+
+        log("Reinjecting \(queuedMessages.count) message(s) for chat \(chatIdentifier.prefix(12))...", level: .info, component: "QueueProcessor")
+
+        // Reinject messages into session manager
+        // The session manager will handle batching (11-second window)
+        for queued in queuedMessages {
+            let message = queued.message.toMessage()
+            sessionManager.addMessage(message)
+        }
+    }
+
+    /// Legacy: Process all queued messages (for backward compatibility)
     private func processQueue() {
         guard let sessionManager = sessionManager else {
             log("No session manager set, cannot process queue", level: .error, component: "QueueProcessor")

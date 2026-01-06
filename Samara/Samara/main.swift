@@ -136,10 +136,11 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
 
     let chatIdentifier = messages.first?.chatIdentifier ?? ""
     let isGroupChat = messages.first?.isGroupChat ?? false
+    let scope = LockScope.conversation(chatIdentifier: chatIdentifier)
 
-    // Check if Claude is already busy with another task
-    if TaskLock.isLocked() {
-        log("[Main] Claude is busy, queueing \(messages.count) message(s) for chat \(chatIdentifier)")
+    // Check if THIS CHAT is already busy (per-chat locking allows concurrent chats)
+    if TaskLock.isLocked(scope: scope) {
+        log("[Main] This chat is busy, queueing \(messages.count) message(s) for chat \(chatIdentifier)")
 
         // Queue all messages
         for message in messages {
@@ -158,8 +159,8 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
         return  // Don't invoke Claude now - queue processor will handle it
     }
 
-    // Acquire the lock
-    guard TaskLock.acquire(task: "message", chat: chatIdentifier) else {
+    // Acquire the lock for this chat specifically
+    guard TaskLock.acquire(scope: scope, task: "message") else {
         // Race condition - someone else got the lock between check and acquire
         log("[Main] Failed to acquire lock (race condition), queueing messages")
         for message in messages {
@@ -175,10 +176,11 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
         log("[Main] Starting new session")
     }
 
-    // Process in background
+    // Process in background (capture scope for deferred release)
+    let lockScope = scope
     DispatchQueue.global(qos: .userInitiated).async {
         // Always release the lock when done, even on error
-        defer { TaskLock.release() }
+        defer { TaskLock.release(scope: lockScope) }
 
         do {
             // Build context from memory
@@ -346,10 +348,8 @@ permissionMonitor.startMonitoring()
 log("[Main] Permission dialog monitor started")
 
 // Clean up any stale locks from previous crashes
-if TaskLock.isStale() {
-    log("[Main] Found stale lock at startup, releasing...")
-    TaskLock.release()
-}
+TaskLock.cleanupStaleLocks()
+log("[Main] Cleaned up stale locks")
 
 // Message handler - now routes through SessionManager
 func handleMessage(_ message: Message) {
