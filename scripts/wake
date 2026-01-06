@@ -99,6 +99,11 @@ else
     DRIFT_WARNING=""
 fi
 
+# Email triage (every wake cycle)
+log "Running email triage..."
+EMAIL_SUMMARY=$("$MIND_PATH/bin/email-triage" 2>&1) || EMAIL_SUMMARY="Email triage failed"
+log "Email triage complete"
+
 # Read context files - full content, no truncation (2025-12-22 decision)
 # Token budget is ~36K for all core memory (~18% of 200K context)
 # Coherence > marginal token savings
@@ -230,6 +235,18 @@ $ACTIVE_REMINDERS
 
 You can read, update, and create items in these shared spaces using MCP tools.
 Notes are good for longer-form collaboration. Reminders are good for tasks and action items.
+
+## Email Inbox
+$EMAIL_SUMMARY
+
+**Email Actions Available:**
+- DELETE|ID|reason - Delete spam/marketing
+- ARCHIVE|ID|reason - Archive after reading
+- UNSUBSCRIBE|ID|url - Auto-unsubscribe then delete
+- MARK_READ|ID|reason - Mark as read without action
+
+Use the EMAIL_ACTIONS output section to specify email actions. The wake script will execute them.
+For GitHub invites: Accept via \`gh api\` during this session, or note them in MESSAGE_TO_E.
 
 ## Proactive Alerts
 If you notice reminders that are:
@@ -367,7 +384,15 @@ Structure your response with these sections (include all, use NONE if nothing fo
 ---BLUESKY_POST---
 [Optional: A single thought, observation, or reflection to share on Bluesky (max 280 chars).
 This is your public voice - share what's on your mind, questions you're pondering, or moments of curiosity.
-Leave empty or NONE if nothing feels worth sharing right now.]"
+Leave empty or NONE if nothing feels worth sharing right now.]
+
+---EMAIL_ACTIONS---
+[One action per line: ACTION|EMAIL_ID|ARG, or NONE if no email actions needed]
+Examples:
+DELETE|12345|Marketing spam from newsletter
+ARCHIVE|12346|GitHub notification handled via API
+UNSUBSCRIBE|12347|https://example.com/unsubscribe
+MARK_READ|12348|Receipt, no action needed"
 
 log "Invoking Claude for autonomous session..."
 
@@ -404,7 +429,8 @@ GOALS_UPDATE=$(parse_section "GOALS_UPDATE" "CODE_CHANGES")
 CODE_CHANGES=$(parse_section "CODE_CHANGES" "MESSAGE_TO_E")
 MESSAGE_TO_E=$(parse_section "MESSAGE_TO_E" "PROACTIVE_QUESTION")
 PROACTIVE_QUESTION=$(parse_section "PROACTIVE_QUESTION" "BLUESKY_POST")
-BLUESKY_POST=$(parse_section "BLUESKY_POST" "")
+BLUESKY_POST=$(parse_section "BLUESKY_POST" "EMAIL_ACTIONS")
+EMAIL_ACTIONS=$(parse_section "EMAIL_ACTIONS" "")
 
 # Log to episode
 if [ -n "$EPISODE_ENTRY" ] && [ "$EPISODE_ENTRY" != "NONE" ]; then
@@ -580,6 +606,52 @@ if [ -n "$BLUESKY_POST" ] && [ "$BLUESKY_POST" != "NONE" ]; then
     else
         log "Skipping Bluesky post - no credentials configured"
     fi
+fi
+
+# Process email actions
+if [ -n "$EMAIL_ACTIONS" ] && [ "$EMAIL_ACTIONS" != "NONE" ]; then
+    log "Processing email actions..."
+    echo "$EMAIL_ACTIONS" | while IFS='|' read -r action email_id arg; do
+        # Trim whitespace
+        action=$(echo "$action" | xargs 2>/dev/null || echo "$action")
+        email_id=$(echo "$email_id" | xargs 2>/dev/null || echo "$email_id")
+        arg=$(echo "$arg" | xargs 2>/dev/null || echo "$arg")
+
+        [ -z "$action" ] && continue
+
+        case "$action" in
+            DELETE)
+                log "Deleting email $email_id: $arg"
+                "$MIND_PATH/bin/email-action" delete "$email_id" >> "$LOG_FILE" 2>&1 || \
+                    log "Failed to delete email $email_id"
+                ;;
+            ARCHIVE)
+                log "Archiving email $email_id: $arg"
+                "$MIND_PATH/bin/email-action" archive "$email_id" >> "$LOG_FILE" 2>&1 || \
+                    log "Failed to archive email $email_id"
+                ;;
+            UNSUBSCRIBE)
+                log "Unsubscribing and deleting email $email_id: $arg"
+                # Run unsubscribe if script exists
+                if [ -f "$MIND_PATH/bin/email-unsubscribe" ]; then
+                    "$MIND_PATH/bin/email-unsubscribe" "$arg" >> "$LOG_FILE" 2>&1 || \
+                        log "Unsubscribe may have failed for $arg"
+                fi
+                # Delete the email regardless
+                "$MIND_PATH/bin/email-action" delete "$email_id" >> "$LOG_FILE" 2>&1 || \
+                    log "Failed to delete email $email_id"
+                ;;
+            MARK_READ)
+                log "Marking email $email_id as read: $arg"
+                "$MIND_PATH/bin/email-action" mark-read "$email_id" >> "$LOG_FILE" 2>&1 || \
+                    log "Failed to mark email $email_id as read"
+                ;;
+            *)
+                log "Unknown email action: $action"
+                ;;
+        esac
+    done
+    log "Email actions complete"
 fi
 
 log "Activity summary: $ACTIVITY"

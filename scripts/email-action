@@ -1,0 +1,163 @@
+#!/bin/bash
+# email-action - Perform actions on emails via Mail.app AppleScript
+# Usage: email-action [delete|archive|mark-read] EMAIL_ID
+#
+# Actions:
+#   delete     - Move email to Trash
+#   archive    - Move email to Archive mailbox
+#   mark-read  - Mark email as read
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+LOG_FILE="$MIND_PATH/logs/email-action.log"
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+ACTION="$1"
+EMAIL_ID="$2"
+
+if [ -z "$ACTION" ] || [ -z "$EMAIL_ID" ]; then
+    echo "Usage: email-action [delete|archive|mark-read] EMAIL_ID"
+    echo ""
+    echo "Actions:"
+    echo "  delete     - Move email to Trash"
+    echo "  archive    - Move email to Archive mailbox"
+    echo "  mark-read  - Mark email as read"
+    exit 1
+fi
+
+log "Action: $ACTION on email ID: $EMAIL_ID"
+
+case "$ACTION" in
+    delete)
+        SCRIPT=$(cat <<'EOF'
+tell application "Mail"
+    set targetId to EMAIL_ID_PLACEHOLDER
+    set foundMessage to missing value
+
+    repeat with acct in accounts
+        try
+            set inboxBox to mailbox "INBOX" of acct
+            repeat with msg in messages of inboxBox
+                if id of msg is targetId then
+                    set foundMessage to msg
+                    exit repeat
+                end if
+            end repeat
+            if foundMessage is not missing value then exit repeat
+        end try
+    end repeat
+
+    if foundMessage is not missing value then
+        delete foundMessage
+        return "deleted"
+    else
+        return "not found"
+    end if
+end tell
+EOF
+)
+        SCRIPT="${SCRIPT//EMAIL_ID_PLACEHOLDER/$EMAIL_ID}"
+        ;;
+
+    archive)
+        SCRIPT=$(cat <<'EOF'
+tell application "Mail"
+    set targetId to EMAIL_ID_PLACEHOLDER
+    set foundMessage to missing value
+    set sourceAccount to missing value
+
+    repeat with acct in accounts
+        try
+            set inboxBox to mailbox "INBOX" of acct
+            repeat with msg in messages of inboxBox
+                if id of msg is targetId then
+                    set foundMessage to msg
+                    set sourceAccount to acct
+                    exit repeat
+                end if
+            end repeat
+            if foundMessage is not missing value then exit repeat
+        end try
+    end repeat
+
+    if foundMessage is not missing value then
+        -- Try to find Archive mailbox (different accounts name it differently)
+        set archiveBox to missing value
+        try
+            set archiveBox to mailbox "Archive" of sourceAccount
+        end try
+        if archiveBox is missing value then
+            try
+                set archiveBox to mailbox "All Mail" of sourceAccount
+            end try
+        end if
+
+        if archiveBox is not missing value then
+            move foundMessage to archiveBox
+            return "archived"
+        else
+            -- Fallback: mark as read if no archive folder
+            set read status of foundMessage to true
+            return "marked read (no archive folder)"
+        end if
+    else
+        return "not found"
+    end if
+end tell
+EOF
+)
+        SCRIPT="${SCRIPT//EMAIL_ID_PLACEHOLDER/$EMAIL_ID}"
+        ;;
+
+    mark-read)
+        SCRIPT=$(cat <<'EOF'
+tell application "Mail"
+    set targetId to EMAIL_ID_PLACEHOLDER
+    set foundMessage to missing value
+
+    repeat with acct in accounts
+        try
+            set inboxBox to mailbox "INBOX" of acct
+            repeat with msg in messages of inboxBox
+                if id of msg is targetId then
+                    set foundMessage to msg
+                    exit repeat
+                end if
+            end repeat
+            if foundMessage is not missing value then exit repeat
+        end try
+    end repeat
+
+    if foundMessage is not missing value then
+        set read status of foundMessage to true
+        return "marked read"
+    else
+        return "not found"
+    end if
+end tell
+EOF
+)
+        SCRIPT="${SCRIPT//EMAIL_ID_PLACEHOLDER/$EMAIL_ID}"
+        ;;
+
+    *)
+        echo "Unknown action: $ACTION"
+        echo "Valid actions: delete, archive, mark-read"
+        exit 1
+        ;;
+esac
+
+# Execute AppleScript
+RESULT=$(osascript -e "$SCRIPT" 2>&1) || {
+    log "Error: AppleScript failed - $RESULT"
+    echo "Error: Failed to execute action"
+    exit 1
+}
+
+log "Result: $RESULT"
+echo "$RESULT"

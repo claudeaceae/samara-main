@@ -1,0 +1,100 @@
+#!/bin/bash
+# email-unsubscribe - Auto-unsubscribe from marketing emails via browser automation
+# Usage: email-unsubscribe URL
+#
+# Uses Claude Code with Playwright to navigate and click unsubscribe.
+# For mailto: links, sends an unsubscribe email instead.
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+LOG_FILE="$MIND_PATH/logs/unsubscribe.log"
+CLAUDE="$HOME/.local/bin/claude"
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+URL="$1"
+
+if [ -z "$URL" ]; then
+    echo "Usage: email-unsubscribe URL"
+    echo ""
+    echo "Navigates to the URL and attempts to unsubscribe automatically."
+    echo "For mailto: links, sends an unsubscribe email."
+    exit 1
+fi
+
+log "Starting unsubscribe for: $URL"
+
+# Handle mailto: links
+if [[ "$URL" == mailto:* ]]; then
+    # Extract email address from mailto: link
+    EMAIL=$(echo "$URL" | sed 's/mailto://' | sed 's/?.*//')
+    SUBJECT="Unsubscribe"
+
+    # Try to extract subject from URL if present
+    if [[ "$URL" == *"subject="* ]]; then
+        SUBJECT=$(echo "$URL" | grep -o 'subject=[^&]*' | sed 's/subject=//' | python3 -c "import sys; from urllib.parse import unquote; print(unquote(sys.stdin.read().strip()))")
+    fi
+
+    log "Sending unsubscribe email to: $EMAIL (subject: $SUBJECT)"
+
+    # Send unsubscribe email
+    "$MIND_PATH/bin/send-email" "$SUBJECT" "Please unsubscribe this email address from your mailing list." "$EMAIL"
+
+    if [ $? -eq 0 ]; then
+        log "Unsubscribe email sent successfully"
+        echo "Unsubscribe email sent to $EMAIL"
+    else
+        log "Failed to send unsubscribe email"
+        echo "Failed to send unsubscribe email"
+        exit 1
+    fi
+    exit 0
+fi
+
+# For HTTP/HTTPS URLs, use browser automation
+log "Using browser automation for: $URL"
+
+PROMPT="Navigate to this URL and unsubscribe from the mailing list:
+$URL
+
+Steps:
+1. Navigate to the URL using browser_navigate
+2. Take a snapshot to see the page
+3. Look for an unsubscribe button, checkbox, or confirmation
+4. Click it / select it
+5. If there's a confirmation step, complete it
+6. Report SUCCESS or FAILURE
+
+Important:
+- Some pages unsubscribe immediately on load - check if the page says 'unsubscribed' already
+- Don't fill in email addresses - the link should have that info embedded
+- If you see a 'confirm' or 'yes' button, click it
+- If you see checkboxes to select which lists to unsubscribe from, uncheck/check all as appropriate
+
+Output just: SUCCESS or FAILURE with a brief reason"
+
+RESULT=$("$CLAUDE" -p "$PROMPT" \
+    --dangerously-skip-permissions \
+    --max-turns 10 \
+    --output-format text 2>&1) || {
+    log "Browser automation failed: $RESULT"
+    echo "Browser automation failed"
+    exit 1
+}
+
+log "Result: $RESULT"
+
+# Check if successful
+if echo "$RESULT" | grep -qi "success"; then
+    log "Unsubscribe successful"
+    echo "SUCCESS"
+    exit 0
+else
+    log "Unsubscribe may have failed: $RESULT"
+    echo "Unsubscribe result unclear - check logs"
+    exit 1
+fi

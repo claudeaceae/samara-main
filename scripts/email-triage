@@ -1,0 +1,280 @@
+#!/bin/bash
+# email-triage - Fetch all unread emails, categorize, output summary for wake cycle
+# Outputs structured markdown summary suitable for Claude prompt injection
+#
+# Categories:
+#   - Actionable: Invites, direct correspondence, support tickets
+#   - GitHub: Notifications (org invites highlighted)
+#   - Marketing/Spam: Has unsubscribe link - candidate for removal
+#   - Informational: Receipts, shipping, transactional
+
+set -e
+
+MIND_PATH="$HOME/.claude-mind"
+LOG_FILE="$MIND_PATH/logs/email-triage.log"
+STATE_FILE="$MIND_PATH/state/email-seen-ids.json"
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+log "Starting email triage..."
+
+# Ensure state directory exists
+mkdir -p "$(dirname "$STATE_FILE")"
+
+# Fetch emails and categorize using Python
+python3 << 'PYEOF'
+import json
+import os
+import subprocess
+import sys
+import re
+from datetime import datetime
+from html import unescape
+
+home = os.environ.get('HOME', os.path.expanduser('~'))
+state_file = f"{home}/.claude-mind/state/email-seen-ids.json"
+log_file = f"{home}/.claude-mind/logs/email-triage.log"
+
+def log(msg):
+    with open(log_file, 'a') as f:
+        f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+
+# Load seen IDs state
+try:
+    with open(state_file) as f:
+        state = json.load(f)
+except:
+    state = {"seen_ids": [], "last_triage": None}
+
+seen_ids = set(state.get("seen_ids", []))
+
+# AppleScript to fetch ALL unread emails with source (for unsubscribe links)
+# Using ASCII 31 (unit separator) and ASCII 30 (record separator) for parsing
+applescript = '''
+tell application "Mail"
+    set results to ""
+    set sep to ASCII character 31
+    set rsep to ASCII character 30
+
+    repeat with acct in accounts
+        try
+            set inboxMsgs to messages of mailbox "INBOX" of acct
+            repeat with m in inboxMsgs
+                try
+                    if read status of m is false then
+                        set msgId to id of m as text
+                        set msgSubject to subject of m
+                        set msgSender to sender of m
+                        set msgDate to date received of m as text
+                        -- Get plain text content (truncated)
+                        set msgContent to content of m
+                        if length of msgContent > 500 then
+                            set msgContent to text 1 thru 500 of msgContent
+                        end if
+                        -- Get raw source for unsubscribe link extraction
+                        set msgSource to ""
+                        try
+                            set rawSource to source of m
+                            -- Extract just the unsubscribe-related parts
+                            if rawSource contains "unsubscribe" or rawSource contains "List-Unsubscribe" then
+                                set msgSource to "HAS_UNSUBSCRIBE"
+                            end if
+                        end try
+                        set results to results & msgId & sep & msgSubject & sep & msgSender & sep & msgDate & sep & msgContent & sep & msgSource & rsep
+                    end if
+                end try
+            end repeat
+        end try
+    end repeat
+    return results
+end tell
+'''
+
+# Run AppleScript with timeout
+try:
+    result = subprocess.run(
+        ['osascript', '-e', applescript],
+        capture_output=True, text=True, timeout=60
+    )
+    raw_output = result.stdout.strip()
+except subprocess.TimeoutExpired:
+    log("AppleScript timeout - Mail.app may be unresponsive")
+    print("**Email triage failed**: Mail.app timeout")
+    sys.exit(0)
+except Exception as e:
+    log(f"AppleScript error: {e}")
+    print("**Email triage failed**: Could not access Mail.app")
+    sys.exit(0)
+
+if not raw_output:
+    print("**No unread emails**")
+    sys.exit(0)
+
+# Parse emails
+emails = []
+for record in raw_output.split(chr(30)):
+    if not record.strip():
+        continue
+    fields = record.split(chr(31))
+    if len(fields) >= 5:
+        email_id = fields[0].strip()
+        # Skip if we've seen this email before
+        if email_id in seen_ids:
+            continue
+
+        emails.append({
+            'id': email_id,
+            'subject': fields[1].strip(),
+            'sender': fields[2].strip(),
+            'date': fields[3].strip(),
+            'content': fields[4].strip()[:300],  # Truncate for prompt
+            'has_unsubscribe': len(fields) > 5 and fields[5].strip() == 'HAS_UNSUBSCRIBE'
+        })
+        seen_ids.add(email_id)
+
+if not emails:
+    print("**No new unread emails**")
+    # Still save state
+    state["seen_ids"] = list(seen_ids)[-500:]  # Prune to last 500
+    state["last_triage"] = datetime.now().isoformat()
+    with open(state_file, 'w') as f:
+        json.dump(state, f, indent=2)
+    sys.exit(0)
+
+# Categorize emails
+def categorize(email):
+    sender = email['sender'].lower()
+    subject = email['subject'].lower()
+    content = email['content'].lower()
+
+    # GitHub
+    if 'github.com' in sender or '@github.com' in sender:
+        if 'invite' in subject or 'invitation' in subject or 'join' in subject:
+            return 'github_invite'  # Special - needs action
+        return 'github'
+
+    # Direct correspondence (personal)
+    # Check for reply indicators or known personal domains
+    if subject.startswith('re:') or subject.startswith('fwd:'):
+        return 'actionable'
+
+    # Marketing/Spam - has unsubscribe link
+    if email['has_unsubscribe']:
+        # Check for common marketing patterns
+        marketing_patterns = [
+            'newsletter', 'digest', 'weekly', 'daily', 'update',
+            'sale', 'offer', 'discount', 'promo', '%off',
+            'unsubscribe', 'email preferences', 'opt out'
+        ]
+        if any(p in subject or p in content for p in marketing_patterns):
+            return 'marketing'
+        # If it has unsubscribe but doesn't look like marketing, still flag it
+        return 'marketing'
+
+    # Transactional/Informational
+    transactional_senders = [
+        'noreply', 'no-reply', 'donotreply', 'notification',
+        'amazon', 'paypal', 'venmo', 'apple', 'google',
+        'receipt', 'order', 'shipping', 'delivery', 'tracking'
+    ]
+    if any(t in sender for t in transactional_senders):
+        return 'informational'
+
+    # Security/Important
+    security_keywords = ['security', 'password', 'verification', 'confirm', 'unusual activity']
+    if any(k in subject for k in security_keywords):
+        return 'actionable'
+
+    # Default to actionable (be conservative)
+    return 'actionable'
+
+# Group by category
+categorized = {
+    'github_invite': [],
+    'actionable': [],
+    'github': [],
+    'informational': [],
+    'marketing': []
+}
+
+for email in emails:
+    cat = categorize(email)
+    categorized[cat].append(email)
+
+# Build output summary
+output = []
+total = len(emails)
+output.append(f"**Unread Emails:** {total} new\n")
+
+# GitHub invites - highest priority
+if categorized['github_invite']:
+    output.append("### GitHub Invitations (ACTION NEEDED)")
+    for e in categorized['github_invite']:
+        output.append(f"- [ID:{e['id']}] From: {e['sender']}")
+        output.append(f"  Subject: {e['subject']}")
+    output.append("")
+
+# Actionable
+if categorized['actionable']:
+    output.append(f"### Actionable ({len(categorized['actionable'])})")
+    for e in categorized['actionable']:
+        output.append(f"- [ID:{e['id']}] From: {e['sender']}")
+        output.append(f"  Subject: {e['subject']}")
+    output.append("")
+
+# GitHub notifications (non-invite)
+if categorized['github']:
+    output.append(f"### GitHub Notifications ({len(categorized['github'])})")
+    output.append("(Consider using GitHub API instead of email for these)")
+    for e in categorized['github'][:5]:  # Limit display
+        output.append(f"- [ID:{e['id']}] {e['subject'][:60]}")
+    if len(categorized['github']) > 5:
+        output.append(f"- ... and {len(categorized['github']) - 5} more")
+    output.append("")
+
+# Marketing/Spam - candidates for unsubscribe
+if categorized['marketing']:
+    output.append(f"### Marketing/Spam - Unsubscribe Candidates ({len(categorized['marketing'])})")
+    for e in categorized['marketing']:
+        output.append(f"- [ID:{e['id']}] From: {e['sender']}")
+        output.append(f"  Subject: {e['subject'][:50]}")
+    output.append("")
+
+# Informational
+if categorized['informational']:
+    output.append(f"### Informational ({len(categorized['informational'])})")
+    for e in categorized['informational'][:3]:  # Limit
+        output.append(f"- [ID:{e['id']}] {e['sender']}: {e['subject'][:40]}")
+    if len(categorized['informational']) > 3:
+        output.append(f"- ... and {len(categorized['informational']) - 3} more")
+    output.append("")
+
+# Suggested actions
+output.append("### Suggested Actions")
+if categorized['github_invite']:
+    output.append("- **GitHub invites**: Accept via `gh api` or respond via email")
+if categorized['marketing']:
+    output.append(f"- **Marketing ({len(categorized['marketing'])})**: UNSUBSCRIBE and DELETE")
+if categorized['github']:
+    output.append(f"- **GitHub notifications**: ARCHIVE (handled via API)")
+if categorized['informational']:
+    output.append(f"- **Informational**: ARCHIVE after noting any important info")
+
+print('\n'.join(output))
+
+# Save state
+state["seen_ids"] = list(seen_ids)[-500:]  # Prune to last 500
+state["last_triage"] = datetime.now().isoformat()
+try:
+    with open(state_file, 'w') as f:
+        json.dump(state, f, indent=2)
+except Exception as e:
+    log(f"Failed to save state: {e}")
+
+log(f"Triage complete: {total} emails processed")
+PYEOF
+
+log "Email triage complete"
