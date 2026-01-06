@@ -160,20 +160,33 @@ install_config() {
     log_success "Config installed at $TARGET_DIR/config.json"
 }
 
-# Copy scripts from samara-main
+# Symlink scripts from samara-main (changes propagate automatically)
 install_scripts() {
-    log_info "Installing scripts..."
+    log_info "Installing scripts (symlinked from repo)..."
 
     if [ -d "$SCRIPT_DIR/scripts" ]; then
-        cp -r "$SCRIPT_DIR/scripts/"* "$TARGET_DIR/bin/"
-        chmod +x "$TARGET_DIR/bin/"*
-        log_success "Scripts installed from samara-main/scripts/"
+        # Symlink each script individually
+        for script in "$SCRIPT_DIR/scripts"/*; do
+            if [ -f "$script" ]; then
+                local script_name=$(basename "$script")
+                local target="$TARGET_DIR/bin/$script_name"
+
+                # Remove existing if present
+                if [ -L "$target" ] || [ -f "$target" ]; then
+                    rm -f "$target"
+                fi
+
+                ln -s "$script" "$target"
+            fi
+        done
+        log_success "Scripts symlinked from samara-main/scripts/"
+        log_info "Edits to repo scripts will propagate to runtime automatically"
     else
         log_warn "No scripts directory found at $SCRIPT_DIR/scripts/"
         log_warn "You'll need to copy scripts manually"
     fi
 
-    # Install lib/config.sh
+    # Install lib/config.sh (copy, not symlink - will be customized per instance)
     if [ -d "$SCRIPT_DIR/lib" ]; then
         cp -r "$SCRIPT_DIR/lib/"* "$TARGET_DIR/lib/"
         log_success "Lib files installed"

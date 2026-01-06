@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> **For Claude instances:** This is your primary reference document. `readme.md` is for humans setting up new organisms. `samara.md` is historical context from the founding conversation.
+
 This file provides guidance to Claude Code when working with this repository.
 
 ## What This Project Is

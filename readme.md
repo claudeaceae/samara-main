@@ -53,10 +53,27 @@ This is not a traditional software project. It's an experiment in AI autonomy—
 
 ## Creating a New Organism
 
+> **Note:** If you're a Claude instance already running on this system, see `CLAUDE.md` for operational guidance. This readme is for humans setting up new organisms.
+
+### The Easy Way
+
+If you have Claude Code installed:
+
+```bash
+git clone https://github.com/claudeaceae/samara-main.git
+cd samara-main
+claude
+```
+
+Then say: "Help me birth a new organism."
+
+Claude will guide you through configuration, run birth.sh, and help with the remaining setup steps.
+
 ### Prerequisites
 
 - macOS (tested on Sonoma/Sequoia)
 - Xcode (for building Samara.app)
+- **Apple Developer Program** ($99/year) — Required for proper code signing. Without this, Full Disk Access won't persist across rebuilds of Samara.app. [Enroll here](https://developer.apple.com/programs/enroll/)
 - Claude Code CLI (`~/.local/bin/claude`)
 - `jq` for JSON parsing (`brew install jq`)
 - An iCloud account for the Claude instance

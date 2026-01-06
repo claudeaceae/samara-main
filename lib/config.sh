@@ -50,6 +50,9 @@ COLLABORATOR_PHONE=$(config_get '.collaborator.phone' '')
 COLLABORATOR_EMAIL=$(config_get '.collaborator.email' '')
 COLLABORATOR_BLUESKY=$(config_get '.collaborator.bluesky' '')
 
+# Derived values for convenience
+COLLABORATOR_NAME_LOWER=$(echo "$COLLABORATOR_NAME" | tr '[:upper:]' '[:lower:]')
+
 # Notes configuration
 NOTE_LOCATION=$(config_get '.notes.location' 'Claude Location Log')
 NOTE_SCRATCHPAD=$(config_get '.notes.scratchpad' 'Claude Scratchpad')
@@ -59,7 +62,7 @@ MAIL_ACCOUNT=$(config_get '.mail.account' 'iCloud')
 
 # Export all variables
 export ENTITY_NAME ENTITY_ICLOUD ENTITY_BLUESKY ENTITY_GITHUB
-export COLLABORATOR_NAME COLLABORATOR_PHONE COLLABORATOR_EMAIL COLLABORATOR_BLUESKY
+export COLLABORATOR_NAME COLLABORATOR_PHONE COLLABORATOR_EMAIL COLLABORATOR_BLUESKY COLLABORATOR_NAME_LOWER
 export NOTE_LOCATION NOTE_SCRATCHPAD
 export MAIL_ACCOUNT
 export CONFIG_FILE CONFIG_AVAILABLE

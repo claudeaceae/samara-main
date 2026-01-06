@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "memory-bridge": {
+      "url": "http://localhost:8765/sse",
+      "description": "Shared memory layer for Claude Desktop/Web integration"
+    }
+  },
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Bash(ls:*)",
+      "Bash(git:*)"
+    ]
+  }
+}
