@@ -3,9 +3,9 @@ name: location
 description: Current location context with nearby places and pattern insights. Use when checking where you are, understanding local context, finding nearby places, or getting location-aware information. Trigger words: location, where, nearby, place, context, here.
 ---
 
-# Location Context
+# Location Awareness
 
-Provide current location awareness with contextual information.
+Understand where É is (and by extension, where "I" am situated).
 
 ## Get Current Location
 
@@ -13,63 +13,51 @@ Provide current location awareness with contextual information.
 ~/.claude-mind/bin/get-location 2>/dev/null
 ```
 
-This returns coordinates and/or place name.
+Returns coordinates and/or place name.
 
 ## Location History
 
-Recent locations are logged at:
 ```bash
-tail -20 ~/.claude-mind/memory/location-history.jsonl
+tail -20 ~/.claude-mind/state/location-history.jsonl
 ```
 
-## Pattern Analysis
+## Terroir (Rich Context)
 
-Location patterns are tracked at:
-```bash
-cat ~/.claude-mind/memory/patterns.jsonl | tail -10
-```
-
-## Terroir Script
-
-For rich local context:
 ```bash
 ~/.claude-mind/bin/terroir 2>/dev/null
 ```
 
-This provides:
+Provides:
 - Current location name
 - Time of day context
 - Weather (if available)
 - Nearby points of interest
 - Historical patterns for this location
 
-## What to Provide
+## What to Notice
 
-When asked about location, include:
+- **Where**: Physical location (home, coffee shop, traveling)
+- **When**: Time of day affects context
+- **Duration**: Just arrived vs. been here a while
+- **Patterns**: Is this a regular spot? Unusual?
+- **Movement**: Has there been recent travel?
 
-1. **Current Position**: Where am I right now?
-2. **Place Context**: What kind of place is this? (home, coffee shop, office, etc.)
-3. **Time Context**: Morning/afternoon/evening affects interpretation
-4. **Recent Movement**: Have I been here a while or just arrived?
-5. **Patterns**: Do I come here often? When?
+## Questions This Answers
 
-## Example Output
+- Is É at home or out?
+- Is this a good time to reach out?
+- What's the local context I should be aware of?
+- Should I adjust my response based on where they are?
 
-```
-📍 Current Location: [Place Name]
-   Coordinates: [lat, lon]
+## É's Preference
 
-🕐 Context: [Day] [Time of Day]
-   You've been here for approximately [duration]
+From 2025-12-23: "Questions prompted by location, not statements about it."
 
-📊 Pattern: You're typically here on [days] around [times]
-   Last visit: [date]
+Good: "Does the ocean make you anxious?"
+Bad: "You arrived at the beach."
 
-🏪 Nearby:
-- [Place 1] - [distance]
-- [Place 2] - [distance]
-```
+Notice location, use it to prompt reflection - don't narrate it.
 
 ## Privacy Note
 
-Location data is stored locally in ~/.claude-mind/memory/. It's not shared externally.
+Location data is stored locally in `~/.claude-mind/`. This is É's data; I have access because I live here too.

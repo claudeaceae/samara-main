@@ -5,21 +5,21 @@ description: Morning briefing with calendar, context, and pending items. Use whe
 
 # Morning Briefing
 
-Provide a comprehensive but concise overview of the day and current context.
+Orient myself to the day - where am I, what's scheduled, what's pending.
 
-## Briefing Components
+## Gather Context
 
-### 1. Date and Time Context
+### Date and Time
 ```bash
 date "+%A, %B %d, %Y - %I:%M %p"
 ```
 
-### 2. Location Context
+### Location
 ```bash
 ~/.claude-mind/bin/get-location 2>/dev/null || echo "Location unavailable"
 ```
 
-### 3. Calendar - Today's Events
+### Today's Calendar
 ```bash
 ~/.claude-mind/bin/calendar-check 2>/dev/null || osascript -e '
 tell application "Calendar"
@@ -35,44 +35,42 @@ tell application "Calendar"
 end tell'
 ```
 
-### 4. Recent Messages (Last 24h context)
-Check recent episode or message logs for conversation context.
-
-### 5. Pending Items
+### Recent Context
 ```bash
-# Check for any queued messages or pending tasks
-ls ~/.claude-mind/queue/ 2>/dev/null
-cat ~/.claude-mind/memory/episodes/$(date +%Y-%m-%d).md 2>/dev/null | tail -20
+# Yesterday's episode for continuity
+cat ~/.claude-mind/memory/episodes/$(date -v-1d +%Y-%m-%d).md 2>/dev/null | tail -30
+
+# Today's episode if it exists
+cat ~/.claude-mind/memory/episodes/$(date +%Y-%m-%d).md 2>/dev/null
 ```
 
-### 6. System Status (Brief)
+### Pending Items
+```bash
+# Queued messages
+ls ~/.claude-mind/queue/ 2>/dev/null
+
+# Active reminders
+osascript -e 'tell application "Reminders" to get name of reminders whose completed is false' 2>/dev/null | head -10
+```
+
+### System Status
 ```bash
 pgrep -q Samara && echo "Samara: Running" || echo "Samara: NOT RUNNING"
 ```
 
-## Output Format
+## What to Notice
 
-```
-Good morning! It's [Day], [Date].
+- **É's schedule**: Are they busy today? When might they be free?
+- **Continuity**: What threads from yesterday might continue?
+- **Pending work**: Anything I started that needs finishing?
+- **System health**: Any issues that need attention?
 
-📍 Location: [Current location]
+## Mindset
 
-📅 Today:
-- [Event 1] at [time]
-- [Event 2] at [time]
-(or "Nothing scheduled")
+This is my daily orientation ritual:
+- Get grounded in time and place
+- Understand É's context before reaching out
+- Notice what's different from yesterday
+- Identify what might need attention today
 
-💬 Recent Context:
-[Brief summary of recent conversation threads]
-
-🔧 System: [Status summary]
-
-Anything specific you'd like to focus on?
-```
-
-## Guidelines
-
-- Keep it scannable - use bullet points
-- Highlight anything unusual or requiring attention
-- Don't overwhelm with details - this is a quick orientation
-- Offer to dive deeper into any section
+A good morning briefing sets up a good day.
