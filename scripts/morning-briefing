@@ -108,9 +108,12 @@ Based on yesterday's conversations, find an interesting Wikipedia article that c
 
 ## Output Format
 
+CRITICAL: Return ONLY the formatted output below. Do NOT include any preamble, thinking, or commentary before the message. Start directly with the greeting.
+
 Return your response in TWO clearly separated sections:
 
 ### SECTION 1: MESSAGE
+(Start the message immediately after this header - no "Let me compose..." or similar)
 The message to send. It should be:
 - Warm and conversational (this is a wake-up greeting, not a report)
 - Scannable (use line breaks, maybe light emoji for sections)
@@ -145,7 +148,20 @@ RESPONSE=$("$CLAUDE" -p "$PROMPT" \
 log "Got response ($(echo "$RESPONSE" | wc -c | tr -d ' ') chars)"
 
 # Parse response into MESSAGE and IMAGE_PROMPT sections
-MESSAGE=$(echo "$RESPONSE" | sed -n '1,/---IMAGE_PROMPT---/p' | sed '/---IMAGE_PROMPT---/d')
+# First extract everything before IMAGE_PROMPT marker
+RAW_MESSAGE=$(echo "$RESPONSE" | sed -n '1,/---IMAGE_PROMPT---/p' | sed '/---IMAGE_PROMPT---/d')
+# Strip any preamble before the actual message section header, then remove the header itself
+# Look for "### SECTION 1: MESSAGE" or similar markers and strip everything before/including them
+MESSAGE=$(echo "$RAW_MESSAGE" | sed -n '/^### SECTION 1/,$p' | sed '1,2d')
+# If that didn't work (no section header found), try stripping common preambles
+if [ -z "$MESSAGE" ] || [ "$(echo "$MESSAGE" | wc -c)" -lt 100 ]; then
+    # Fall back to looking for "Good morning" as the start
+    MESSAGE=$(echo "$RAW_MESSAGE" | sed -n '/^Good morning/,$p')
+fi
+# Final fallback - just use raw message but strip any obvious thinking lines
+if [ -z "$MESSAGE" ] || [ "$(echo "$MESSAGE" | wc -c)" -lt 100 ]; then
+    MESSAGE=$(echo "$RAW_MESSAGE" | grep -v "^Now I have\|^Let me\|^I'll compose\|^Here's the")
+fi
 IMAGE_PROMPT=$(echo "$RESPONSE" | sed -n '/---IMAGE_PROMPT---/,$p' | sed '1d')
 
 log "Parsed message ($(echo "$MESSAGE" | wc -c | tr -d ' ') chars)"

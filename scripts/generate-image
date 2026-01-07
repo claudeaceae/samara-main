@@ -17,7 +17,14 @@ ASPECT=""
 RESOLUTION=""
 WITH_TEXT=false
 REFERENCE_IMAGES=()
-API_KEY="AIzaSyBBlskop31xuzQq0oJOxtjSudvoI4QcLqs"
+# Load API key from local credentials (not in repo)
+CREDENTIALS_FILE="$HOME/.claude-mind/credentials/gemini.txt"
+if [ -f "$CREDENTIALS_FILE" ]; then
+    API_KEY=$(cat "$CREDENTIALS_FILE" | tr -d '[:space:]')
+else
+    echo "Error: Gemini API key not found at $CREDENTIALS_FILE" >&2
+    exit 1
+fi
 
 # Parse arguments
 PROMPT=""

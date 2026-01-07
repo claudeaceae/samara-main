@@ -24,6 +24,8 @@ final class LocationTracker {
         let longitude: Double
         let address: String
         let altitude: Double?
+        let speed: Double?
+        let motion: [String]
 
         /// Distance in meters to another location
         func distance(to other: LocationEntry) -> Double {
@@ -173,6 +175,18 @@ final class LocationTracker {
     /// Minimum time between proactive messages (1 hour)
     private let messageCooldown: TimeInterval = 60 * 60
 
+    /// Data age threshold for adding staleness qualifier to messages (2 minutes)
+    private let stalenessQualifierThreshold: TimeInterval = 2 * 60
+
+    /// Data age threshold for suppressing lingering alerts (10 minutes)
+    private let lingeringStalenessThreshold: TimeInterval = 10 * 60
+
+    /// Data age threshold for suppressing stationary alerts (15 minutes)
+    private let stationaryStalenessThreshold: TimeInterval = 15 * 60
+
+    /// Speed threshold for considering user "moving" (1 m/s ≈ 2.2 mph)
+    private let movingSpeedThreshold: Double = 1.0
+
     // MARK: - State
 
     private var lastMessageTime: Date?
@@ -240,8 +254,10 @@ final class LocationTracker {
             timestamp: update.timestamp,
             latitude: update.latitude,
             longitude: update.longitude,
-            address: update.wifi ?? "Unknown",  // Use WiFi name as a proxy for location context
-            altitude: update.altitude
+            address: update.wifi.flatMap { $0.isEmpty ? nil : $0 } ?? "somewhere new",
+            altitude: update.altitude,
+            speed: update.speed,
+            motion: update.motion
         )
 
         // Store in history
@@ -380,7 +396,9 @@ final class LocationTracker {
             latitude: lat,
             longitude: lon,
             address: address,
-            altitude: altitude
+            altitude: altitude,
+            speed: nil,
+            motion: []
         )
     }
 
@@ -454,18 +472,32 @@ final class LocationTracker {
         // Check 7: Stationary for a long time (but NOT at known places like home)
         // Being at home for extended periods is normal - don't alert about it
         if !isAtKnownPlace(location) {
-            let duration = durationAtCurrentLocation(location)
-            if duration > stationaryAlertThreshold {
-                let hours = Int(duration / 3600)
-                // Only alert once per stationary period
-                if shouldAlertStationary(location, duration: duration) {
-                    lastMessageTime = Date()
-                    return LocationAnalysis(
-                        shouldMessage: true,
-                        reason: "You've been at \(simplifyAddress(location.address)) for \(hours)+ hours. Everything okay?",
-                        currentLocation: location,
-                        triggerType: .stationary
-                    )
+            // Don't alert if data is too stale - we don't know current position
+            let age = dataAge(for: location)
+            if age > stationaryStalenessThreshold {
+                log("Suppressing stationary alert - data is \(Int(age/60)) mins stale", level: .debug, component: "LocationTracker")
+            } else {
+                let duration = durationAtCurrentLocation(location)
+                if duration > stationaryAlertThreshold {
+                    let hours = Int(duration / 3600)
+                    // Only alert once per stationary period
+                    if shouldAlertStationary(location, duration: duration) {
+                        lastMessageTime = Date()
+
+                        // Build message with optional staleness qualifier
+                        var message = "You've been at \(simplifyAddress(location.address)) for \(hours)+ hours"
+                        if let qualifier = stalenessQualifier(for: location) {
+                            message += " \(qualifier)"
+                        }
+                        message += ". Everything okay?"
+
+                        return LocationAnalysis(
+                            shouldMessage: true,
+                            reason: message,
+                            currentLocation: location,
+                            triggerType: .stationary
+                        )
+                    }
                 }
             }
         }
@@ -594,9 +626,17 @@ final class LocationTracker {
 
                 lastTransitAlert = station.name
                 lastMessageTime = Date()
+
+                // Build message with optional staleness qualifier
+                var message = "Near \(station.name)"
+                if let qualifier = stalenessQualifier(for: location) {
+                    message += " \(qualifier)"
+                }
+                message += " — taking the train?"
+
                 return LocationAnalysis(
                     shouldMessage: true,
-                    reason: "Near \(station.name) — taking the train?",
+                    reason: message,
                     currentLocation: location,
                     triggerType: .nearTransit
                 )
@@ -613,15 +653,36 @@ final class LocationTracker {
         // Only check if we're not at a known place
         if isAtKnownPlace(location) { return nil }
 
+        // Don't alert if user is moving - they're not really "lingering"
+        if isMoving(location) {
+            log("Suppressing lingering alert - user is moving", level: .debug, component: "LocationTracker")
+            return nil
+        }
+
+        // Don't alert if data is too stale - we don't know current position
+        let age = dataAge(for: location)
+        if age > lingeringStalenessThreshold {
+            log("Suppressing lingering alert - data is \(Int(age/60)) mins stale", level: .debug, component: "LocationTracker")
+            return nil
+        }
+
         let duration = durationAtCurrentLocation(location)
         if duration > lingeringThreshold {
             // Only alert once per lingering period (use stationary logic)
             if shouldAlertStationary(location, duration: duration) {
                 let minutes = Int(duration / 60)
                 lastMessageTime = Date()
+
+                // Build message with optional staleness qualifier
+                var message = "You've been at \(simplifyAddress(location.address)) for \(minutes) minutes"
+                if let qualifier = stalenessQualifier(for: location) {
+                    message += " \(qualifier)"
+                }
+                message += ". Found a new spot?"
+
                 return LocationAnalysis(
                     shouldMessage: true,
-                    reason: "You've been at \(simplifyAddress(location.address)) for \(minutes) minutes. Found a new spot?",
+                    reason: message,
                     currentLocation: location,
                     triggerType: .lingering
                 )
@@ -775,6 +836,33 @@ final class LocationTracker {
             return parts[0].trimmingCharacters(in: .whitespaces)
         }
         return address
+    }
+
+    // MARK: - Temporal Accuracy Helpers
+
+    /// Calculate how stale the location data is
+    private func dataAge(for location: LocationEntry) -> TimeInterval {
+        return Date().timeIntervalSince(location.timestamp)
+    }
+
+    /// Format staleness qualifier for messages (e.g., "as of 3 mins ago")
+    /// Returns nil if data is fresh enough (< 2 minutes)
+    private func stalenessQualifier(for location: LocationEntry) -> String? {
+        let age = dataAge(for: location)
+        if age < stalenessQualifierThreshold { return nil }
+        let mins = Int(age / 60)
+        return "(as of \(mins) min\(mins == 1 ? "" : "s") ago)"
+    }
+
+    /// Check if user appears to be moving based on speed and motion state
+    private func isMoving(_ location: LocationEntry) -> Bool {
+        // Check speed first
+        if let speed = location.speed, speed > movingSpeedThreshold {
+            return true
+        }
+        // Check motion state
+        let movingStates = ["walking", "running", "cycling", "automotive"]
+        return location.motion.contains { movingStates.contains($0) }
     }
 
     // MARK: - Persistence
