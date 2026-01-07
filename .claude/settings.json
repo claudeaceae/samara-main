@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "prompt",
-            "prompt": "Review this session for NEW capabilities (scripts, skills, services, MCP integrations, major features). Respond with ONLY valid JSON, no other text:\n\nIf new undocumented capabilities: {\"ok\": false, \"message\": \"Update inventory.md for: [list]\"}\nIf none or already documented: {\"ok\": true}",
+            "prompt": "Were any NEW capabilities created this session (new scripts, skills, services, MCP servers)? Answer ONLY with valid JSON:\n{\"ok\": true} if no new capabilities or already documented\n{\"ok\": false, \"message\": \"Document in inventory.md: X, Y\"} if new undocumented capabilities exist",
             "timeout": 30
           }
         ]
