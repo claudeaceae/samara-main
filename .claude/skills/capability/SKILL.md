@@ -1,6 +1,12 @@
 ---
 name: capability
 description: Check if a specific action is possible and what might be blocking it. Use when asking if you can do something, checking permissions, verifying a capability exists, or troubleshooting why something isn't working. Trigger words: can I, capability, able to, permission, possible, how do I.
+context: fork
+allowed-tools:
+  - Bash
+  - Read
+  - Grep
+  - Glob
 ---
 
 # Capability Check

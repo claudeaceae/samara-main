@@ -1,4 +1,5 @@
 import Foundation
+import CoreLocation
 
 /// Tracks É's location over time and provides proactive awareness
 final class LocationTracker {
@@ -249,16 +250,22 @@ final class LocationTracker {
 
     /// Process a location update from the file watcher (primary method)
     func processLocation(_ update: LocationUpdate) -> LocationAnalysis {
+        // Get address: try cache first, then use WiFi name, then coordinates
+        let address = getAddressForLocation(lat: update.latitude, lon: update.longitude, wifi: update.wifi)
+
         // Convert LocationUpdate to LocationEntry
         let location = LocationEntry(
             timestamp: update.timestamp,
             latitude: update.latitude,
             longitude: update.longitude,
-            address: update.wifi.flatMap { $0.isEmpty ? nil : $0 } ?? "somewhere new",
+            address: address,
             altitude: update.altitude,
             speed: update.speed,
             motion: update.motion
         )
+
+        // Trigger async geocoding in background to populate cache for future
+        triggerBackgroundGeocoding(lat: update.latitude, lon: update.longitude)
 
         // Store in history
         appendToHistory(location)
@@ -270,6 +277,47 @@ final class LocationTracker {
         lastKnownLocation = location
 
         return analysis
+    }
+
+    /// Get a human-readable address for coordinates
+    private func getAddressForLocation(lat: Double, lon: Double, wifi: String?) -> String {
+        // First check if we're at a known place
+        for place in places {
+            let distance = LocationTracker.haversineDistance(lat1: lat, lon1: lon, lat2: place.lat, lon2: place.lon)
+            if distance < place.radius {
+                return place.label ?? place.name
+            }
+        }
+
+        // Try geocoder cache (sync)
+        let geocoded = ReverseGeocoder.shared.addressSync(for: lat, longitude: lon)
+        if !geocoded.contains(",") {  // Not a coordinate string
+            return geocoded
+        }
+
+        // Fall back to WiFi name if available and meaningful
+        if let wifi = wifi, !wifi.isEmpty, wifi != "null" {
+            return "near \(wifi)"
+        }
+
+        // Final fallback
+        return geocoded
+    }
+
+    /// Trigger background geocoding to populate cache
+    private func triggerBackgroundGeocoding(lat: Double, lon: Double) {
+        // Don't geocode if we're at a known place
+        for place in places {
+            let distance = LocationTracker.haversineDistance(lat1: lat, lon1: lon, lat2: place.lat, lon2: place.lon)
+            if distance < place.radius {
+                return
+            }
+        }
+
+        // Trigger async geocoding - result will be cached for next time
+        ReverseGeocoder.shared.address(for: lat, longitude: lon) { _ in
+            // Just populating cache, don't need to do anything with result
+        }
     }
 
     /// Process a location update from the note (DEPRECATED - use processLocation instead)

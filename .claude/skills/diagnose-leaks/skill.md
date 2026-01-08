@@ -1,6 +1,11 @@
 ---
 name: diagnose-leaks
 description: Diagnose thinking trace leaks in Samara message output. Use when internal content appears in messages, session IDs leak to users, or thinking blocks become visible. Trigger words: leak, thinking trace, session ID, internal, sanitization, filtered.
+context: fork
+allowed-tools:
+  - Bash
+  - Read
+  - Grep
 ---
 
 # Diagnose Thinking Trace Leaks

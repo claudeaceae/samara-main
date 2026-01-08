@@ -142,18 +142,11 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
     if TaskLock.isLocked(scope: scope) {
         log("[Main] This chat is busy, queueing \(messages.count) message(s) for chat \(chatIdentifier)")
 
-        // Queue all messages
+        // Queue silently - no acknowledgment needed for same-chat scenarios.
+        // Feels more natural: humans don't say "hold on" for every message.
+        // QueueProcessor will pick these up when the current invocation finishes.
         for message in messages {
-            MessageQueue.enqueue(message, acknowledged: true)
-        }
-
-        // Send acknowledgment to the sender via MessageBus (ensures logging)
-        let ack = buildAcknowledgment()
-        do {
-            try messageBus.send(ack, type: .acknowledgment, chatIdentifier: chatIdentifier, isGroupChat: isGroupChat)
-            log("[Main] Sent acknowledgment: \(ack)")
-        } catch {
-            log("[Main] Failed to send acknowledgment: \(error)")
+            MessageQueue.enqueue(message, acknowledged: false)
         }
 
         return  // Don't invoke Claude now - queue processor will handle it

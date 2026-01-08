@@ -1,6 +1,12 @@
 ---
 name: memory
 description: Search through memory files - learnings, decisions, observations, questions, episodes, reflections. Use when looking for past insights, recalling why a decision was made, finding what was learned about a topic, or searching conversation history. Trigger words: memory, remember, recall, search, find, when did, what did I learn, past.
+context: fork
+allowed-tools:
+  - Bash
+  - Read
+  - Grep
+  - Glob
 ---
 
 # Memory Search

@@ -1,6 +1,11 @@
 ---
 name: debug-session
 description: Debug Samara session management, message batching, and task routing. Use when messages are scrambled, batching seems wrong, group chats behave oddly, or concurrent tasks interfere with each other. Trigger words: session, batch, group chat, concurrent, scrambled, task routing.
+context: fork
+allowed-tools:
+  - Bash
+  - Read
+  - Grep
 ---
 
 # Debug Session Management

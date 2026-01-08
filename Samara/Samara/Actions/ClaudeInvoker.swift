@@ -346,11 +346,19 @@ final class ClaudeInvoker {
             }
         } catch {
             log("JSON parsing failed: \(error)", level: .error, component: "ClaudeInvoker")
+            let truncatedOutput = String(output.prefix(500))
+            log("Failed JSON: \(truncatedOutput)...", level: .warn, component: "ClaudeInvoker")
         }
 
         // CRITICAL: Do NOT fall back to raw output - it may contain thinking traces
         // Return an error placeholder instead
         log("No valid 'result' field in JSON output - refusing to return raw output", level: .error, component: "ClaudeInvoker")
+
+        // Log raw output for diagnosis (truncate if very long)
+        let truncatedOutput = String(output.prefix(2000))
+        let wasTruncated = output.count > 2000
+        log("Raw output was: \(truncatedOutput)\(wasTruncated ? "... [truncated]" : "")", level: .warn, component: "ClaudeInvoker")
+
         return ClaudeInvocationResult(response: "[Processing error - please try again]", sessionId: nil)
     }
 

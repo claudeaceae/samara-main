@@ -1,6 +1,11 @@
 ---
 name: email
 description: Check and manage email inbox. Use when checking for unread emails, triaging inbox, handling spam, or managing email actions. Trigger words: email, inbox, mail, unread, messages, spam, unsubscribe.
+context: fork
+allowed-tools:
+  - Bash
+  - Read
+  - WebFetch
 ---
 
 # Email Inbox Management

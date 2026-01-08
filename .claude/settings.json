@@ -27,9 +27,9 @@
       {
         "hooks": [
           {
-            "type": "prompt",
-            "prompt": "Were any NEW capabilities created this session (new scripts, skills, services, MCP servers)? Answer ONLY with valid JSON:\n{\"ok\": true} if no new capabilities or already documented\n{\"ok\": false, \"message\": \"Document in inventory.md: X, Y\"} if new undocumented capabilities exist",
-            "timeout": 30
+            "type": "command",
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/check-new-capabilities.sh",
+            "timeout": 10
           }
         ]
       }

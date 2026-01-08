@@ -1,10 +1,16 @@
+---
+name: sync
+description: Check for drift between repo and running system. Use when checking if scripts or Samara are out of sync, verifying system integrity, or before/after rebuilds. Trigger words: sync, organism sync, check drift, system drift, repo sync.
+context: fork
+allowed-tools:
+  - Bash
+  - Read
+  - Grep
+---
+
 # Sync Skill
 
 Check for drift between the repo and running system, and optionally fix it.
-
----
-trigger: "sync, organism sync, check drift, system drift, repo sync"
----
 
 ## What This Does
 
