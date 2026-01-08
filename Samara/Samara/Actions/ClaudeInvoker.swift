@@ -329,20 +329,51 @@ final class ClaudeInvoker {
         }
 
         do {
-            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let result = json["result"] as? String {
-                // Sanitize the response to strip any internal traces
-                let (sanitized, filtered) = sanitizeResponse(result)
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                // Check for error_during_execution subtype
+                // This happens when Claude Code encounters errors but is_error may still be false
+                if let subtype = json["subtype"] as? String, subtype == "error_during_execution" {
+                    let sessionId = json["session_id"] as? String
 
-                // Log filtered content for debugging (helps diagnose future leaks)
-                if let filteredContent = filtered {
-                    log("Filtered from response:\n\(filteredContent)", level: .debug, component: "ClaudeInvoker")
+                    // Log the errors for debugging
+                    if let errors = json["errors"] as? [String] {
+                        let errorSummary = errors.prefix(3).joined(separator: "; ")
+                        log("error_during_execution with \(errors.count) errors: \(errorSummary)", level: .warn, component: "ClaudeInvoker")
+                    }
+
+                    // Check if there's a result field despite the error
+                    if let result = json["result"] as? String, !result.isEmpty {
+                        let (sanitized, filtered) = sanitizeResponse(result)
+                        if let filteredContent = filtered {
+                            log("Filtered from error response:\n\(filteredContent)", level: .debug, component: "ClaudeInvoker")
+                        }
+                        return ClaudeInvocationResult(response: sanitized, sessionId: sessionId)
+                    }
+
+                    // No result - the session failed to produce output
+                    // This often happens due to tool execution failures or permission issues
+                    log("error_during_execution with no result - session produced no output", level: .error, component: "ClaudeInvoker")
+                    return ClaudeInvocationResult(
+                        response: "[Session error - no response generated. Try again or start a new conversation.]",
+                        sessionId: nil  // Don't preserve bad session
+                    )
                 }
 
-                return ClaudeInvocationResult(
-                    response: sanitized,
-                    sessionId: json["session_id"] as? String
-                )
+                // Normal success case - extract result
+                if let result = json["result"] as? String {
+                    // Sanitize the response to strip any internal traces
+                    let (sanitized, filtered) = sanitizeResponse(result)
+
+                    // Log filtered content for debugging (helps diagnose future leaks)
+                    if let filteredContent = filtered {
+                        log("Filtered from response:\n\(filteredContent)", level: .debug, component: "ClaudeInvoker")
+                    }
+
+                    return ClaudeInvocationResult(
+                        response: sanitized,
+                        sessionId: json["session_id"] as? String
+                    )
+                }
             }
         } catch {
             log("JSON parsing failed: \(error)", level: .error, component: "ClaudeInvoker")

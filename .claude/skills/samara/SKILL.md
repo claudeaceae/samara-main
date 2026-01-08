@@ -8,6 +8,13 @@ allowed-tools:
   - Grep
   - Glob
   - Write
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "/Users/claude/Developer/samara-main/.claude/hooks/block-deriveddata-copy.sh"
+          timeout: 5
 ---
 
 # Samara Debug and Control

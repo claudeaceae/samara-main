@@ -1,6 +1,11 @@
 ---
 name: status
 description: System health check for Samara organism. Use when checking if Samara is running, if messages are being detected, if wake cycles are scheduled, or diagnosing permission issues. Trigger words: status, health, check, running, working, broken.
+context: fork
+allowed-tools:
+  - Bash
+  - Read
+  - Grep
 ---
 
 # System Status Check
