@@ -93,7 +93,12 @@
       "Bash(gh ssh-key add:*)",
       "Bash(gh auth refresh:*)",
       "Bash(gh ssh-key:*)",
-      "Bash(gh config:*)"
+      "Bash(gh config:*)",
+      "Bash(ln:*)",
+      "Bash(~/.claude-mind/bin/sync-organism:*)"
     ]
+  },
+  "enabledPlugins": {
+    "code-simplifier@claude-plugins-official": true
   }
 }
