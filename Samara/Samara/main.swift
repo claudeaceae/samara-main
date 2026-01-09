@@ -57,6 +57,15 @@ let locationTracker = LocationTracker()
 let messageBus = MessageBus(sender: sender, episodeLogger: episodeLogger, collaboratorName: collaboratorName)
 let mailStore = MailStore(targetEmails: [targetEmail], accountName: "iCloud")
 
+// Sense router - handles events from satellite services
+let senseRouter = SenseRouter(
+    invoker: invoker,
+    memoryContext: memoryContext,
+    episodeLogger: episodeLogger,
+    messageBus: messageBus,
+    collaboratorName: collaboratorName
+)
+
 // Location file watcher - monitors ~/.claude-mind/state/location.json directly
 let locationFileWatcher = LocationFileWatcher(
     pollInterval: 5,  // Check every 5 seconds as backup to dispatch source
@@ -176,8 +185,21 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
         defer { TaskLock.release(scope: lockScope) }
 
         do {
-            // Build context from memory
-            let context = memoryContext.buildContext()
+            // Determine if this is a collaborator-only chat (for privacy filtering)
+            let targetHandlesSet = Set([targetPhone, targetEmail])
+            let isCollaboratorChat = messages.allSatisfy { msg in
+                msg.isFromE(targetHandles: targetHandlesSet)
+            } && !(messages.first?.isGroupChat ?? false)
+
+            // Build context from memory (excludes collaborator profile for non-collaborator chats)
+            let context = memoryContext.buildContext(isCollaboratorChat: isCollaboratorChat)
+
+            // Fetch chat info for group chats (name + participants)
+            var chatInfo: ChatInfo? = nil
+            if let firstMessage = messages.first, firstMessage.isGroupChat {
+                chatInfo = store.fetchChatInfo(chatId: firstMessage.chatId)
+                log("[Main] Fetched chat info: name=\(chatInfo?.displayName ?? "none"), participants=\(chatInfo?.participants.count ?? 0)")
+            }
 
             // Invoke Claude with batch
             log("Invoking Claude...")
@@ -185,7 +207,8 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
                 messages: messages,
                 context: context,
                 resumeSessionId: resumeSessionId,
-                targetHandles: Set([targetPhone, targetEmail])
+                targetHandles: Set([targetPhone, targetEmail]),
+                chatInfo: chatInfo
             )
             log("[Main] Got response: \(result.response.prefix(100))...")
 
@@ -481,6 +504,18 @@ let captureWatcher = CaptureRequestWatcher()
 captureWatcher.start()
 log("[Main] Capture request watcher started")
 
+// Initialize SenseDirectoryWatcher for satellite services
+// Watches ~/.claude-mind/senses/ for *.event.json files from satellites
+let senseWatcher = SenseDirectoryWatcher(
+    pollInterval: 5,  // Check every 5 seconds as backup to dispatch source
+    onSenseEvent: { event in
+        log("[Main] Sense event received: \(event.sense) (priority: \(event.priority.rawValue))")
+        senseRouter.route(event)
+    }
+)
+senseWatcher.start()
+log("[Main] Sense directory watcher started")
+
 // Email handler - invokes Claude for emails from collaborator
 func handleEmail(_ email: Email) {
     log("[Main] Processing email from \(email.sender): \(email.subject)")
@@ -547,6 +582,7 @@ log("[Main] Watching for messages from \(targetPhone) or \(targetEmail)...")
 log("[Main] Watching notes: Claude Scratchpad")
 log("[Main] Watching location file: ~/.claude-mind/state/location.json")
 log("[Main] Watching email inbox for messages from \(targetEmail)")
+log("[Main] Watching sense directory: ~/.claude-mind/senses/")
 
 // Keep the app running - use NSApp.run() to properly handle GCD main queue
 app.run()
