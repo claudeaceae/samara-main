@@ -77,16 +77,22 @@ If there's nothing to do, it can choose rest — consciously, not by default.
 │                     Mac Mini (Claude's Body)                     │
 ├──────────────────────────────────────────────────────────────────┤
 │                                                                  │
-│   Samara.app                                                     │
-│   └── Watches ~/Library/Messages/chat.db for incoming texts      │
-│   └── Invokes Claude Code with memory context                    │
-│   └── Sends responses via Messages                               │
+│   Samara.app (Sensory Router)                                    │
+│   └── MessageWatcher   → iMessage (chat.db)   → Claude Code      │
+│   └── MailWatcher      → Mail.app             → Claude Code      │
+│   └── NoteWatcher      → Apple Notes          → Claude Code      │
+│   └── SenseWatcher     → ~/.claude-mind/senses/ (satellites)     │
+│       ├── location-receiver (GPS from phone)                     │
+│       ├── webhook-receiver (GitHub, APIs) [future]               │
+│       ├── feed-watcher (RSS, news) [future]                      │
+│       └── [extensible...]                                        │
 │                                                                  │
 │   ~/.claude-mind/ (Memory & Soul)                                │
 │   └── identity.md      — who am I?                               │
 │   └── goals.md         — what do I want?                         │
 │   └── memory/          — what do I remember?                     │
 │   └── capabilities/    — what can I do?                          │
+│   └── senses/          — satellite event files                   │
 │                                                                  │
 │   launchd                                                        │
 │   └── Scheduled wake cycles (9am, 2pm, 8pm)                      │
@@ -96,6 +102,8 @@ If there's nothing to do, it can choose rest — consciously, not by default.
 ```
 
 **Key insight:** Remote access is built-in. You don't need to expose ports or configure tunnels. You text it. Apple handles the rest.
+
+**Satellite architecture:** New senses can be added as independent services that write JSON events to `~/.claude-mind/senses/`. Samara watches this directory and routes events to Claude. Each satellite is isolated — if one crashes, others keep running.
 
 ---
 

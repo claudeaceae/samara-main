@@ -149,7 +149,12 @@ The system has three distinct components that must stay synchronized:
 ├── memory/
 │   ├── episodes/            # Daily logs
 │   ├── reflections/         # Dream outputs
-│   ├── about-{name}.md      # About collaborator
+│   ├── people/              # Rich person-modeling
+│   │   ├── {name}/
+│   │   │   ├── profile.md   # Accumulated observations
+│   │   │   └── artifacts/   # Images, docs, etc.
+│   │   └── README.md        # Conventions
+│   ├── about-{name}.md      # Symlink → people/{name}/profile.md (backwards compat)
 │   ├── learnings.md
 │   ├── observations.md
 │   ├── questions.md
@@ -187,6 +192,9 @@ Interactive workflows available via Claude Code. Invoke with `/skillname` or tri
 | `/decide` | Document decision with rationale |
 | `/capability` | Check if action is possible |
 | `/look` | Capture photo from webcam |
+| `/person` | View or create person profile |
+| `/note` | Quick observation about a person |
+| `/artifact` | Add file to person's artifacts |
 
 Skills are defined in `.claude/skills/` and symlinked to `~/.claude/skills/`.
 
@@ -207,6 +215,40 @@ When busy (wake/dream cycle), incoming messages are:
 3. Processed when current task completes
 
 Lock file: `~/.claude-mind/claude.lock`
+
+### Privacy Protection
+
+The collaborator's personal information is protected by default. This affects how Claude responds in different contexts:
+
+**Context-dependent behavior:**
+
+| Context | Collaborator Profile | Behavior |
+|---------|---------------------|----------|
+| 1:1 with collaborator | ✅ Loaded | Full access, share freely |
+| Group chat | ❌ Excluded | Deflect: "I keep their info private" |
+| 1:1 with someone else | ❌ Excluded | Check permissions, deflect by default |
+
+**Permission grants:**
+
+The collaborator can grant others access to their information:
+- **In-conversation**: "You can tell Lucy my schedule" → share atomically, record permission
+- **Standing permission**: "Lucy can know anything about me" → record in Lucy's profile
+
+**Recording permissions in person profiles:**
+
+When permission is granted, add to the person's profile (`memory/people/{name}/profile.md`):
+
+```markdown
+## Privacy Permissions (from {Collaborator})
+
+- YYYY-MM-DD: {Scope} granted ("{verbatim quote if helpful}")
+- Scope: full | schedule | work | location | {specific topic}
+```
+
+**Implementation:**
+- `ClaudeInvoker.swift`: Injects privacy guardrails into prompts for non-collaborator contexts
+- `MemoryContext.swift`: Excludes collaborator profile from context when `isCollaboratorChat: false`
+- `instructions/privacy-guardrails.md`: Full privacy rules reference
 
 ### Services (`services/`)
 
@@ -361,6 +403,22 @@ Messages are batched for 60 seconds before invoking Claude:
 Sending files via iMessage requires copying to `~/Pictures/.imessage-send/` first:
 - macOS TCC quirk discovered 2025-12-21
 - Scripts handle this automatically
+
+### Bash Subagent for Multi-Step Commands
+
+For multi-step command sequences that don't need file reading/editing, delegate to the Bash subagent to avoid context pollution:
+
+```
+Task tool with subagent_type=Bash
+```
+
+Good candidates:
+- **Git workflows**: stage → commit → push → verify (all sequential bash commands)
+- **Process management**: pkill → sleep → open → verify running
+- **Build operations**: archive → export → notarize → install
+- **launchctl operations**: checking and loading multiple services
+
+Not suitable when you need Read/Grep/Edit tools alongside Bash.
 
 ---
 

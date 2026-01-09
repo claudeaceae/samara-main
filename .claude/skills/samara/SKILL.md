@@ -50,6 +50,8 @@ sleep 2
 open /Applications/Samara.app
 ```
 
+**Tip:** This sequence is a good candidate for the Bash subagent (Task tool with `subagent_type=Bash`) to avoid polluting context with intermediate steps.
+
 ### Check Full Disk Access
 ```bash
 # This will work if FDA is granted
