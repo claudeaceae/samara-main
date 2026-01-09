@@ -124,7 +124,7 @@ fill_template() {
 create_directories() {
     log_info "Creating directory structure at $TARGET_DIR"
 
-    mkdir -p "$TARGET_DIR"/{memory/episodes,memory/reflections,capabilities,scratch,outbox,bin,lib,logs,credentials,sessions}
+    mkdir -p "$TARGET_DIR"/{memory/episodes,memory/reflections,memory/people,capabilities,scratch,outbox,bin,lib,logs,credentials,sessions,state,senses}
 
     log_success "Directory structure created"
 }
@@ -140,7 +140,21 @@ install_templates() {
 
     # Create empty placeholder files
     local collaborator_lower=$(echo "$COLLABORATOR_NAME" | tr '[:upper:]' '[:lower:]')
-    touch "$TARGET_DIR/memory/about-${collaborator_lower}.md"
+
+    # Create people directory structure for collaborator
+    mkdir -p "$TARGET_DIR/memory/people/${collaborator_lower}/artifacts"
+    echo "# $COLLABORATOR_NAME" > "$TARGET_DIR/memory/people/${collaborator_lower}/profile.md"
+    echo "" >> "$TARGET_DIR/memory/people/${collaborator_lower}/profile.md"
+    echo "<!-- Notes accumulate organically below -->" >> "$TARGET_DIR/memory/people/${collaborator_lower}/profile.md"
+
+    # Copy people README from templates
+    if [ -f "$SCRIPT_DIR/templates/memory/people/README.md" ]; then
+        cp "$SCRIPT_DIR/templates/memory/people/README.md" "$TARGET_DIR/memory/people/"
+    fi
+
+    # Create symlink for backwards compatibility
+    ln -sf "people/${collaborator_lower}/profile.md" "$TARGET_DIR/memory/about-${collaborator_lower}.md"
+
     touch "$TARGET_DIR/memory/learnings.md"
     touch "$TARGET_DIR/memory/observations.md"
     touch "$TARGET_DIR/memory/questions.md"
@@ -336,6 +350,64 @@ EOF
     <string>$TARGET_DIR/logs/dream.log</string>
     <key>StandardErrorPath</key>
     <string>$TARGET_DIR/logs/dream.log</string>
+</dict>
+</plist>
+EOF
+
+    # Bluesky Watcher (every 15 minutes)
+    cat > "$plist_dir/com.claude.bluesky-watcher.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claude.bluesky-watcher</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>$SCRIPT_DIR/services/bluesky-watcher/server.py</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>StandardOutPath</key>
+    <string>$TARGET_DIR/logs/bluesky-watcher.log</string>
+    <key>StandardErrorPath</key>
+    <string>$TARGET_DIR/logs/bluesky-watcher.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>$HOME</string>
+    </dict>
+</dict>
+</plist>
+EOF
+
+    # GitHub Watcher (every 15 minutes)
+    cat > "$plist_dir/com.claude.github-watcher.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claude.github-watcher</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>$SCRIPT_DIR/services/github-watcher/server.py</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>StandardOutPath</key>
+    <string>$TARGET_DIR/logs/github-watcher.log</string>
+    <key>StandardErrorPath</key>
+    <string>$TARGET_DIR/logs/github-watcher.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>$HOME</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+    </dict>
 </dict>
 </plist>
 EOF
