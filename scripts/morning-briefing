@@ -113,7 +113,7 @@ CRITICAL: Return ONLY the formatted output below. Do NOT include any preamble, t
 Return your response in TWO clearly separated sections:
 
 ### SECTION 1: MESSAGE
-(Start the message immediately after this header - no "Let me compose..." or similar)
+(Start the message immediately after this header - no 'Let me compose...' or similar)
 The message to send. It should be:
 - Warm and conversational (this is a wake-up greeting, not a report)
 - Scannable (use line breaks, maybe light emoji for sections)
