@@ -9,11 +9,13 @@ import os
 import math
 
 STATE_DIR = os.path.expanduser("~/.claude-mind/state")
+SENSES_DIR = os.path.expanduser("~/.claude-mind/senses")
 LOCATION_FILE = os.path.join(STATE_DIR, "location.json")
 HISTORY_FILE = os.path.join(STATE_DIR, "location-history.jsonl")
 TRIPS_FILE = os.path.join(STATE_DIR, "trips.jsonl")
 PLACES_FILE = os.path.join(STATE_DIR, "places.json")
 SUBWAY_FILE = os.path.join(STATE_DIR, "subway-stations.json")
+LOCATION_EVENT_FILE = os.path.join(SENSES_DIR, "location.event.json")
 
 # Trip segmentation constants
 STATIONARY_THRESHOLD_M = 50  # Movement less than this = stationary
@@ -294,6 +296,32 @@ class TripSegmenter:
 # Global trip segmenter instance
 trip_segmenter = TripSegmenter()
 
+
+def write_sense_event(event_type: str, data: Dict, priority: str = "normal", suggested_prompt: str = None):
+    """Write a sense event in the canonical format for Samara's SenseDirectoryWatcher."""
+    os.makedirs(SENSES_DIR, exist_ok=True)
+
+    event = {
+        "sense": "location",
+        "timestamp": datetime.now().isoformat(),
+        "priority": priority,
+        "data": {
+            "type": event_type,
+            **data
+        },
+        "auth": {
+            "source_id": "location-receiver"
+        }
+    }
+
+    if suggested_prompt:
+        event["context"] = {
+            "suggested_prompt": suggested_prompt
+        }
+
+    with open(LOCATION_EVENT_FILE, 'w') as f:
+        json.dump(event, f, indent=2)
+
 class LocationHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         content_length = int(self.headers.get('Content-Length', 0))
@@ -346,6 +374,20 @@ class LocationHandler(BaseHTTPRequestHandler):
                         f.write(json.dumps(completed_trip) + '\n')
                     print(f"[TRIP] {completed_trip['start_place']} → {completed_trip['end_place']} "
                           f"({completed_trip['distance_m']}m, {completed_trip['duration_s']}s)")
+
+                    # Write trip completion as a sense event
+                    write_sense_event(
+                        event_type="trip_completed",
+                        data={
+                            "from": completed_trip['start_place'],
+                            "to": completed_trip['end_place'],
+                            "distance_m": completed_trip['distance_m'],
+                            "duration_s": completed_trip['duration_s'],
+                            "mode": completed_trip['mode']
+                        },
+                        priority="normal",
+                        suggested_prompt=f"A trip just completed: {completed_trip['start_place']} → {completed_trip['end_place']} ({completed_trip['distance_m']}m in {completed_trip['duration_s']}s). Consider if this is notable or if any context is relevant."
+                    )
 
                 print(f"[{location_data['timestamp']}] Location: {location_data['lat']}, {location_data['lon']}"
                       + (f" [in trip]" if trip_segmenter.current_trip else ""))

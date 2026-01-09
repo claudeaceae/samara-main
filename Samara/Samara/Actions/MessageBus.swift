@@ -23,6 +23,7 @@ final class MessageBus {
         case error = "Error"                      // Error notifications
         case webcam = "Webcam"                    // Webcam capture sharing
         case webFetch = "WebFetch"                // Web content sharing
+        case senseEvent = "Sense"                 // Satellite sense events
     }
 
     init(sender: MessageSender, episodeLogger: EpisodeLogger, collaboratorName: String) {
