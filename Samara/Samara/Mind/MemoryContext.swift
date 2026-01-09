@@ -27,7 +27,10 @@ final class MemoryContext {
     /// Design principle (2025-12-22): Load full files, no truncation.
     /// Token budget is ~36K for all core memory (~18% of 200K context).
     /// Coherence > marginal token savings. Future scaling via retrieval tools.
-    func buildContext() -> String {
+    ///
+    /// - Parameter isCollaboratorChat: If false, excludes collaborator's personal profile
+    ///   for privacy protection (used in group chats or non-collaborator 1:1s)
+    func buildContext(isCollaboratorChat: Bool = true) -> String {
         var sections: [String] = []
 
         // Identity - full, essential context
@@ -40,12 +43,16 @@ final class MemoryContext {
             sections.append("### Architectural Decisions\n\(decisions)")
         }
 
-        // About collaborator - full, relationship context
-        // Try config-driven filename first, fall back to legacy about-e.md
-        let collaboratorName = config.collaborator.name
-        let aboutFile = "memory/about-\(collaboratorName.lowercased()).md"
-        if let aboutContent = readFile(aboutFile) ?? readFile("memory/about-e.md") {
-            sections.append("### About \(collaboratorName)\n\(aboutContent)")
+        // About collaborator - ONLY include for collaborator chats (privacy protection)
+        // Try new people/ structure first, fall back to legacy about-{name}.md
+        if isCollaboratorChat {
+            let collaboratorName = config.collaborator.name
+            let collaboratorLower = collaboratorName.lowercased()
+            let peopleFile = "memory/people/\(collaboratorLower)/profile.md"
+            let legacyFile = "memory/about-\(collaboratorLower).md"
+            if let aboutContent = readFile(peopleFile) ?? readFile(legacyFile) ?? readFile("memory/about-e.md") {
+                sections.append("### About \(collaboratorName)\n\(aboutContent)")
+            }
         }
 
         // Goals - full
@@ -90,6 +97,38 @@ final class MemoryContext {
         }
 
         return sections.joined(separator: "\n\n")
+    }
+
+    /// Loads profiles for specified handles (phone/email) to check permissions
+    /// Returns a formatted string with relevant person profiles
+    func loadParticipantProfiles(handles: [String]) -> String? {
+        var profiles: [String] = []
+
+        // Try to find profile by handle - need to search all people directories
+        let peopleDir = (mindPath as NSString).appendingPathComponent("memory/people")
+
+        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: peopleDir) else {
+            return nil
+        }
+
+        for personDir in contents where personDir != "_template" && !personDir.hasPrefix(".") {
+            let profilePath = "memory/people/\(personDir)/profile.md"
+            if let profile = readFile(profilePath) {
+                // Check if any handle appears in the profile (simple check)
+                // Or if the directory name matches part of a handle
+                for handle in handles {
+                    let handleLower = handle.lowercased()
+                    let dirLower = personDir.lowercased()
+                    if profile.lowercased().contains(handleLower) || handleLower.contains(dirLower) {
+                        profiles.append("### \(personDir)\n\(profile)")
+                        break
+                    }
+                }
+            }
+        }
+
+        guard !profiles.isEmpty else { return nil }
+        return profiles.joined(separator: "\n\n")
     }
 
     /// Builds context with cross-temporal linking for a specific conversation
@@ -206,6 +245,7 @@ final class MemoryContext {
         Your entire output will be sent as an iMessage. Respond naturally and concisely.
         - Keep responses brief (this is texting)
         - DO NOT narrate actions or use the message script
+        - DO NOT use markdown formatting - Apple Messages displays it literally
         - To send images: ~/.claude-mind/bin/send-image /path/to/file
         - To take photos: ~/.claude-mind/bin/look -s
         """

@@ -57,6 +57,12 @@ enum ReactionType: Int {
     }
 }
 
+/// Information about a chat (group name and participants)
+struct ChatInfo {
+    let displayName: String?      // Group chat name (if set by users)
+    let participants: [String]    // All participant handles (phone/email)
+}
+
 /// Represents a message from the Messages database
 struct Message {
     let rowId: Int64
@@ -212,6 +218,56 @@ final class MessageStore {
         }
 
         return 0
+    }
+
+    /// Fetches chat display name and all participant handles for a given chat
+    func fetchChatInfo(chatId: Int64) -> ChatInfo {
+        guard let db = db else {
+            return ChatInfo(displayName: nil, participants: [])
+        }
+
+        // Get display name from chat table
+        var displayName: String? = nil
+        let nameQuery = "SELECT display_name FROM chat WHERE ROWID = ?"
+        var nameStmt: OpaquePointer?
+
+        if sqlite3_prepare_v2(db, nameQuery, -1, &nameStmt, nil) == SQLITE_OK {
+            sqlite3_bind_int64(nameStmt, 1, chatId)
+            if sqlite3_step(nameStmt) == SQLITE_ROW,
+               let ptr = sqlite3_column_text(nameStmt, 0) {
+                let name = String(cString: ptr)
+                if !name.isEmpty {
+                    displayName = name
+                }
+            }
+        }
+        sqlite3_finalize(nameStmt)
+
+        // Get all participants from chat_handle_join
+        let participantsQuery = """
+            SELECT h.id
+            FROM chat_handle_join chj
+            JOIN handle h ON chj.handle_id = h.ROWID
+            WHERE chj.chat_id = ?
+            """
+
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+
+        guard sqlite3_prepare_v2(db, participantsQuery, -1, &statement, nil) == SQLITE_OK else {
+            return ChatInfo(displayName: displayName, participants: [])
+        }
+
+        sqlite3_bind_int64(statement, 1, chatId)
+
+        var participants: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            if let handlePtr = sqlite3_column_text(statement, 0) {
+                participants.append(String(cString: handlePtr))
+            }
+        }
+
+        return ChatInfo(displayName: displayName, participants: participants)
     }
 
     /// Fetches new messages from chats where É is a participant since the given ROWID

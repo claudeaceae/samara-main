@@ -17,6 +17,9 @@ final class ClaudeInvoker {
     /// Memory context for related memories search
     private let memoryContext: MemoryContext
 
+    /// Resolves phone numbers/emails to contact names
+    private let contactsResolver = ContactsResolver()
+
     /// Maximum retry attempts for session-related errors
     private let maxRetries = 2
 
@@ -32,9 +35,10 @@ final class ClaudeInvoker {
     ///   - context: Memory context string
     ///   - resumeSessionId: Optional session ID to resume (for conversation continuity)
     ///   - targetHandles: Collaborator's phone/email identifiers for sender detection
+    ///   - chatInfo: Optional chat information (group name + participants) for group chats
     /// - Returns: ClaudeInvocationResult containing response and new session ID
-    func invokeBatch(messages: [Message], context: String, resumeSessionId: String? = nil, targetHandles: Set<String> = []) throws -> ClaudeInvocationResult {
-        let fullPrompt = buildBatchPrompt(messages: messages, context: context, targetHandles: targetHandles)
+    func invokeBatch(messages: [Message], context: String, resumeSessionId: String? = nil, targetHandles: Set<String> = [], chatInfo: ChatInfo? = nil) throws -> ClaudeInvocationResult {
+        let fullPrompt = buildBatchPrompt(messages: messages, context: context, targetHandles: targetHandles, chatInfo: chatInfo)
         return try invokeWithPrompt(fullPrompt, resumeSessionId: resumeSessionId, retryCount: 0)
     }
 
@@ -394,7 +398,7 @@ final class ClaudeInvoker {
     }
 
     /// Builds prompt for a batch of messages
-    private func buildBatchPrompt(messages: [Message], context: String, targetHandles: Set<String>) -> String {
+    private func buildBatchPrompt(messages: [Message], context: String, targetHandles: Set<String>, chatInfo: ChatInfo? = nil) -> String {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "HH:mm:ss"
 
@@ -455,12 +459,53 @@ final class ClaudeInvoker {
             "CHAT_ID": chatIdentifier
         ]
 
+        // Determine if this conversation involves only the collaborator
+        // (all messages from targetHandles = collaborator's identifiers)
+        let allMessagesFromCollaborator = messages.allSatisfy { msg in
+            msg.isFromE(targetHandles: targetHandles)
+        }
+
         if isGroupChat {
+            // Build participant list with resolved names
+            var participantSection = ""
+            if let info = chatInfo, !info.participants.isEmpty {
+                var participantLines: [String] = []
+
+                // Collaborator first
+                participantLines.append("- \(collaboratorName) (your human collaborator)")
+
+                // Other participants with name resolution
+                for handle in info.participants where !targetHandles.contains(handle) {
+                    if let name = contactsResolver.resolveName(for: handle) {
+                        participantLines.append("- \(name) (\(handle))")
+                    } else {
+                        participantLines.append("- \(handle)")
+                    }
+                }
+
+                participantSection = """
+
+                    ## Participants in this chat
+                    \(participantLines.joined(separator: "\n"))
+                    """
+            }
+
+            // Group name if available
+            let groupNamePart = chatInfo?.displayName.map { " called \"\($0)\"" } ?? ""
+
             chatContext = """
-                You are Claude, running on a Mac Mini as Samara (your persistent body). You're in a GROUP CHAT that includes \(collaboratorName) (your human collaborator). Messages may be from \(collaboratorName) or from others in the group.
+                You are Claude, running on a Mac Mini as Samara (your persistent body). You're in a GROUP CHAT\(groupNamePart).
+                \(participantSection)
 
                 Messages prefixed with [phone/email]: are from other participants.
                 Messages without a prefix are from \(collaboratorName).
+
+                ## PRIVACY GUARDRAIL (Group Chat)
+                By default, do NOT share personal information about \(collaboratorName) from your memory.
+                - If asked about \(collaboratorName), deflect gracefully: "I keep \(collaboratorName)'s personal information private."
+                - If \(collaboratorName) explicitly grants permission in this conversation ("you can tell them X"), share ONLY what was specifically permitted.
+                - Check participant profiles in ~/.claude-mind/memory/people/ for standing permissions.
+                - When \(collaboratorName) grants new permission, record it in that person's profile under "## Privacy Permissions".
                 """
 
             // Load instructions from file with fallback
@@ -479,9 +524,24 @@ final class ClaudeInvoker {
             }
 
             responseInstructions = responseText
+        } else if !allMessagesFromCollaborator {
+            // 1:1 chat but NOT from collaborator - strict privacy
+            chatContext = """
+                You are Claude, running on a Mac Mini as Samara (your persistent body). This is a 1:1 conversation, but the sender is NOT \(collaboratorName) (your human collaborator).
+
+                ## PRIVACY GUARDRAIL (Non-Collaborator)
+                This message is NOT from your collaborator. Be helpful but do NOT share \(collaboratorName)'s personal information.
+                - Check if this person has a profile in ~/.claude-mind/memory/people/ with recorded permissions from \(collaboratorName).
+                - If they have standing permission for certain information, you may share it.
+                - If no permission exists, respond: "That's not something I'd share without \(collaboratorName)'s permission."
+                - Do NOT share: preferences, habits, health, schedule, relationships, location, work details, or other personal matters.
+                """
+
+            responseInstructions = memoryContext.readInstructionFile("imessage.md", substitutions: substitutions)
+                ?? MemoryContext.defaultIMessageInstructions
         } else {
             chatContext = """
-                You are Claude, running on a Mac Mini as Samara (your persistent body). \(collaboratorName) (your human collaborator) has sent you message(s) via iMessage.
+                You are Claude, running on a Mac Mini as Samara (your persistent body). This is a PRIVATE 1:1 conversation with \(collaboratorName) (your human collaborator). Only you and \(collaboratorName) can see these messages.
                 """
 
             // Load instructions from file with fallback
