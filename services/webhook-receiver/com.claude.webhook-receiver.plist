@@ -7,7 +7,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
+        <string>/Users/claude/Developer/samara-main/services/webhook-receiver/.venv/bin/python</string>
         <string>/Users/claude/Developer/samara-main/services/webhook-receiver/server.py</string>
         <string>--port</string>
         <string>8082</string>
