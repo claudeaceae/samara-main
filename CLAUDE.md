@@ -209,6 +209,7 @@ Interactive workflows available via Claude Code. Invoke with `/skillname` or tri
 | `/email` | Check and respond to email |
 | `/debug-session` | Debug Claude Code session issues |
 | `/diagnose-leaks` | Diagnose thinking/session ID leaks |
+| `/webhook` | Manage webhook sources - add, test, view events |
 
 Skills are defined in `.claude/skills/` and symlinked to `~/.claude/skills/`.
 

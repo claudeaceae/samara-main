@@ -216,18 +216,21 @@ async def receive_webhook(
     # Get request body
     body = await request.body()
 
-    # Verify signature
+    # Verify authentication
     secret = source_config.get("secret", "")
-    signature = x_hub_signature_256 or x_webhook_secret
 
     if secret and secret != "change-me":
-        # If secret is set and not default, require valid signature
-        if signature:
-            if not verify_signature(body, signature, secret):
+        # If secret is set and not default, require authentication
+        if x_hub_signature_256:
+            # HMAC-SHA256 signature verification (GitHub-style)
+            if not verify_signature(body, x_hub_signature_256, secret):
                 raise HTTPException(status_code=401, detail="Invalid signature")
-        elif x_webhook_secret != secret:
-            # Fallback to direct secret comparison
-            raise HTTPException(status_code=401, detail="Missing or invalid secret")
+        elif x_webhook_secret:
+            # Direct secret comparison (IFTTT-style)
+            if x_webhook_secret != secret:
+                raise HTTPException(status_code=401, detail="Invalid secret")
+        else:
+            raise HTTPException(status_code=401, detail="Missing authentication")
 
     # Parse body
     try:
