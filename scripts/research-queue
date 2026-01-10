@@ -1,0 +1,278 @@
+#!/bin/bash
+# research-queue - Manage shared items for async research
+# Items come from "share" webhook source via iOS Share Sheet
+
+QUEUE_FILE="$HOME/.claude-mind/state/research-queue/queue.jsonl"
+ARCHIVE_FILE="$HOME/.claude-mind/state/research-queue/archive.jsonl"
+SENSES_DIR="$HOME/.claude-mind/senses"
+
+mkdir -p "$(dirname "$QUEUE_FILE")"
+touch "$QUEUE_FILE" "$ARCHIVE_FILE"
+
+usage() {
+    cat << 'EOF'
+Usage: research-queue <command> [args]
+
+Commands:
+  list              Show pending items (default)
+  add <json>        Add item directly (usually via webhook processing)
+  process           Process new share webhook events into queue
+  view <id>         Show full details of an item
+  note <id> <text>  Add a note to an item
+  done <id>         Mark item as processed (moves to archive)
+  archive           Show archived items
+  stats             Show queue statistics
+
+Examples:
+  research-queue                    # List pending items
+  research-queue process            # Ingest new share webhooks
+  research-queue view abc123        # View item details
+  research-queue done abc123        # Archive processed item
+EOF
+}
+
+# Generate short ID
+short_id() {
+    echo "$1" | shasum | cut -c1-8
+}
+
+# List pending items
+cmd_list() {
+    if [[ ! -s "$QUEUE_FILE" ]]; then
+        echo "Research queue is empty."
+        echo "Share items from iOS using the Share Sheet shortcut."
+        return
+    fi
+
+    echo "=== Research Queue ==="
+    echo ""
+
+    while IFS= read -r line; do
+        id=$(echo "$line" | jq -r '.id // empty')
+        type=$(echo "$line" | jq -r '.type // "unknown"')
+        title=$(echo "$line" | jq -r '.title // .url // .text[:50] // "untitled"' | cut -c1-60)
+        timestamp=$(echo "$line" | jq -r '.timestamp // empty' | cut -c1-16)
+        notes=$(echo "$line" | jq -r '.notes // empty')
+
+        # Type indicator
+        case "$type" in
+            url) icon="🔗" ;;
+            text) icon="📝" ;;
+            pdf) icon="📄" ;;
+            image) icon="🖼️" ;;
+            *) icon="📎" ;;
+        esac
+
+        echo "$icon [$id] $title"
+        echo "   Added: $timestamp"
+        if [[ -n "$notes" && "$notes" != "null" ]]; then
+            echo "   Notes: $notes"
+        fi
+        echo ""
+    done < "$QUEUE_FILE"
+
+    count=$(wc -l < "$QUEUE_FILE" | tr -d ' ')
+    echo "---"
+    echo "$count item(s) pending"
+}
+
+# Process share webhook events into queue
+cmd_process() {
+    local added=0
+
+    for event_file in "$SENSES_DIR"/webhook-share-*.json; do
+        [[ -f "$event_file" ]] || continue
+
+        # Check if already processed (by checking if ID exists in queue or archive)
+        event_id=$(basename "$event_file" .json | sed 's/webhook-share-//')
+        short=$(short_id "$event_id")
+
+        if grep -q "\"id\":\"$short\"" "$QUEUE_FILE" "$ARCHIVE_FILE" 2>/dev/null; then
+            continue
+        fi
+
+        # Extract data from sense event
+        payload=$(jq -r '.data.payload' "$event_file")
+        timestamp=$(jq -r '.timestamp' "$event_file")
+
+        # Determine type and extract relevant fields
+        url=$(echo "$payload" | jq -r '.url // empty')
+        text=$(echo "$payload" | jq -r '.text // empty')
+        title=$(echo "$payload" | jq -r '.title // empty')
+        content_type=$(echo "$payload" | jq -r '.type // empty')
+        note=$(echo "$payload" | jq -r '.note // empty')
+
+        # Determine item type
+        if [[ -n "$url" && "$url" != "null" ]]; then
+            type="url"
+            [[ -z "$title" || "$title" == "null" ]] && title="$url"
+        elif [[ -n "$text" && "$text" != "null" ]]; then
+            type="text"
+            [[ -z "$title" || "$title" == "null" ]] && title="${text:0:50}..."
+        else
+            type="other"
+        fi
+
+        # Create queue item (compact JSON for JSONL format)
+        item=$(jq -c -n \
+            --arg id "$short" \
+            --arg type "$type" \
+            --arg title "$title" \
+            --arg url "$url" \
+            --arg text "$text" \
+            --arg note "$note" \
+            --arg timestamp "$timestamp" \
+            --arg source_file "$(basename "$event_file")" \
+            '{
+                id: $id,
+                type: $type,
+                title: $title,
+                url: (if $url != "" then $url else null end),
+                text: (if $text != "" then $text else null end),
+                notes: (if $note != "" then $note else null end),
+                timestamp: $timestamp,
+                source_file: $source_file,
+                status: "pending"
+            }')
+
+        echo "$item" >> "$QUEUE_FILE"
+        ((added++))
+
+        echo "Added: $title"
+    done
+
+    if [[ $added -eq 0 ]]; then
+        echo "No new items to process."
+    else
+        echo ""
+        echo "Processed $added new item(s)."
+    fi
+}
+
+# View item details
+cmd_view() {
+    local id="$1"
+    [[ -z "$id" ]] && { echo "Usage: research-queue view <id>"; exit 1; }
+
+    item=$(grep "\"id\":\"$id\"" "$QUEUE_FILE" "$ARCHIVE_FILE" 2>/dev/null | head -1)
+
+    if [[ -z "$item" ]]; then
+        echo "Item not found: $id"
+        exit 1
+    fi
+
+    echo "$item" | jq .
+}
+
+# Add note to item
+cmd_note() {
+    local id="$1"
+    shift
+    local note="$*"
+
+    [[ -z "$id" || -z "$note" ]] && { echo "Usage: research-queue note <id> <text>"; exit 1; }
+
+    # Update item in place
+    if grep -q "\"id\":\"$id\"" "$QUEUE_FILE"; then
+        temp=$(mktemp)
+        while IFS= read -r line; do
+            if echo "$line" | grep -q "\"id\":\"$id\""; then
+                existing=$(echo "$line" | jq -r '.notes // ""')
+                if [[ -n "$existing" && "$existing" != "null" ]]; then
+                    new_note="$existing | $note"
+                else
+                    new_note="$note"
+                fi
+                echo "$line" | jq -c --arg n "$new_note" '.notes = $n'
+            else
+                echo "$line"
+            fi
+        done < "$QUEUE_FILE" > "$temp"
+        mv "$temp" "$QUEUE_FILE"
+        echo "Note added to $id"
+    else
+        echo "Item not found: $id"
+        exit 1
+    fi
+}
+
+# Mark item as done
+cmd_done() {
+    local id="$1"
+    [[ -z "$id" ]] && { echo "Usage: research-queue done <id>"; exit 1; }
+
+    item=$(grep "\"id\":\"$id\"" "$QUEUE_FILE" 2>/dev/null)
+
+    if [[ -z "$item" ]]; then
+        echo "Item not found in queue: $id"
+        exit 1
+    fi
+
+    # Add to archive with completion timestamp
+    echo "$item" | jq -c --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.status = "done" | .completed_at = $t' >> "$ARCHIVE_FILE"
+
+    # Remove from queue
+    temp=$(mktemp)
+    grep -v "\"id\":\"$id\"" "$QUEUE_FILE" > "$temp"
+    mv "$temp" "$QUEUE_FILE"
+
+    title=$(echo "$item" | jq -r '.title')
+    echo "Archived: $title"
+}
+
+# Show archive
+cmd_archive() {
+    if [[ ! -s "$ARCHIVE_FILE" ]]; then
+        echo "Archive is empty."
+        return
+    fi
+
+    echo "=== Research Archive ==="
+    echo ""
+
+    tail -20 "$ARCHIVE_FILE" | while IFS= read -r line; do
+        id=$(echo "$line" | jq -r '.id')
+        title=$(echo "$line" | jq -r '.title' | cut -c1-50)
+        completed=$(echo "$line" | jq -r '.completed_at // empty' | cut -c1-10)
+
+        echo "✓ [$id] $title (done: $completed)"
+    done
+
+    count=$(wc -l < "$ARCHIVE_FILE" | tr -d ' ')
+    echo ""
+    echo "---"
+    echo "$count item(s) archived"
+}
+
+# Show stats
+cmd_stats() {
+    pending=$(wc -l < "$QUEUE_FILE" 2>/dev/null | tr -d ' ')
+    archived=$(wc -l < "$ARCHIVE_FILE" 2>/dev/null | tr -d ' ')
+
+    echo "Research Queue Stats"
+    echo "---"
+    echo "Pending:  $pending"
+    echo "Archived: $archived"
+    echo ""
+
+    if [[ -s "$QUEUE_FILE" ]]; then
+        echo "By type:"
+        jq -r '.type' "$QUEUE_FILE" | sort | uniq -c | while read count type; do
+            echo "  $type: $count"
+        done
+    fi
+}
+
+# Main
+case "${1:-list}" in
+    list) cmd_list ;;
+    add) shift; echo "$1" >> "$QUEUE_FILE"; echo "Added to queue" ;;
+    process) cmd_process ;;
+    view) cmd_view "$2" ;;
+    note) cmd_note "$2" "${@:3}" ;;
+    done) cmd_done "$2" ;;
+    archive) cmd_archive ;;
+    stats) cmd_stats ;;
+    -h|--help|help) usage ;;
+    *) echo "Unknown command: $1"; usage; exit 1 ;;
+esac
