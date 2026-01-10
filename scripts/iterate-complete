@@ -1,0 +1,145 @@
+#!/bin/bash
+#
+# iterate-complete - Mark an iteration as complete
+#
+# Usage:
+#   iterate-complete --success ["summary"]
+#   iterate-complete --failed "reason"
+#   iterate-complete --abandon "reason"
+#
+
+set -e
+
+STATE_FILE="${HOME}/.claude-mind/state/iteration-state.json"
+GOAL_FILE="${HOME}/.claude-mind/state/iteration-goal.md"
+ARCHIVE_DIR="${HOME}/.claude-mind/state/iteration-archive"
+
+# Check if iteration is active
+if [ ! -f "$STATE_FILE" ]; then
+    echo "Error: No iteration in progress"
+    exit 1
+fi
+
+# Parse arguments
+FINAL_STATUS=""
+SUMMARY=""
+
+case "$1" in
+    --success)
+        FINAL_STATUS="success"
+        SUMMARY="${2:-Iteration completed successfully}"
+        ;;
+    --failed)
+        FINAL_STATUS="failed"
+        SUMMARY="${2:-Iteration failed}"
+        if [ -z "$2" ]; then
+            echo "Error: --failed requires a reason"
+            exit 1
+        fi
+        ;;
+    --abandon)
+        FINAL_STATUS="abandoned"
+        SUMMARY="${2:-Iteration abandoned}"
+        ;;
+    --help|-h)
+        echo "Usage: iterate-complete --success|--failed|--abandon [\"summary\"]"
+        echo ""
+        echo "Options:"
+        echo "  --success [\"summary\"]   Mark iteration as successful"
+        echo "  --failed \"reason\"       Mark iteration as failed (reason required)"
+        echo "  --abandon [\"reason\"]    Mark iteration as abandoned"
+        exit 0
+        ;;
+    *)
+        echo "Error: Must specify --success, --failed, or --abandon"
+        exit 1
+        ;;
+esac
+
+# Get current state
+GOAL=$(jq -r '.goal' "$STATE_FILE")
+CURRENT_ATTEMPT=$(jq -r '.currentAttempt' "$STATE_FILE")
+STARTED=$(jq -r '.startedAt' "$STATE_FILE")
+
+# Extract key learnings from attempts
+KEY_LEARNINGS=$(jq -r '[.attempts[].learning | select(. != "" and . != null)] | unique' "$STATE_FILE")
+
+# Get timestamp
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Update state file
+TMP_FILE=$(mktemp)
+jq --arg status "$FINAL_STATUS" \
+   --arg summary "$SUMMARY" \
+   --arg completed "$TIMESTAMP" \
+   --argjson learnings "$KEY_LEARNINGS" \
+   '.status = $status | .summary = $summary | .completedAt = $completed | .key_learnings = $learnings' \
+   "$STATE_FILE" > "$TMP_FILE"
+mv "$TMP_FILE" "$STATE_FILE"
+
+# Archive the iteration
+mkdir -p "$ARCHIVE_DIR"
+ARCHIVE_NAME="iteration-$(date +%Y%m%d-%H%M%S)-${FINAL_STATUS}.json"
+cp "$STATE_FILE" "$ARCHIVE_DIR/$ARCHIVE_NAME"
+
+# Update goal file
+cat >> "$GOAL_FILE" <<EOF
+
+---
+
+## Final Result: $(echo "$FINAL_STATUS" | tr '[:lower:]' '[:upper:]')
+
+**Completed**: $TIMESTAMP
+**Total Attempts**: $CURRENT_ATTEMPT
+**Summary**: $SUMMARY
+
+### Key Learnings
+EOF
+
+jq -r '.key_learnings[]' "$STATE_FILE" 2>/dev/null | while read -r learning; do
+    echo "- $learning" >> "$GOAL_FILE"
+done
+
+# Archive goal file too
+GOAL_ARCHIVE="${ARCHIVE_DIR}/iteration-$(date +%Y%m%d-%H%M%S)-goal.md"
+cp "$GOAL_FILE" "$GOAL_ARCHIVE"
+
+# Output
+echo "=== Iteration Complete ==="
+echo ""
+echo "Goal: $GOAL"
+echo "Status: $FINAL_STATUS"
+echo "Total Attempts: $CURRENT_ATTEMPT"
+echo "Duration: $STARTED -> $TIMESTAMP"
+echo ""
+echo "Summary: $SUMMARY"
+echo ""
+
+if [ "$KEY_LEARNINGS" != "[]" ]; then
+    echo "Key Learnings:"
+    jq -r '.key_learnings[]' "$STATE_FILE" 2>/dev/null | while read -r learning; do
+        echo "  - $learning"
+    done
+    echo ""
+fi
+
+echo "Archived to: $ARCHIVE_DIR/$ARCHIVE_NAME"
+echo ""
+
+# Optionally record to decisions if successful
+if [ "$FINAL_STATUS" = "success" ]; then
+    DECISIONS_FILE="${HOME}/.claude-mind/memory/decisions.md"
+    if [ -f "$DECISIONS_FILE" ]; then
+        echo "" >> "$DECISIONS_FILE"
+        echo "## $(date +%Y-%m-%d): Iteration Success - $GOAL" >> "$DECISIONS_FILE"
+        echo "" >> "$DECISIONS_FILE"
+        echo "Completed after $CURRENT_ATTEMPT attempts." >> "$DECISIONS_FILE"
+        echo "$SUMMARY" >> "$DECISIONS_FILE"
+        echo ""
+        echo "Also recorded in decisions.md"
+    fi
+fi
+
+# Clean up active state (keep for reference but mark as done)
+echo ""
+echo "Use 'iterate-start' to begin a new iteration."

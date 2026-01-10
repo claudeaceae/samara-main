@@ -1,0 +1,404 @@
+#!/bin/bash
+#
+# memory-index - Build and query the FTS5 semantic memory index
+#
+# Usage:
+#   memory-index rebuild     - Rebuild the entire index from memory files
+#   memory-index search <q>  - Search for memories matching query
+#   memory-index stats       - Show index statistics
+#   memory-index status      - Check if index exists and is healthy
+#
+
+set -e
+
+MIND_DIR="${HOME}/.claude-mind"
+SEMANTIC_DIR="${MIND_DIR}/semantic"
+DB_PATH="${SEMANTIC_DIR}/memory.db"
+
+# Ensure semantic directory exists
+mkdir -p "$SEMANTIC_DIR"
+
+# Create database with FTS5 if it doesn't exist
+init_db() {
+    if [ ! -f "$DB_PATH" ]; then
+        echo "Creating new FTS5 database..."
+        sqlite3 "$DB_PATH" <<'EOF'
+-- Main memory table
+CREATE TABLE IF NOT EXISTS memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    context TEXT,
+    memory_type TEXT NOT NULL,
+    episode_date TEXT,
+    source_file TEXT,
+    source_line INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- FTS5 virtual table with Porter stemming
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+    content,
+    context,
+    memory_type,
+    content=memories,
+    content_rowid=id,
+    tokenize='porter unicode61'
+);
+
+-- Triggers to keep FTS in sync
+CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+    INSERT INTO memories_fts(rowid, content, context, memory_type)
+    VALUES (new.id, new.content, new.context, new.memory_type);
+END;
+
+CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, content, context, memory_type)
+    VALUES ('delete', old.id, old.content, old.context, old.memory_type);
+END;
+
+CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+    INSERT INTO memories_fts(memories_fts, rowid, content, context, memory_type)
+    VALUES ('delete', old.id, old.content, old.context, old.memory_type);
+    INSERT INTO memories_fts(rowid, content, context, memory_type)
+    VALUES (new.id, new.content, new.context, new.memory_type);
+END;
+EOF
+        echo "Database created at $DB_PATH"
+    fi
+}
+
+# Extract sections from markdown file
+# Returns: section_header|content pairs
+parse_markdown_sections() {
+    local file="$1"
+    local current_section=""
+    local content=""
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        if [[ "$line" =~ ^##[[:space:]](.+)$ ]]; then
+            # New section found - emit previous if exists
+            if [ -n "$current_section" ] && [ -n "$content" ]; then
+                echo "${current_section}|${content}"
+            fi
+            current_section="${BASH_REMATCH[1]}"
+            content=""
+        else
+            # Accumulate content
+            content="${content}${line}
+"
+        fi
+    done < "$file"
+
+    # Emit final section
+    if [ -n "$current_section" ] && [ -n "$content" ]; then
+        echo "${current_section}|${content}"
+    fi
+}
+
+# Insert a memory entry safely using Python to handle escaping
+insert_memory() {
+    local content="$1"
+    local memory_type="$2"
+    local episode_date="$3"
+    local source_file="$4"
+    local source_line="$5"
+
+    # Use Python for reliable SQL escaping and insertion
+    python3 - "$DB_PATH" "$content" "$memory_type" "$episode_date" "$source_file" "$source_line" <<'PYTHON'
+import sqlite3
+import sys
+
+db_path = sys.argv[1]
+content = sys.argv[2]
+memory_type = sys.argv[3]
+episode_date = sys.argv[4] if sys.argv[4] else None
+source_file = sys.argv[5]
+source_line = int(sys.argv[6])
+
+try:
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO memories (content, memory_type, episode_date, source_file, source_line) VALUES (?, ?, ?, ?, ?)",
+        (content, memory_type, episode_date, source_file, source_line)
+    )
+    conn.commit()
+    conn.close()
+except Exception as e:
+    # Silently skip problematic entries
+    pass
+PYTHON
+}
+
+# Index a single memory file
+index_file() {
+    local file="$1"
+    local memory_type="$2"
+    local filename=$(basename "$file")
+    local line_num=0
+
+    # For episode files, extract date from filename
+    local episode_date=""
+    if [[ "$filename" =~ ^([0-9]{4}-[0-9]{2}-[0-9]{2}) ]]; then
+        episode_date="${BASH_REMATCH[1]}"
+    fi
+
+    # Read file and index meaningful chunks
+    local current_chunk=""
+    local chunk_start=1
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        ((line_num++))
+
+        # Skip empty lines and pure headers at chunk start
+        if [ -z "$line" ] && [ -z "$current_chunk" ]; then
+            chunk_start=$line_num
+            continue
+        fi
+
+        # Detect section breaks (## headers, ---, blank after content)
+        if [[ "$line" =~ ^##[[:space:]] ]] || [[ "$line" =~ ^---$ ]] || \
+           ([ -z "$line" ] && [ -n "$current_chunk" ] && [ ${#current_chunk} -gt 50 ]); then
+
+            # Index the accumulated chunk if substantial
+            if [ -n "$current_chunk" ] && [ ${#current_chunk} -gt 20 ]; then
+                insert_memory "$current_chunk" "$memory_type" "$episode_date" "$file" "$chunk_start"
+            fi
+
+            current_chunk=""
+            chunk_start=$line_num
+
+            # If this is a header, include it in next chunk
+            if [[ "$line" =~ ^##[[:space:]] ]]; then
+                current_chunk="$line
+"
+            fi
+        else
+            current_chunk="${current_chunk}${line}
+"
+        fi
+    done < "$file"
+
+    # Index final chunk
+    if [ -n "$current_chunk" ] && [ ${#current_chunk} -gt 20 ]; then
+        insert_memory "$current_chunk" "$memory_type" "$episode_date" "$file" "$chunk_start"
+    fi
+}
+
+# Rebuild the entire index
+rebuild_index() {
+    echo "Rebuilding FTS5 memory index..."
+
+    # Remove existing database
+    rm -f "$DB_PATH"
+
+    # Create fresh database
+    init_db
+
+    local count=0
+
+    # Index core memory files
+    for file in "$MIND_DIR"/memory/learnings.md \
+                "$MIND_DIR"/memory/observations.md \
+                "$MIND_DIR"/memory/decisions.md \
+                "$MIND_DIR"/memory/questions.md; do
+        if [ -f "$file" ]; then
+            local type=$(basename "$file" .md)
+            echo "  Indexing $type..."
+            index_file "$file" "$type"
+            ((count++))
+        fi
+    done
+
+    # Index episode logs
+    echo "  Indexing episodes..."
+    local episode_count=0
+    for file in "$MIND_DIR"/memory/episodes/*.md; do
+        if [ -f "$file" ]; then
+            index_file "$file" "episode"
+            ((episode_count++))
+        fi
+    done
+    echo "    $episode_count episode files"
+
+    # Index reflections
+    echo "  Indexing reflections..."
+    local reflection_count=0
+    for file in "$MIND_DIR"/memory/reflections/*.md; do
+        if [ -f "$file" ]; then
+            index_file "$file" "reflection"
+            ((reflection_count++))
+        fi
+    done
+    echo "    $reflection_count reflection files"
+
+    # Index person profiles
+    echo "  Indexing person profiles..."
+    local profile_count=0
+    for file in "$MIND_DIR"/memory/people/*/profile.md; do
+        if [ -f "$file" ]; then
+            index_file "$file" "person"
+            ((profile_count++))
+        fi
+    done
+    echo "    $profile_count person profiles"
+
+    # Optimize FTS index
+    echo "  Optimizing index..."
+    sqlite3 "$DB_PATH" "INSERT INTO memories_fts(memories_fts) VALUES('optimize');"
+
+    # Show final stats
+    echo ""
+    show_stats
+}
+
+# Search the index
+search_index() {
+    local query="$1"
+    local limit="${2:-10}"
+
+    if [ ! -f "$DB_PATH" ]; then
+        echo "Error: Index not found. Run 'memory-index rebuild' first."
+        exit 1
+    fi
+
+    # Escape query for SQL
+    local escaped_query="${query//\'/\'\'}"
+
+    echo "Searching for: $query"
+    echo "---"
+
+    sqlite3 -header -column "$DB_PATH" <<EOF
+SELECT
+    m.id,
+    m.memory_type as type,
+    m.episode_date as date,
+    substr(m.content, 1, 100) as preview,
+    round(bm25(memories_fts), 2) as rank
+FROM memories_fts
+JOIN memories m ON memories_fts.rowid = m.id
+WHERE memories_fts MATCH '$escaped_query'
+ORDER BY rank
+LIMIT $limit;
+EOF
+}
+
+# Show index statistics
+show_stats() {
+    if [ ! -f "$DB_PATH" ]; then
+        echo "Error: Index not found. Run 'memory-index rebuild' first."
+        exit 1
+    fi
+
+    echo "=== Memory Index Statistics ==="
+    echo ""
+
+    # Total entries
+    local total=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM memories;")
+    echo "Total entries: $total"
+
+    # By type
+    echo ""
+    echo "By type:"
+    sqlite3 -column "$DB_PATH" <<'EOF'
+SELECT memory_type, COUNT(*) as count
+FROM memories
+GROUP BY memory_type
+ORDER BY count DESC;
+EOF
+
+    # Database size
+    local size=$(du -h "$DB_PATH" | cut -f1)
+    echo ""
+    echo "Database size: $size"
+
+    # Recent entries
+    echo ""
+    echo "Most recent entries:"
+    sqlite3 -column "$DB_PATH" <<'EOF'
+SELECT memory_type, episode_date, substr(content, 1, 60) as preview
+FROM memories
+WHERE episode_date IS NOT NULL
+ORDER BY episode_date DESC, id DESC
+LIMIT 5;
+EOF
+}
+
+# Check index health
+check_status() {
+    echo "=== Memory Index Status ==="
+    echo ""
+
+    if [ ! -f "$DB_PATH" ]; then
+        echo "Status: NOT FOUND"
+        echo "Database does not exist at: $DB_PATH"
+        echo ""
+        echo "Run 'memory-index rebuild' to create the index."
+        exit 1
+    fi
+
+    # Check integrity
+    local integrity=$(sqlite3 "$DB_PATH" "PRAGMA integrity_check;")
+    if [ "$integrity" = "ok" ]; then
+        echo "Status: HEALTHY"
+    else
+        echo "Status: CORRUPTED"
+        echo "Integrity check failed: $integrity"
+        exit 1
+    fi
+
+    # Last modified
+    local mtime=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" "$DB_PATH")
+    echo "Last updated: $mtime"
+
+    # Entry count
+    local count=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM memories;")
+    echo "Entries indexed: $count"
+
+    # FTS status
+    local fts_count=$(sqlite3 "$DB_PATH" "SELECT COUNT(*) FROM memories_fts;")
+    echo "FTS entries: $fts_count"
+
+    if [ "$count" -ne "$fts_count" ]; then
+        echo "Warning: FTS index out of sync with main table"
+    fi
+}
+
+# Main command dispatch
+case "${1:-status}" in
+    rebuild)
+        rebuild_index
+        ;;
+    search)
+        if [ -z "$2" ]; then
+            echo "Usage: memory-index search <query>"
+            exit 1
+        fi
+        search_index "$2" "${3:-10}"
+        ;;
+    stats)
+        show_stats
+        ;;
+    status)
+        check_status
+        ;;
+    help|--help|-h)
+        echo "memory-index - Build and query the FTS5 semantic memory index"
+        echo ""
+        echo "Usage:"
+        echo "  memory-index rebuild      Rebuild the entire index from memory files"
+        echo "  memory-index search <q>   Search for memories matching query"
+        echo "  memory-index stats        Show index statistics"
+        echo "  memory-index status       Check if index exists and is healthy"
+        echo ""
+        echo "Examples:"
+        echo "  memory-index rebuild"
+        echo "  memory-index search \"wake cycle\""
+        echo "  memory-index search \"decision about\" 20"
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Run 'memory-index help' for usage."
+        exit 1
+        ;;
+esac

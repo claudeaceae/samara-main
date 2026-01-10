@@ -32,6 +32,12 @@ final class ClaudeInvoker {
     /// Whether to use fallback chain (can be disabled for testing)
     private let useFallbackChain: Bool
 
+    /// Tracks context window usage and provides tiered warnings
+    private let contextTracker: ContextTracker
+
+    /// Manages session ledgers for structured handoffs
+    private let ledgerManager: LedgerManager
+
     init(claudePath: String = "/usr/local/bin/claude", timeout: TimeInterval = 300, memoryContext: MemoryContext? = nil, useFallbackChain: Bool = true) {
         self.claudePath = claudePath
         self.timeout = timeout
@@ -49,6 +55,12 @@ final class ClaudeInvoker {
             localInvoker: self.localInvoker,
             timeoutConfig: config.timeoutsConfig
         )
+
+        // Initialize context tracking (200K tokens for Claude 4)
+        self.contextTracker = ContextTracker(maxTokens: 200_000)
+
+        // Initialize ledger manager
+        self.ledgerManager = LedgerManager()
 
         log("ClaudeInvoker initialized (fallback=\(useFallbackChain), localEndpoint=\(localEndpoint))",
             level: .info, component: "ClaudeInvoker")
@@ -139,6 +151,65 @@ final class ClaudeInvoker {
         log("Isolated invocation for \(messages.count) message(s)", level: .info, component: "ClaudeInvoker")
         // No session ID = fresh context, no cross-contamination
         return try invokeBatch(messages: messages, context: context, resumeSessionId: nil, targetHandles: targetHandles)
+    }
+
+    // MARK: - Context Management
+
+    /// Get the current context level for a chat
+    /// Returns nil if no metrics have been calculated yet
+    func getContextLevel(forChat chatId: String) -> ContextTracker.ContextLevel? {
+        // The ledger stores the last known context percentage
+        let ledger = ledgerManager.getLedger(forChat: chatId, sessionId: UUID().uuidString)
+        guard ledger.contextPercentage > 0 else { return nil }
+        return contextTracker.level(forPercentage: ledger.contextPercentage)
+    }
+
+    /// Check if handoff is recommended for a chat
+    func shouldHandoff(forChat chatId: String) -> Bool {
+        guard let level = getContextLevel(forChat: chatId) else { return false }
+        return level.shouldHandoff
+    }
+
+    /// Create a handoff document for a chat (for session transitions)
+    /// - Parameters:
+    ///   - chatId: The chat identifier
+    ///   - reason: Why the handoff is being created
+    /// - Returns: The handoff document, or nil if no ledger exists
+    func createHandoff(forChat chatId: String, reason: LedgerManager.Handoff.HandoffReason) -> LedgerManager.Handoff? {
+        return ledgerManager.createHandoff(forChat: chatId, reason: reason)
+    }
+
+    /// Get context for session continuation from a previous handoff
+    func getContinuationContext(forChat chatId: String) -> String? {
+        guard let handoff = ledgerManager.getMostRecentHandoff(forChat: chatId) else {
+            return nil
+        }
+        return ledgerManager.contextFromHandoff(handoff)
+    }
+
+    /// Record a goal in the current session ledger
+    func recordGoal(chatId: String, description: String, status: LedgerManager.Ledger.GoalStatus = .pending) {
+        ledgerManager.addGoal(chatId: chatId, description: description, status: status)
+    }
+
+    /// Record a decision in the current session ledger
+    func recordDecision(chatId: String, description: String, rationale: String) {
+        ledgerManager.recordDecision(chatId: chatId, description: description, rationale: rationale)
+    }
+
+    /// Record a file change in the current session ledger
+    func recordFileChange(chatId: String, path: String, action: LedgerManager.Ledger.FileAction, summary: String) {
+        ledgerManager.recordFileChange(chatId: chatId, path: path, action: action, summary: summary)
+    }
+
+    /// Get summary of context usage during current session
+    func getContextSessionSummary() -> String {
+        return contextTracker.sessionSummary()
+    }
+
+    /// Reset context tracking for a new session
+    func resetContextTracking() {
+        contextTracker.resetForNewSession()
     }
 
     /// Core invocation method with retry tracking to prevent infinite loops
@@ -501,6 +572,7 @@ final class ClaudeInvoker {
     }
 
     /// Builds prompt for a batch of messages
+    /// Also calculates context metrics and injects warnings when approaching limits
     private func buildBatchPrompt(messages: [Message], context: String, targetHandles: Set<String>, chatInfo: ChatInfo? = nil) -> String {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "HH:mm:ss"
@@ -658,7 +730,8 @@ final class ClaudeInvoker {
             combinedRelatedContext += "\n\n" + crossTemporalSection
         }
 
-        return """
+        // Build initial prompt without context metrics (to measure it)
+        let basePrompt = """
             \(chatContext)
 
             ## Your Memory Context
@@ -668,6 +741,51 @@ final class ClaudeInvoker {
             \(messageSection.trimmingCharacters(in: .whitespacesAndNewlines))
 
             \(responseInstructions)
+            """
+
+        // Calculate context metrics for the full prompt
+        let metrics = contextTracker.calculateMetrics(for: basePrompt)
+
+        // Update ledger with context percentage
+        ledgerManager.updateContextPercentage(chatId: chatIdentifier, percentage: metrics.percentage)
+
+        // Log context status
+        log("Context: \(metrics.level.emoji) \(Int(metrics.percentage * 100))% (\(metrics.estimatedTokens)/\(metrics.maxTokens) tokens)",
+            level: metrics.level >= .orange ? .warn : .info, component: "ClaudeInvoker")
+
+        // Build context status section
+        var contextStatusSection = """
+
+            ## Context Window Status
+            \(metrics.statusLine())
+            """
+
+        // Add warning at threshold levels
+        if let warning = metrics.level.warningMessage {
+            contextStatusSection += "\n⚠️ \(warning)"
+
+            // Add handoff instructions at critical level
+            if metrics.level.shouldHandoff {
+                contextStatusSection += """
+
+                    **CRITICAL**: Context is nearly full. Before responding:
+                    1. Capture key state in a brief summary
+                    2. Note any unfinished tasks or open questions
+                    3. Keep your response concise to leave room for continuation
+                    """
+            }
+        }
+
+        // Add estimated time to full if we have growth data
+        if let timeToFull = contextTracker.estimatedTimeToFull(from: metrics), timeToFull < 60 {
+            contextStatusSection += "\n📊 At current rate, context full in ~\(Int(timeToFull)) minutes"
+        }
+
+        // Inject context status at the start of the prompt (visible to Claude)
+        return """
+            \(contextStatusSection)
+
+            \(basePrompt)
             """
             // Note: Capabilities are included via MemoryContext reading capabilities/inventory.md
             // Do NOT add hardcoded capability lists here - they will drift out of sync

@@ -1,0 +1,81 @@
+#!/bin/bash
+#
+# wake-adaptive - Adaptive wake cycle dispatcher
+#
+# Checks the wake scheduler and dispatches to appropriate wake type:
+# - full: Full wake cycle (scripts/wake)
+# - light: Quick check-in (scripts/wake-light)
+# - none: No wake needed
+#
+# This script is designed to be run by launchd every 15 minutes.
+#
+# Usage:
+#   wake-adaptive [--force TYPE]
+#
+
+set -e
+
+MIND_PATH="${HOME}/.claude-mind"
+LOG_FILE="${MIND_PATH}/logs/wake-adaptive.log"
+
+# Ensure log directory exists
+mkdir -p "$(dirname "$LOG_FILE")"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+# Parse arguments
+FORCE_TYPE=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --force)
+            FORCE_TYPE="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+log "Adaptive wake check starting..."
+
+# Check scheduler
+SCHEDULER_RESULT=$("$MIND_PATH/bin/wake-scheduler" check 2>/dev/null || echo '{"should_wake": false, "type": "none", "reason": "scheduler unavailable"}')
+
+SHOULD_WAKE=$(echo "$SCHEDULER_RESULT" | jq -r '.should_wake // false')
+WAKE_TYPE=$(echo "$SCHEDULER_RESULT" | jq -r '.type // "none"')
+REASON=$(echo "$SCHEDULER_RESULT" | jq -r '.reason // "unknown"')
+
+# Override with force if specified
+if [ -n "$FORCE_TYPE" ]; then
+    SHOULD_WAKE="true"
+    WAKE_TYPE="$FORCE_TYPE"
+    REASON="Forced: $FORCE_TYPE"
+fi
+
+log "Decision: should_wake=$SHOULD_WAKE, type=$WAKE_TYPE, reason=$REASON"
+
+if [ "$SHOULD_WAKE" = "true" ]; then
+    case "$WAKE_TYPE" in
+        full)
+            log "Dispatching to full wake cycle"
+            exec "$MIND_PATH/bin/wake"
+            ;;
+        light)
+            log "Dispatching to light wake cycle"
+            exec "$MIND_PATH/bin/wake-light" --reason "$REASON"
+            ;;
+        emergency)
+            log "Dispatching to emergency wake (using light with urgency)"
+            exec "$MIND_PATH/bin/wake-light" --reason "EMERGENCY: $REASON"
+            ;;
+        *)
+            log "Unknown wake type: $WAKE_TYPE, using light"
+            exec "$MIND_PATH/bin/wake-light" --reason "$REASON"
+            ;;
+    esac
+else
+    log "No wake needed: $REASON"
+fi

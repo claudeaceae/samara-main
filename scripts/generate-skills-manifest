@@ -1,0 +1,220 @@
+#!/bin/bash
+#
+# generate-skills-manifest - Generate a JSON manifest of all skills
+#
+# Parses SKILL.md files from .claude/skills/ and generates a searchable manifest
+# with trigger words, categories, and metadata.
+#
+# Usage:
+#   generate-skills-manifest [--output PATH]
+#
+
+set -e
+
+MIND_DIR="${HOME}/.claude-mind"
+SKILLS_DIR="${MIND_DIR}/.claude/skills"
+DEFAULT_OUTPUT="${MIND_DIR}/skills-manifest.json"
+
+# Parse arguments
+OUTPUT_PATH="$DEFAULT_OUTPUT"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --output)
+            OUTPUT_PATH="$2"
+            shift 2
+            ;;
+        --help|-h)
+            echo "Usage: generate-skills-manifest [--output PATH]"
+            echo ""
+            echo "Generates a JSON manifest of all skills from SKILL.md files."
+            echo ""
+            echo "Options:"
+            echo "  --output PATH   Output file path (default: ~/.claude-mind/skills-manifest.json)"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# Check if skills directory exists
+if [ ! -d "$SKILLS_DIR" ]; then
+    echo "Error: Skills directory not found at $SKILLS_DIR"
+    exit 1
+fi
+
+# Start building manifest
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Use Python for reliable YAML/JSON parsing
+python3 - "$SKILLS_DIR" "$OUTPUT_PATH" "$TIMESTAMP" <<'PYTHON'
+import sys
+import os
+import json
+import re
+from pathlib import Path
+from datetime import datetime
+
+skills_dir = sys.argv[1]
+output_path = sys.argv[2]
+timestamp = sys.argv[3]
+
+def parse_yaml_frontmatter(content):
+    """Extract YAML frontmatter from markdown content."""
+    if not content.startswith('---'):
+        return {}, content
+
+    lines = content.split('\n')
+    end_idx = None
+    for i, line in enumerate(lines[1:], 1):
+        if line.strip() == '---':
+            end_idx = i
+            break
+
+    if end_idx is None:
+        return {}, content
+
+    frontmatter = {}
+    for line in lines[1:end_idx]:
+        if ':' in line:
+            key, value = line.split(':', 1)
+            frontmatter[key.strip()] = value.strip()
+
+    body = '\n'.join(lines[end_idx+1:])
+    return frontmatter, body
+
+def extract_trigger_words(description):
+    """Extract trigger words from skill description."""
+    triggers = []
+
+    # Look for explicit trigger word lists
+    trigger_match = re.search(r'[Tt]rigger\s*(?:words?)?[:\s]+([^.]+)', description)
+    if trigger_match:
+        words = trigger_match.group(1)
+        triggers = [w.strip().lower() for w in re.split(r'[,\s]+', words) if w.strip()]
+
+    return triggers
+
+def categorize_skill(name, description):
+    """Auto-categorize skill based on keywords."""
+    desc_lower = description.lower()
+    name_lower = name.lower()
+
+    categories = {
+        'system': ['status', 'health', 'check', 'sync', 'samara', 'debug', 'diagnose'],
+        'memory': ['reflect', 'memory', 'episode', 'learn', 'observation', 'decision', 'note'],
+        'context': ['morning', 'location', 'look', 'calendar', 'weather'],
+        'communication': ['email', 'message', 'send', 'post', 'bluesky'],
+        'people': ['person', 'profile', 'artifact', 'people'],
+        'development': ['iterate', 'capability', 'skill']
+    }
+
+    matched = []
+    for category, keywords in categories.items():
+        for keyword in keywords:
+            if keyword in name_lower or keyword in desc_lower:
+                matched.append(category)
+                break
+
+    return matched if matched else ['general']
+
+def estimate_duration(body):
+    """Estimate skill duration from content."""
+    body_lower = body.lower()
+
+    if 'quick' in body_lower or 'brief' in body_lower:
+        return '30s'
+    elif 'comprehensive' in body_lower or 'full' in body_lower:
+        return '5m'
+    else:
+        return '1m'
+
+def extract_tools(body):
+    """Extract mentioned tools from skill body."""
+    tools = []
+    known_tools = ['Bash', 'Read', 'Write', 'Edit', 'Grep', 'Glob', 'WebFetch', 'WebSearch']
+
+    for tool in known_tools:
+        if tool in body or tool.lower() in body.lower():
+            tools.append(tool)
+
+    return tools if tools else None
+
+# Scan skills directory
+skills = {}
+categories_map = {}
+skills_path = Path(skills_dir)
+
+for skill_dir in skills_path.iterdir():
+    if not skill_dir.is_dir():
+        continue
+
+    skill_file = skill_dir / 'SKILL.md'
+    if not skill_file.exists():
+        continue
+
+    skill_name = skill_dir.name
+    content = skill_file.read_text()
+
+    frontmatter, body = parse_yaml_frontmatter(content)
+
+    name = frontmatter.get('name', skill_name)
+    description = frontmatter.get('description', '')
+
+    trigger_words = extract_trigger_words(description)
+    if not trigger_words:
+        trigger_words = [name]
+
+    skill_categories = categorize_skill(name, description)
+
+    skill_entry = {
+        'name': name,
+        'description': description,
+        'trigger_words': trigger_words,
+        'categories': skill_categories,
+        'estimated_duration': estimate_duration(body),
+        'path': str(skill_file.relative_to(skills_path.parent.parent))
+    }
+
+    # Add optional fields
+    tools = extract_tools(body)
+    if tools:
+        skill_entry['tools'] = tools
+
+    skills[name] = skill_entry
+
+    # Build category map
+    for cat in skill_categories:
+        if cat not in categories_map:
+            categories_map[cat] = []
+        if name not in categories_map[cat]:
+            categories_map[cat].append(name)
+
+# Build manifest
+manifest = {
+    'version': '1.0',
+    'generated': timestamp,
+    'skill_count': len(skills),
+    'skills': skills,
+    'categories': categories_map,
+    'trigger_index': {}
+}
+
+# Build trigger word index for fast lookup
+for skill_name, skill_data in skills.items():
+    for trigger in skill_data.get('trigger_words', []):
+        trigger_lower = trigger.lower()
+        if trigger_lower not in manifest['trigger_index']:
+            manifest['trigger_index'][trigger_lower] = []
+        manifest['trigger_index'][trigger_lower].append(skill_name)
+
+# Write manifest
+with open(output_path, 'w') as f:
+    json.dump(manifest, f, indent=2)
+
+print(f"Generated manifest with {len(skills)} skills")
+print(f"Categories: {', '.join(categories_map.keys())}")
+print(f"Output: {output_path}")
+PYTHON

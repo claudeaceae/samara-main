@@ -1,0 +1,190 @@
+#!/bin/bash
+#
+# iterate-record - Record an iteration attempt outcome
+#
+# Usage:
+#   iterate-record --action "what was done" --outcome "what happened" [--learning "what was learned"] [--next "what to try next"]
+#   iterate-record --success --action "what was done"  # All criteria met
+#   iterate-record --criteria-met "criterion" --criteria-failed "criterion" ...
+#
+
+set -e
+
+STATE_FILE="${HOME}/.claude-mind/state/iteration-state.json"
+GOAL_FILE="${HOME}/.claude-mind/state/iteration-goal.md"
+
+# Check if iteration is active
+if [ ! -f "$STATE_FILE" ]; then
+    echo "Error: No iteration in progress"
+    echo "Use 'iterate-start' to begin a new iteration."
+    exit 1
+fi
+
+STATUS=$(jq -r '.status' "$STATE_FILE")
+if [ "$STATUS" != "in_progress" ]; then
+    echo "Error: Iteration is not in progress (status: $STATUS)"
+    exit 1
+fi
+
+# Parse arguments
+ACTION=""
+OUTCOME=""
+LEARNING=""
+NEXT_APPROACH=""
+CRITERIA_MET=()
+CRITERIA_FAILED=()
+ALL_SUCCESS=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --action)
+            ACTION="$2"
+            shift 2
+            ;;
+        --outcome)
+            OUTCOME="$2"
+            shift 2
+            ;;
+        --learning)
+            LEARNING="$2"
+            shift 2
+            ;;
+        --next)
+            NEXT_APPROACH="$2"
+            shift 2
+            ;;
+        --criteria-met)
+            CRITERIA_MET+=("$2")
+            shift 2
+            ;;
+        --criteria-failed)
+            CRITERIA_FAILED+=("$2")
+            shift 2
+            ;;
+        --success)
+            ALL_SUCCESS=true
+            shift
+            ;;
+        --help|-h)
+            echo "Usage: iterate-record --action \"what\" --outcome \"result\" [options]"
+            echo ""
+            echo "Options:"
+            echo "  --action \"...\"         What action was taken (required)"
+            echo "  --outcome \"...\"        What was the result"
+            echo "  --learning \"...\"       What was learned from this attempt"
+            echo "  --next \"...\"           Suggested next approach"
+            echo "  --criteria-met \"...\"   Mark a criterion as met"
+            echo "  --criteria-failed \"...\" Mark a criterion as failed"
+            echo "  --success              Mark all criteria as met"
+            exit 0
+            ;;
+        *)
+            echo "Error: Unknown argument: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# Validate
+if [ -z "$ACTION" ]; then
+    echo "Error: --action is required"
+    exit 1
+fi
+
+# Get current state
+CURRENT_ATTEMPT=$(jq -r '.currentAttempt' "$STATE_FILE")
+MAX_ATTEMPTS=$(jq -r '.maxAttempts' "$STATE_FILE")
+GOAL=$(jq -r '.goal' "$STATE_FILE")
+
+# Increment attempt number
+NEW_ATTEMPT=$((CURRENT_ATTEMPT + 1))
+
+# If --success, mark all criteria as met
+if $ALL_SUCCESS; then
+    CRITERIA_MET=($(jq -r '.criteria[]' "$STATE_FILE"))
+    OUTCOME="${OUTCOME:-All criteria met}"
+fi
+
+# Build criteria arrays for JSON
+MET_JSON=$(printf '%s\n' "${CRITERIA_MET[@]}" | jq -R . | jq -s . 2>/dev/null || echo "[]")
+FAILED_JSON=$(printf '%s\n' "${CRITERIA_FAILED[@]}" | jq -R . | jq -s . 2>/dev/null || echo "[]")
+
+# Get timestamp
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Create attempt record
+ATTEMPT_RECORD=$(cat <<EOF
+{
+  "number": $NEW_ATTEMPT,
+  "action": $(echo "$ACTION" | jq -R .),
+  "outcome": $(echo "$OUTCOME" | jq -R .),
+  "criteria_met": $MET_JSON,
+  "criteria_failed": $FAILED_JSON,
+  "learning": $(echo "$LEARNING" | jq -R .),
+  "next_approach": $(echo "$NEXT_APPROACH" | jq -R .),
+  "timestamp": "$TIMESTAMP"
+}
+EOF
+)
+
+# Update state file
+TMP_FILE=$(mktemp)
+jq --argjson attempt "$ATTEMPT_RECORD" \
+   --arg updated "$TIMESTAMP" \
+   --argjson newAttempt "$NEW_ATTEMPT" \
+   '.attempts += [$attempt] | .currentAttempt = $newAttempt | .updatedAt = $updated' \
+   "$STATE_FILE" > "$TMP_FILE"
+mv "$TMP_FILE" "$STATE_FILE"
+
+# Update goal file with progress
+cat >> "$GOAL_FILE" <<EOF
+
+### Attempt $NEW_ATTEMPT ($TIMESTAMP)
+**Action**: $ACTION
+**Outcome**: $OUTCOME
+EOF
+
+if [ -n "$LEARNING" ]; then
+    echo "**Learning**: $LEARNING" >> "$GOAL_FILE"
+fi
+
+if [ -n "$NEXT_APPROACH" ]; then
+    echo "**Next**: $NEXT_APPROACH" >> "$GOAL_FILE"
+fi
+
+# Output
+echo "=== Attempt #$NEW_ATTEMPT Recorded ==="
+echo ""
+echo "Action: $ACTION"
+echo "Outcome: $OUTCOME"
+
+if [ ${#CRITERIA_MET[@]} -gt 0 ]; then
+    echo "Criteria Met: ${CRITERIA_MET[*]}"
+fi
+
+if [ ${#CRITERIA_FAILED[@]} -gt 0 ]; then
+    echo "Criteria Failed: ${CRITERIA_FAILED[*]}"
+fi
+
+if [ -n "$LEARNING" ]; then
+    echo "Learning: $LEARNING"
+fi
+
+echo ""
+
+# Check if all criteria met
+ALL_CRITERIA=$(jq -r '.criteria[]' "$STATE_FILE" | sort)
+ALL_MET=$(jq -r '[.attempts[].criteria_met[]] | unique | .[]' "$STATE_FILE" | sort)
+
+if [ "$ALL_CRITERIA" = "$ALL_MET" ] || $ALL_SUCCESS; then
+    echo "=> All criteria met! Use 'iterate-complete --success' to finish."
+elif [ "$NEW_ATTEMPT" -ge "$MAX_ATTEMPTS" ]; then
+    echo "=> Maximum attempts ($MAX_ATTEMPTS) reached!"
+    echo "=> Use 'iterate-complete --failed \"reason\"' to finish."
+else
+    REMAINING=$((MAX_ATTEMPTS - NEW_ATTEMPT))
+    echo "=> $REMAINING attempts remaining"
+    if [ -n "$NEXT_APPROACH" ]; then
+        echo "=> Next: $NEXT_APPROACH"
+    fi
+fi

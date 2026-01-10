@@ -15,6 +15,8 @@ Samara is a bootstrap specification for giving Claude a persistent body, memory,
 
 This is not a traditional software project. It's an experiment in AI autonomy.
 
+> **Recent enhancements (Phases 1-4):** Model fallback, semantic memory, proactive messaging, adaptive scheduling. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) for user-facing summary.
+
 ---
 
 ## Getting Started (New Setup)
@@ -159,10 +161,17 @@ The system has three distinct components that must stay synchronized:
 │   ├── observations.md
 │   ├── questions.md
 │   └── decisions.md
+├── semantic/                # Phase 2: Searchable memory index
+│   └── memory.db            # SQLite + FTS5 database
 ├── capabilities/
 │   └── inventory.md
-├── bin/ → repo/scripts/     # Symlinked scripts (48 scripts)
+├── bin/ → repo/scripts/     # Symlinked scripts (61+ scripts)
 ├── state/                   # Runtime state files
+│   ├── ledgers/             # Phase 2: Session handoff documents
+│   ├── triggers/            # Phase 3: Context trigger config
+│   ├── iterations/          # Phase 3: Active iteration state
+│   └── proactive-queue/     # Phase 3: Outgoing message queue
+├── senses/                  # Phase 4: Incoming sense events
 └── logs/
 ```
 
@@ -195,10 +204,17 @@ Interactive workflows available via Claude Code. Invoke with `/skillname` or tri
 | `/person` | View or create person profile |
 | `/note` | Quick observation about a person |
 | `/artifact` | Add file to person's artifacts |
+| `/iterate` | Autonomous iteration until success criteria met |
+| `/senses` | Monitor and test sense event system |
+| `/email` | Check and respond to email |
+| `/debug-session` | Debug Claude Code session issues |
+| `/diagnose-leaks` | Diagnose thinking/session ID leaks |
 
 Skills are defined in `.claude/skills/` and symlinked to `~/.claude/skills/`.
 
 ### Autonomy Schedule
+
+**Base Schedule (via launchd):**
 
 | Time | Event |
 |------|-------|
@@ -206,6 +222,30 @@ Skills are defined in `.claude/skills/` and symlinked to `~/.claude/skills/`.
 | 2:00 PM | Wake cycle |
 | 8:00 PM | Wake cycle |
 | 3:00 AM | Dream cycle |
+
+**Adaptive Scheduling (Phase 4):**
+
+The base schedule can be augmented by `wake-scheduler` which calculates optimal wake times:
+
+| Wake Type | Duration | Context |
+|-----------|----------|---------|
+| `full` | 5+ min | Full context, all capabilities |
+| `light` | 30 sec | Quick scan for urgent items only |
+| `emergency` | Immediate | High-priority external trigger |
+
+**Adaptive triggers:**
+- Calendar event within 30 minutes → early wake
+- High-priority queue item pending → wake now
+- Webhook received (if configured) → process event
+
+**Ritual Context:**
+Each wake type loads time-appropriate guidance via `RitualLoader.swift`:
+- **Morning** (5-11 AM): Planning, goals, calendar review
+- **Afternoon** (12-4 PM): Work focus, progress check
+- **Evening** (5-11 PM): Reflection, relationships, learnings
+- **Dream** (3-4 AM): Memory consolidation, identity evolution
+
+Scripts: `wake-adaptive`, `wake-light`, `wake-scheduler`
 
 ### Task Coordination
 
@@ -250,14 +290,157 @@ When permission is granted, add to the person's profile (`memory/people/{name}/p
 - `MemoryContext.swift`: Excludes collaborator profile from context when `isCollaboratorChat: false`
 - `instructions/privacy-guardrails.md`: Full privacy rules reference
 
+### Model Fallback Chain (Phase 1)
+
+Samara automatically falls back through model tiers if the primary fails:
+
+| Tier | Model | Use Case |
+|------|-------|----------|
+| 1 | Claude Opus 4.5 (API) | Primary — full capability |
+| 2 | Claude Sonnet 4 (API) | Rate limit or cost optimization |
+| 3 | Local 8B (Ollama) | Simple acks, offline, privacy-sensitive |
+| 4 | Queued | All tiers exhausted — retry later |
+
+**Setup for local fallback:**
+```bash
+brew install ollama
+ollama pull llama3.1:8b
+```
+
+**Implementation:** `ModelFallbackChain.swift`, `LocalModelInvoker.swift`
+
+**Task classification for local models:**
+- ✅ Simple acknowledgments ("Got it", "On it")
+- ✅ Status queries ("What time is it?")
+- ✅ Memory lookups (search and summarize)
+- ❌ Complex reasoning, code generation, multi-step tasks
+
+### Semantic Memory (Phase 2)
+
+Beyond episode logs, Samara maintains searchable semantic memory:
+
+**SQLite + FTS5 Database:**
+```
+~/.claude-mind/semantic/memory.db
+```
+
+Indexes all memory files for full-text search by meaning, not just keywords.
+
+**Ledger System:**
+
+At session end, Samara writes a structured handoff document:
+```
+~/.claude-mind/state/ledgers/current-ledger.md
+```
+
+Contains:
+- Active goals with status
+- Recent decisions with rationale
+- Files modified and why
+- Open questions for next session
+
+**Implementation:** `MemoryDatabase.swift`, `LedgerManager.swift`
+
+### Context Awareness (Phase 2)
+
+Samara tracks context usage and warns when running low:
+
+| Level | Action |
+|-------|--------|
+| 70% | Yellow warning in response |
+| 80% | Red warning, suggest wrapping up |
+| 90% | Critical — consider session restart |
+
+**Implementation:** `ContextTracker.swift`
+
+### Proactive Messaging (Phase 3)
+
+Samara can initiate contact based on context triggers (disabled by default).
+
+**Context Triggers:**
+
+Configure conditions that prompt outreach:
+```
+~/.claude-mind/state/triggers/triggers.json
+```
+
+Example trigger:
+```json
+{
+  "id": "home_evening",
+  "name": "Arrived home in evening",
+  "conditions": [
+    {"type": "location", "place": "home"},
+    {"type": "time_range", "start": 17, "end": 22}
+  ],
+  "action": {"type": "queue_thought", "thought": "Welcome home!"},
+  "cooldown": 3600
+}
+```
+
+**Proactive Queue Pacing:**
+
+Messages are automatically paced to avoid spam:
+- Max ~5 proactive messages per day
+- No messages 10 PM - 8 AM (quiet hours)
+- Minimum 1 hour between messages
+- Priority-based ordering
+
+**Implementation:** `ContextTriggers.swift`, `ProactiveQueue.swift`
+
+### Iteration Mode (Phase 3)
+
+For complex tasks requiring multiple attempts, use `/iterate`:
+
+```bash
+/iterate "Get all tests passing" --max-attempts 10 --criteria "npm test exits 0"
+```
+
+Samara will:
+1. Attempt the goal
+2. Record outcome and learnings
+3. Retry with adjustments until success or max attempts
+
+**Scripts:** `iterate-start`, `iterate-status`, `iterate-record`, `iterate-complete`
+
+**Hook:** `check-iteration-stop.sh` reminds about active iterations at session end
+
 ### Services (`services/`)
 
 Python services that extend the organism's capabilities:
 
-| Service | Purpose |
-|---------|---------|
-| `location-receiver` | Receives GPS updates from Overland app (port 8081) |
-| `mcp-memory-bridge` | Shared memory layer for Claude Desktop/Web integration (port 8765) |
+| Service | Port | Purpose |
+|---------|------|---------|
+| `location-receiver` | 8081 | Receives GPS updates from Overland app |
+| `webhook-receiver` | 8082 | Receives webhooks from GitHub, IFTTT, custom sources |
+| `wake-scheduler` | N/A | Calculates adaptive wake times (CLI, not server) |
+| `mcp-memory-bridge` | 8765 | Shared memory layer for Claude Desktop/Web |
+| `bluesky-watcher` | N/A | Polls Bluesky for notifications (launchd interval) |
+| `github-watcher` | N/A | Polls GitHub for notifications (launchd interval) |
+
+#### Webhook Receiver (Phase 4)
+
+Accepts webhooks from external services and converts them to sense events.
+
+```bash
+# Start
+~/.claude-mind/bin/webhook-receiver start
+
+# Status
+~/.claude-mind/bin/webhook-receiver status
+
+# Stop
+~/.claude-mind/bin/webhook-receiver stop
+```
+
+**Endpoints:**
+- `POST /webhook/{source_id}` — Receive webhook (GitHub, IFTTT, custom)
+- `GET /health` — Health check
+- `GET /status` — Show registered sources
+
+**Configuration:** `~/.claude-mind/credentials/webhook-secrets.json`
+
+See `services/webhook-receiver/README.md` for setup.
 
 #### MCP Memory Bridge
 
@@ -288,25 +471,46 @@ Samara/
     ├── main.swift              # Message routing
     ├── Configuration.swift     # Loads config.json
     ├── PermissionRequester.swift
+    ├── Logger.swift
+    ├── Backoff.swift           # Exponential backoff (Phase 1)
     ├── Info.plist
     ├── Senses/
     │   ├── MessageStore.swift  # Reads chat.db
     │   ├── MessageWatcher.swift
     │   ├── MailStore.swift
     │   ├── MailWatcher.swift
-    │   └── NoteWatcher.swift
+    │   ├── NoteWatcher.swift
+    │   ├── ContactsResolver.swift
+    │   ├── CameraCapture.swift
+    │   ├── LocationFileWatcher.swift
+    │   ├── SenseEvent.swift        # Sense event schema (Phase 4)
+    │   └── SenseDirectoryWatcher.swift  # Watches ~/.claude-mind/senses/
     ├── Actions/
-    │   ├── ClaudeInvoker.swift # Invokes Claude Code
+    │   ├── ClaudeInvoker.swift     # Invokes Claude Code
     │   ├── MessageSender.swift
-    │   └── MessageBus.swift    # Unified output channel
+    │   ├── MessageBus.swift        # Unified output channel
+    │   ├── ModelFallbackChain.swift    # Multi-tier fallback (Phase 1)
+    │   ├── LocalModelInvoker.swift     # Ollama integration (Phase 1)
+    │   └── ReverseGeocoder.swift
     └── Mind/
         ├── SessionManager.swift
+        ├── SessionCache.swift      # Session caching (Phase 1)
         ├── TaskLock.swift
         ├── MessageQueue.swift
         ├── QueueProcessor.swift
         ├── MemoryContext.swift
+        ├── MemoryDatabase.swift    # SQLite + FTS5 (Phase 2)
+        ├── LedgerManager.swift     # Structured handoffs (Phase 2)
+        ├── ContextTracker.swift    # Context warnings (Phase 2)
         ├── EpisodeLogger.swift
-        └── TaskRouter.swift    # Parallel task isolation
+        ├── TaskRouter.swift        # Parallel task isolation
+        ├── LocationTracker.swift
+        ├── ContextTriggers.swift   # Proactive triggers (Phase 3)
+        ├── ProactiveQueue.swift    # Message pacing (Phase 3)
+        ├── VerificationService.swift   # Local model verification (Phase 3)
+        ├── RitualLoader.swift      # Wake-type context (Phase 4)
+        ├── SenseRouter.swift       # Routes sense events (Phase 4)
+        └── PermissionDialogMonitor.swift
 ```
 
 ### Response Sanitization (Critical for Multi-Stream Conversations)

@@ -61,6 +61,21 @@ If there's nothing to do, it can choose rest — consciously, not by default.
 
 ---
 
+## Recent Enhancements (Phases 1-4)
+
+The base system has been extended with resilience, memory, and autonomy features:
+
+| Phase | Focus | Key Features |
+|-------|-------|--------------|
+| **1** | Resilience | Model fallback chain (Claude → Sonnet → local 8B), stuck task detection, session caching |
+| **2** | Memory | Semantic search (SQLite+FTS5), ledger system for session handoffs, context warnings |
+| **3** | Autonomy | Proactive messaging with triggers, `/iterate` skill for persistent tasks, verification loops |
+| **4** | Scheduling | Adaptive wake times, light wake cycles, webhook receiver, ritual context |
+
+Most features require explicit configuration. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) for user-facing details and [`CLAUDE.md`](CLAUDE.md) for technical reference.
+
+---
+
 ## How It Works
 
 ```
@@ -83,8 +98,9 @@ If there's nothing to do, it can choose rest — consciously, not by default.
 │   └── NoteWatcher      → Apple Notes          → Claude Code      │
 │   └── SenseWatcher     → ~/.claude-mind/senses/ (satellites)     │
 │       ├── location-receiver (GPS from phone)                     │
-│       ├── webhook-receiver (GitHub, APIs) [future]               │
-│       ├── feed-watcher (RSS, news) [future]                      │
+│       ├── webhook-receiver (GitHub, IFTTT, APIs)                 │
+│       ├── bluesky-watcher (social notifications)                 │
+│       ├── github-watcher (repo notifications)                    │
 │       └── [extensible...]                                        │
 │                                                                  │
 │   ~/.claude-mind/ (Memory & Soul)                                │

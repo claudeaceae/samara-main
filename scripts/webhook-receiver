@@ -1,0 +1,145 @@
+#!/bin/bash
+#
+# webhook-receiver - Wrapper for webhook receiver service
+#
+# Usage:
+#   webhook-receiver start [--port PORT]
+#   webhook-receiver stop
+#   webhook-receiver status
+#   webhook-receiver logs
+#
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SERVICE_DIR="${SCRIPT_DIR}/../services/webhook-receiver"
+
+# If running from symlink, resolve the actual location
+if [ -L "${BASH_SOURCE[0]}" ]; then
+    REAL_SCRIPT=$(readlink "${BASH_SOURCE[0]}")
+    SCRIPT_DIR="$(cd "$(dirname "$REAL_SCRIPT")" && pwd)"
+    SERVICE_DIR="${SCRIPT_DIR}/../services/webhook-receiver"
+fi
+
+# Also check relative to samara-main repo
+if [ ! -f "$SERVICE_DIR/server.py" ]; then
+    SERVICE_DIR="$HOME/Developer/samara-main/services/webhook-receiver"
+fi
+
+MIND_PATH="${HOME}/.claude-mind"
+PID_FILE="${MIND_PATH}/state/webhook-receiver.pid"
+LOG_FILE="${MIND_PATH}/logs/webhook-receiver.log"
+DEFAULT_PORT=8082
+
+# Ensure directories exist
+mkdir -p "$(dirname "$PID_FILE")"
+mkdir -p "$(dirname "$LOG_FILE")"
+
+start_service() {
+    local port="${1:-$DEFAULT_PORT}"
+
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Webhook receiver already running (PID: $pid)"
+            return 1
+        fi
+        rm -f "$PID_FILE"
+    fi
+
+    echo "Starting webhook receiver on port $port..."
+    cd "$SERVICE_DIR"
+
+    # Install dependencies if needed
+    if ! python3 -c "import fastapi" 2>/dev/null; then
+        echo "Installing dependencies..."
+        pip3 install -q -r requirements.txt
+    fi
+
+    # Start in background
+    nohup python3 server.py --port "$port" >> "$LOG_FILE" 2>&1 &
+    local pid=$!
+    echo $pid > "$PID_FILE"
+
+    sleep 1
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "Webhook receiver started (PID: $pid)"
+        echo "Listening on http://0.0.0.0:$port"
+    else
+        echo "Failed to start webhook receiver"
+        rm -f "$PID_FILE"
+        return 1
+    fi
+}
+
+stop_service() {
+    if [ ! -f "$PID_FILE" ]; then
+        echo "Webhook receiver not running (no PID file)"
+        return 0
+    fi
+
+    local pid=$(cat "$PID_FILE")
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "Stopping webhook receiver (PID: $pid)..."
+        kill "$pid"
+        sleep 1
+        if kill -0 "$pid" 2>/dev/null; then
+            kill -9 "$pid"
+        fi
+    fi
+    rm -f "$PID_FILE"
+    echo "Webhook receiver stopped"
+}
+
+show_status() {
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE")
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Webhook receiver is running (PID: $pid)"
+
+            # Try to get health status
+            local health=$(curl -s "http://localhost:$DEFAULT_PORT/health" 2>/dev/null)
+            if [ -n "$health" ]; then
+                echo "Health: $health"
+            fi
+
+            local status=$(curl -s "http://localhost:$DEFAULT_PORT/status" 2>/dev/null)
+            if [ -n "$status" ]; then
+                echo "Status: $status"
+            fi
+            return 0
+        fi
+    fi
+    echo "Webhook receiver is not running"
+    return 1
+}
+
+show_logs() {
+    if [ -f "$LOG_FILE" ]; then
+        tail -f "$LOG_FILE"
+    else
+        echo "No log file found"
+    fi
+}
+
+case "${1:-status}" in
+    start)
+        start_service "$2"
+        ;;
+    stop)
+        stop_service
+        ;;
+    restart)
+        stop_service
+        sleep 1
+        start_service "$2"
+        ;;
+    status)
+        show_status
+        ;;
+    logs)
+        show_logs
+        ;;
+    *)
+        echo "Usage: webhook-receiver {start|stop|restart|status|logs} [--port PORT]"
+        exit 1
+        ;;
+esac

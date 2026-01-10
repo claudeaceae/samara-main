@@ -15,11 +15,36 @@ final class MemoryContext {
     private let mindPath: String
     private let dbPath: String
 
+    /// Native SQLite + FTS5 memory database
+    private var memoryDB: MemoryDatabase?
+
+    /// Whether to use native FTS5 (true) or fall back to subprocess (false)
+    private var useNativeFTS: Bool = true
+
     init() {
         self.mindPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude-mind")
             .path
         self.dbPath = (mindPath as NSString).appendingPathComponent("memory.db")
+
+        // Initialize native database
+        initializeMemoryDatabase()
+    }
+
+    /// Initialize the native memory database
+    private func initializeMemoryDatabase() {
+        let semanticDbPath = (mindPath as NSString).appendingPathComponent("semantic/memory.db")
+        memoryDB = MemoryDatabase(dbPath: semanticDbPath)
+
+        do {
+            try memoryDB?.open()
+            log("Native FTS5 memory database initialized", level: .info, component: "MemoryContext")
+        } catch {
+            log("Failed to initialize native FTS5, falling back to subprocess: \(error)",
+                level: .warn, component: "MemoryContext")
+            useNativeFTS = false
+            memoryDB = nil
+        }
     }
 
     /// Builds a context string from key memory files
@@ -334,6 +359,40 @@ final class MemoryContext {
     ///   - limit: Maximum number of results (default 5)
     /// - Returns: Array of related Memory objects
     func findRelatedMemories(query: String, limit: Int = 5) -> [Memory] {
+        // Try native FTS5 first
+        if useNativeFTS, let db = memoryDB {
+            return findRelatedMemoriesNative(query: query, limit: limit, db: db)
+        }
+
+        // Fall back to subprocess method
+        return findRelatedMemoriesSubprocess(query: query, limit: limit)
+    }
+
+    /// Native FTS5 search using MemoryDatabase
+    private func findRelatedMemoriesNative(query: String, limit: Int, db: MemoryDatabase) -> [Memory] {
+        do {
+            let results = try db.search(query: query, limit: limit)
+
+            // Convert MemoryDatabase.MemoryEntry to Memory
+            return results.map { entry in
+                Memory(
+                    id: Int(entry.id),
+                    content: entry.content,
+                    context: entry.context,
+                    memoryType: entry.memoryType,
+                    episodeDate: entry.episodeDate,
+                    themes: []  // Native DB doesn't track themes yet
+                )
+            }
+        } catch {
+            log("Native FTS search failed: \(error)", level: .warn, component: "MemoryContext")
+            // Fall back to subprocess on error
+            return findRelatedMemoriesSubprocess(query: query, limit: limit)
+        }
+    }
+
+    /// Subprocess-based FTS5 search (legacy fallback)
+    private func findRelatedMemoriesSubprocess(query: String, limit: Int) -> [Memory] {
         guard FileManager.default.fileExists(atPath: dbPath) else {
             return []
         }

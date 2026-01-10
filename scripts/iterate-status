@@ -1,0 +1,89 @@
+#!/bin/bash
+#
+# iterate-status - Check current iteration state
+#
+# Usage:
+#   iterate-status [--json]
+#
+
+STATE_FILE="${HOME}/.claude-mind/state/iteration-state.json"
+
+# Check if state file exists
+if [ ! -f "$STATE_FILE" ]; then
+    echo "No iteration in progress."
+    echo "Use 'iterate-start' to begin a new iteration."
+    exit 0
+fi
+
+# Parse arguments
+OUTPUT_JSON=false
+if [ "$1" = "--json" ]; then
+    OUTPUT_JSON=true
+fi
+
+if $OUTPUT_JSON; then
+    cat "$STATE_FILE"
+    exit 0
+fi
+
+# Human-readable output
+GOAL=$(jq -r '.goal' "$STATE_FILE")
+STATUS=$(jq -r '.status' "$STATE_FILE")
+CURRENT=$(jq -r '.currentAttempt' "$STATE_FILE")
+MAX=$(jq -r '.maxAttempts' "$STATE_FILE")
+STARTED=$(jq -r '.startedAt' "$STATE_FILE")
+UPDATED=$(jq -r '.updatedAt' "$STATE_FILE")
+
+echo "=== Iteration Status ==="
+echo ""
+echo "Goal: $GOAL"
+echo "Status: $STATUS"
+echo "Attempts: $CURRENT / $MAX"
+echo "Started: $STARTED"
+echo "Updated: $UPDATED"
+echo ""
+
+# Show criteria
+echo "Criteria:"
+jq -r '.criteria[]' "$STATE_FILE" | while read -r criterion; do
+    echo "  - $criterion"
+done
+echo ""
+
+# Show recent attempts
+ATTEMPT_COUNT=$(jq '.attempts | length' "$STATE_FILE")
+if [ "$ATTEMPT_COUNT" -gt 0 ]; then
+    echo "Recent Attempts:"
+    # Show last 3 attempts
+    jq -r '.attempts | .[-3:] | .[] | "  #\(.number): \(.outcome // "pending")\n    Action: \(.action)\n    Learning: \(.learning // "none")"' "$STATE_FILE"
+    echo ""
+fi
+
+# Status-specific messaging
+case "$STATUS" in
+    in_progress)
+        REMAINING=$((MAX - CURRENT))
+        echo "=> $REMAINING attempts remaining"
+
+        # Show suggested next action if available
+        LAST_NEXT=$(jq -r '.attempts[-1].next_approach // empty' "$STATE_FILE")
+        if [ -n "$LAST_NEXT" ]; then
+            echo "=> Suggested next: $LAST_NEXT"
+        fi
+        ;;
+    success)
+        echo "=> Iteration completed successfully!"
+        jq -r '.summary // empty' "$STATE_FILE" | while read -r line; do
+            echo "   $line"
+        done
+        ;;
+    failed)
+        echo "=> Iteration failed after $CURRENT attempts"
+        jq -r '.summary // empty' "$STATE_FILE" | while read -r line; do
+            echo "   $line"
+        done
+        ;;
+    abandoned)
+        echo "=> Iteration was abandoned"
+        ;;
+esac

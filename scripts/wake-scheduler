@@ -1,0 +1,32 @@
+#!/bin/bash
+#
+# wake-scheduler - Wrapper for wake scheduler service
+#
+# Usage:
+#   wake-scheduler check    # Check if should wake now
+#   wake-scheduler next     # Get next scheduled wake time
+#   wake-scheduler status   # Show scheduler status
+#   wake-scheduler record   # Record that a wake occurred
+#
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SERVICE_DIR="${SCRIPT_DIR}/../services/wake-scheduler"
+
+# If running from symlink, resolve the actual location
+if [ -L "${BASH_SOURCE[0]}" ]; then
+    REAL_SCRIPT=$(readlink "${BASH_SOURCE[0]}")
+    SCRIPT_DIR="$(cd "$(dirname "$REAL_SCRIPT")" && pwd)"
+    SERVICE_DIR="${SCRIPT_DIR}/../services/wake-scheduler"
+fi
+
+# Also check relative to samara-main repo
+if [ ! -f "$SERVICE_DIR/scheduler.py" ]; then
+    SERVICE_DIR="$HOME/Developer/samara-main/services/wake-scheduler"
+fi
+
+if [ ! -f "$SERVICE_DIR/scheduler.py" ]; then
+    echo "Error: Could not find wake-scheduler service"
+    exit 1
+fi
+
+python3 "$SERVICE_DIR/scheduler.py" "$@"

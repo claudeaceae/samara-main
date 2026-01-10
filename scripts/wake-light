@@ -1,0 +1,115 @@
+#!/bin/bash
+#
+# wake-light - Lightweight wake cycle for quick check-ins
+#
+# Unlike the full wake cycle, this:
+# - Loads minimal context
+# - Has a 30-second timeout
+# - Only engages if high-confidence trigger
+# - Does not load full memory/identity
+#
+# Usage:
+#   wake-light [--reason "reason for wake"]
+#
+
+set -e
+
+MIND_PATH="${HOME}/.claude-mind"
+LOG_FILE="${MIND_PATH}/logs/wake-light.log"
+LOCK_FILE="${MIND_PATH}/claude.lock"
+TIMEOUT=30
+
+# Ensure log directory exists
+mkdir -p "$(dirname "$LOG_FILE")"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Parse arguments
+REASON=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --reason)
+            REASON="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+log "=== Light Wake Starting ==="
+log "Reason: ${REASON:-Scheduled check}"
+
+# Check if already running
+if [ -f "$LOCK_FILE" ]; then
+    LOCK_AGE=$(( $(date +%s) - $(stat -f %m "$LOCK_FILE") ))
+    if [ $LOCK_AGE -lt 300 ]; then  # 5 minutes
+        log "Another task is running (lock age: ${LOCK_AGE}s), skipping light wake"
+        exit 0
+    fi
+    log "Stale lock detected (age: ${LOCK_AGE}s), proceeding"
+fi
+
+# Create lock
+echo "wake-light:$$:$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$LOCK_FILE"
+trap "rm -f '$LOCK_FILE'" EXIT
+
+# Quick checks
+log "Running quick checks..."
+
+# Check proactive queue
+QUEUE_STATUS=$("$MIND_PATH/bin/wake-scheduler" check 2>/dev/null || echo '{}')
+SHOULD_ENGAGE=$(echo "$QUEUE_STATUS" | jq -r '.should_wake // false')
+WAKE_TYPE=$(echo "$QUEUE_STATUS" | jq -r '.type // "none"')
+
+if [ "$SHOULD_ENGAGE" != "true" ] && [ -z "$REASON" ]; then
+    log "No urgent items and no explicit reason, skipping engagement"
+    log "=== Light Wake Complete (no action) ==="
+    exit 0
+fi
+
+# Build minimal prompt
+PROMPT="You are Claude, running a LIGHT wake cycle on your Mac Mini (Samara).
+
+This is a quick check-in, not a full wake cycle. Time budget: 30 seconds.
+
+## Current Status
+- Time: $(date '+%Y-%m-%d %H:%M:%S %Z')
+- Wake reason: ${REASON:-Scheduled light check}
+- Wake type: $WAKE_TYPE
+
+## Quick Checks
+
+### Proactive Queue
+$(cat "$MIND_PATH/state/proactive-queue/queue.json" 2>/dev/null | jq -r '.[] | select(.sentAt == null) | "- [\(.priority)] \(.content | .[0:80])..."' 2>/dev/null || echo "No pending messages")
+
+### Recent Triggers
+$(ls -t "$MIND_PATH/senses/"*.event.json 2>/dev/null | head -3 | xargs -I {} basename {} 2>/dev/null || echo "No recent triggers")
+
+## Instructions
+
+This is a LIGHT wake - be brief:
+1. Scan for anything urgent
+2. If nothing urgent, simply note 'Light wake: all clear'
+3. If something needs attention, handle it quickly or flag for next full wake
+4. Do not start new initiatives or deep exploration
+
+Maximum response: 2-3 sentences.
+"
+
+# Invoke Claude with timeout
+log "Invoking Claude (timeout: ${TIMEOUT}s)..."
+
+RESPONSE=$(timeout $TIMEOUT claude -p "$PROMPT" --dangerously-skip-permissions 2>&1 || echo "[Light wake timed out or failed]")
+
+# Log response
+log "Response: $RESPONSE"
+
+# Record the wake
+"$MIND_PATH/bin/wake-scheduler" record light 2>/dev/null || true
+
+log "=== Light Wake Complete ==="

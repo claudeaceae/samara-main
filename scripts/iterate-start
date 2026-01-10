@@ -1,0 +1,145 @@
+#!/bin/bash
+#
+# iterate-start - Initialize a new autonomous iteration session
+#
+# Usage:
+#   iterate-start "goal description" [--max-attempts N] [--criteria "criterion"]...
+#
+# Examples:
+#   iterate-start "fix build errors" --max-attempts 5 --criteria "build succeeds"
+#   iterate-start "get tests passing" --criteria "all tests pass" --criteria "no warnings"
+#
+
+set -e
+
+STATE_DIR="${HOME}/.claude-mind/state"
+STATE_FILE="${STATE_DIR}/iteration-state.json"
+GOAL_FILE="${STATE_DIR}/iteration-goal.md"
+
+# Ensure state directory exists
+mkdir -p "$STATE_DIR"
+
+# Parse arguments
+GOAL=""
+MAX_ATTEMPTS=5
+CRITERIA=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --max-attempts)
+            MAX_ATTEMPTS="$2"
+            shift 2
+            ;;
+        --criteria)
+            CRITERIA+=("$2")
+            shift 2
+            ;;
+        --help|-h)
+            echo "Usage: iterate-start \"goal\" [--max-attempts N] [--criteria \"criterion\"]..."
+            echo ""
+            echo "Options:"
+            echo "  --max-attempts N    Maximum attempts before giving up (default: 5)"
+            echo "  --criteria \"...\"    Success criterion (can be specified multiple times)"
+            exit 0
+            ;;
+        *)
+            if [ -z "$GOAL" ]; then
+                GOAL="$1"
+            else
+                echo "Error: Unknown argument: $1"
+                exit 1
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Validate
+if [ -z "$GOAL" ]; then
+    echo "Error: Goal is required"
+    echo "Usage: iterate-start \"goal\" [--max-attempts N] [--criteria \"criterion\"]..."
+    exit 1
+fi
+
+if [ ${#CRITERIA[@]} -eq 0 ]; then
+    echo "Error: At least one criterion is required"
+    echo "Usage: iterate-start \"goal\" --criteria \"criterion\""
+    exit 1
+fi
+
+# Check if iteration already in progress
+if [ -f "$STATE_FILE" ]; then
+    STATUS=$(jq -r '.status' "$STATE_FILE" 2>/dev/null || echo "")
+    if [ "$STATUS" = "in_progress" ]; then
+        echo "Warning: Iteration already in progress"
+        echo "Current goal: $(jq -r '.goal' "$STATE_FILE")"
+        echo ""
+        read -p "Abandon current iteration and start new one? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Keeping existing iteration. Use 'iterate-status' to check progress."
+            exit 0
+        fi
+    fi
+fi
+
+# Build criteria JSON array
+CRITERIA_JSON=$(printf '%s\n' "${CRITERIA[@]}" | jq -R . | jq -s .)
+
+# Get current timestamp
+TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Create state file
+cat > "$STATE_FILE" <<EOF
+{
+  "goal": $(echo "$GOAL" | jq -R .),
+  "criteria": $CRITERIA_JSON,
+  "maxAttempts": $MAX_ATTEMPTS,
+  "currentAttempt": 0,
+  "status": "in_progress",
+  "attempts": [],
+  "startedAt": "$TIMESTAMP",
+  "updatedAt": "$TIMESTAMP"
+}
+EOF
+
+# Create human-readable goal file
+cat > "$GOAL_FILE" <<EOF
+# Iteration Goal
+
+**Started**: $TIMESTAMP
+**Max Attempts**: $MAX_ATTEMPTS
+
+## Goal
+$GOAL
+
+## Success Criteria
+EOF
+
+for criterion in "${CRITERIA[@]}"; do
+    echo "- [ ] $criterion" >> "$GOAL_FILE"
+done
+
+cat >> "$GOAL_FILE" <<EOF
+
+## Progress
+_Attempts will be logged here_
+
+---
+EOF
+
+echo "=== Iteration Started ==="
+echo ""
+echo "Goal: $GOAL"
+echo "Max Attempts: $MAX_ATTEMPTS"
+echo "Criteria:"
+for criterion in "${CRITERIA[@]}"; do
+    echo "  - $criterion"
+done
+echo ""
+echo "State file: $STATE_FILE"
+echo "Goal file: $GOAL_FILE"
+echo ""
+echo "Use 'iterate-record' after each attempt to log progress."
+echo "Use 'iterate-status' to check current state."
+echo "Use 'iterate-complete' when finished."

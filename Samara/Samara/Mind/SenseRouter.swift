@@ -249,6 +249,11 @@ final class SenseRouter {
         handlers["test"] = { [weak self] event in
             self?.handleTestEvent(event)
         }
+
+        // Webhook events from external services
+        handlers["webhook"] = { [weak self] event in
+            self?.handleWebhookEvent(event)
+        }
     }
 
     private func handleLocationEvent(_ event: SenseEvent) {
@@ -463,6 +468,114 @@ final class SenseRouter {
 
             Process each notification and take appropriate action. Be helpful and professional.
             """
+    }
+
+    // MARK: - Webhook Handler
+
+    private func handleWebhookEvent(_ event: SenseEvent) {
+        let source = event.getString("source") ?? "unknown"
+        log("Webhook sense event from \(source)", level: .info, component: "SenseRouter")
+
+        // Build specialized prompt for webhook
+        let context = memoryContext.buildContext()
+        let prompt = buildWebhookPrompt(for: event)
+
+        do {
+            let result = try invoker.invoke(
+                prompt: prompt,
+                context: context,
+                attachmentPaths: []
+            )
+
+            log("Webhook event processed: \(result.prefix(50))...", level: .debug, component: "SenseRouter")
+
+            // Determine if we should notify collaborator based on source type
+            let notifyCollaborator = shouldNotifyForWebhook(source: source, event: event)
+
+            if notifyCollaborator {
+                try messageBus.send(result, type: .senseEvent)
+            }
+
+            // Log to episode
+            let eventDescription = formatEventForLogging(event)
+            episodeLogger.logExchange(
+                from: "Sense:webhook:\(source)",
+                message: eventDescription,
+                response: result
+            )
+
+        } catch {
+            log("Error processing webhook event: \(error)", level: .error, component: "SenseRouter")
+        }
+    }
+
+    private func buildWebhookPrompt(for event: SenseEvent) -> String {
+        let source = event.getString("source") ?? "unknown"
+
+        // Extract payload
+        var payloadJson = "{}"
+        if let payload = event.getDict("payload") {
+            if let data = try? JSONSerialization.data(withJSONObject: payload, options: .prettyPrinted),
+               let json = String(data: data, encoding: .utf8) {
+                payloadJson = json
+            }
+        }
+
+        // Get suggested prompt from context
+        let suggestedPrompt = event.context?.suggestedPrompt ?? "Process this webhook event"
+
+        return """
+            You received a webhook from an external service.
+
+            ## Webhook Details
+            - Source: \(source)
+            - Timestamp: \(ISO8601DateFormatter().string(from: event.timestamp))
+            - Context: \(suggestedPrompt)
+
+            ## Payload
+            \(payloadJson)
+
+            ## Instructions
+
+            Analyze this webhook and take appropriate action:
+
+            1. **Understand** what triggered this webhook
+            2. **Evaluate** if any action is needed
+            3. **Act** using available tools if appropriate:
+               - For GitHub events: Use `gh` CLI
+               - For IFTTT triggers: Take contextual action
+               - For custom webhooks: Follow the source-specific logic
+
+            4. **Summarize** what you did (or decided not to do)
+
+            Be concise. Only notify \(collaboratorName) if it's something they should know about.
+            """
+    }
+
+    private func shouldNotifyForWebhook(source: String, event: SenseEvent) -> Bool {
+        // Source-specific notification rules
+
+        switch source {
+        case "github":
+            // Only notify for significant events
+            if let payload = event.getDict("payload") {
+                let action = payload["action"] as? String ?? ""
+                return ["opened", "closed", "merged", "assigned"].contains(action)
+            }
+            return false
+
+        case "ifttt":
+            // IFTTT events are usually user-configured, so notify
+            return true
+
+        case "test":
+            // Test events don't need collaborator notification
+            return false
+
+        default:
+            // Default: notify for unknown sources (safer)
+            return true
+        }
     }
 }
 
