@@ -7,6 +7,8 @@ struct Configuration: Codable {
     let collaborator: CollaboratorConfig
     let notes: NotesConfig
     let mail: MailConfig
+    let models: ModelsConfig?
+    let timeouts: TimeoutsConfig?
 
     struct EntityConfig: Codable {
         let name: String
@@ -31,6 +33,40 @@ struct Configuration: Codable {
         let account: String
     }
 
+    /// Model configuration for multi-tier fallback
+    struct ModelsConfig: Codable {
+        let primary: String
+        let fallbacks: [String]
+        let localEndpoint: String
+        let taskClassification: TaskClassificationConfig?
+
+        struct TaskClassificationConfig: Codable {
+            let simpleAck: [String]?
+            let statusQuery: [String]?
+            let complex: [String]?
+        }
+
+        static let defaults = ModelsConfig(
+            primary: "claude",
+            fallbacks: ["ollama:llama3.1:8b"],
+            localEndpoint: "http://localhost:11434",
+            taskClassification: nil
+        )
+    }
+
+    /// Timeout configuration for various operations
+    struct TimeoutsConfig: Codable {
+        let claudeInvocation: Int
+        let localModel: Int
+        let stuckTask: Int
+
+        static let defaults = TimeoutsConfig(
+            claudeInvocation: 300,  // 5 minutes
+            localModel: 60,         // 1 minute
+            stuckTask: 7200         // 2 hours
+        )
+    }
+
     /// Default configuration (fallback if config.json doesn't exist)
     static let defaults = Configuration(
         entity: EntityConfig(
@@ -51,8 +87,19 @@ struct Configuration: Codable {
         ),
         mail: MailConfig(
             account: "iCloud"
-        )
+        ),
+        models: nil,
+        timeouts: nil
     )
+
+    /// Convenience accessors with defaults
+    var modelsConfig: ModelsConfig {
+        models ?? ModelsConfig.defaults
+    }
+
+    var timeoutsConfig: TimeoutsConfig {
+        timeouts ?? TimeoutsConfig.defaults
+    }
 
     /// Load configuration from ~/.claude-mind/config.json
     /// Returns defaults if file doesn't exist or can't be parsed

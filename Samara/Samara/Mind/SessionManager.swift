@@ -35,6 +35,9 @@ final class SessionManager {
     /// Set of chats currently processing (to prevent concurrent batch processing per chat)
     private var processingChats: Set<String> = []
 
+    /// In-memory session cache for reducing filesystem I/O
+    private let sessionCache = SessionCache(ttl: 45.0, maxEntries: 100)
+
     /// Serial queue for timer operations
     private let timerQueue = DispatchQueue(label: "co.organelle.samara.sessionmanager.timer")
 
@@ -175,6 +178,9 @@ final class SessionManager {
 
         let statePath = sessionStatePath(forChat: chatIdentifier)
         try? FileManager.default.removeItem(atPath: statePath)
+
+        // Invalidate cache
+        sessionCache.invalidateSync(chatIdentifier)
         log("Session cleared for chat \(chatIdentifier)", level: .info, component: "SessionManager")
 
         lock.unlock()
@@ -348,6 +354,8 @@ final class SessionManager {
                 let data = try Data(contentsOf: URL(fileURLWithPath: path))
                 let state = try JSONDecoder().decode(SessionState.self, from: data)
                 chatSessions[state.chatIdentifier] = state
+                // Also populate cache
+                sessionCache.setSync(state.chatIdentifier, state: state)
                 log("Loaded session state for chat \(state.chatIdentifier): \(state.sessionId)", level: .debug, component: "SessionManager")
             } catch {
                 log("Failed to load session state from \(file): \(error)", level: .warn, component: "SessionManager")
@@ -355,6 +363,7 @@ final class SessionManager {
                 backupCorruptedFile(at: path, filename: file)
             }
         }
+        log("Loaded \(chatSessions.count) session states into memory and cache", level: .info, component: "SessionManager")
     }
 
     /// Backup a corrupted session state file for debugging
@@ -380,10 +389,14 @@ final class SessionManager {
         let url = URL(fileURLWithPath: path)
 
         guard let state = chatSessions[chatIdentifier] else {
-            // No state to save - remove the file
+            // No state to save - remove the file and invalidate cache
             try? FileManager.default.removeItem(atPath: path)
+            sessionCache.invalidateSync(chatIdentifier)
             return
         }
+
+        // Update cache immediately
+        sessionCache.setSync(chatIdentifier, state: state)
 
         let backoff = Backoff(config: Backoff.Config(
             maxRetries: 3,

@@ -23,10 +23,35 @@ final class ClaudeInvoker {
     /// Maximum retry attempts for session-related errors
     private let maxRetries = 2
 
-    init(claudePath: String = "/usr/local/bin/claude", timeout: TimeInterval = 300, memoryContext: MemoryContext? = nil) {
+    /// Local model invoker for Ollama fallback
+    private let localInvoker: LocalModelInvoker
+
+    /// Fallback chain for multi-tier model invocation
+    private let fallbackChain: ModelFallbackChain
+
+    /// Whether to use fallback chain (can be disabled for testing)
+    private let useFallbackChain: Bool
+
+    init(claudePath: String = "/usr/local/bin/claude", timeout: TimeInterval = 300, memoryContext: MemoryContext? = nil, useFallbackChain: Bool = true) {
         self.claudePath = claudePath
         self.timeout = timeout
         self.memoryContext = memoryContext ?? MemoryContext()
+        self.useFallbackChain = useFallbackChain
+
+        // Initialize local model invoker with config
+        let localEndpoint = URL(string: config.modelsConfig.localEndpoint) ?? URL(string: "http://localhost:11434")!
+        let localTimeout = TimeInterval(config.timeoutsConfig.localModel)
+        self.localInvoker = LocalModelInvoker(endpoint: localEndpoint, timeout: localTimeout)
+
+        // Initialize fallback chain
+        self.fallbackChain = ModelFallbackChain(
+            config: config.modelsConfig,
+            localInvoker: self.localInvoker,
+            timeoutConfig: config.timeoutsConfig
+        )
+
+        log("ClaudeInvoker initialized (fallback=\(useFallbackChain), localEndpoint=\(localEndpoint))",
+            level: .info, component: "ClaudeInvoker")
     }
 
     /// Invokes Claude with a batch of messages and optional session resumption
@@ -39,7 +64,65 @@ final class ClaudeInvoker {
     /// - Returns: ClaudeInvocationResult containing response and new session ID
     func invokeBatch(messages: [Message], context: String, resumeSessionId: String? = nil, targetHandles: Set<String> = [], chatInfo: ChatInfo? = nil) throws -> ClaudeInvocationResult {
         let fullPrompt = buildBatchPrompt(messages: messages, context: context, targetHandles: targetHandles, chatInfo: chatInfo)
+
+        // Use fallback chain if enabled
+        if useFallbackChain {
+            return try invokeBatchWithFallback(prompt: fullPrompt, context: context, resumeSessionId: resumeSessionId)
+        }
+
+        // Direct invocation (fallback disabled)
         return try invokeWithPrompt(fullPrompt, resumeSessionId: resumeSessionId, retryCount: 0)
+    }
+
+    /// Invokes with multi-tier fallback support (sync wrapper for async fallback chain)
+    private func invokeBatchWithFallback(prompt: String, context: String, resumeSessionId: String?) throws -> ClaudeInvocationResult {
+        var result: ClaudeInvocationResult?
+        var thrownError: Error?
+
+        let semaphore = DispatchSemaphore(value: 0)
+
+        Task {
+            do {
+                let fallbackResult = try await fallbackChain.execute(
+                    prompt: prompt,
+                    sessionId: resumeSessionId,
+                    context: context,
+                    primaryInvoker: { [self] prompt, sessionId in
+                        // This is the Claude CLI invocation
+                        return try self.invokeWithPrompt(prompt, resumeSessionId: sessionId, retryCount: 0)
+                    }
+                )
+
+                // Log which tier was used
+                if fallbackResult.usedLocalModel {
+                    log("Response from local model (tier: \(fallbackResult.tier.description))",
+                        level: .info, component: "ClaudeInvoker")
+                } else {
+                    log("Response from Claude (tier: \(fallbackResult.tier.description))",
+                        level: .info, component: "ClaudeInvoker")
+                }
+
+                result = ClaudeInvocationResult(
+                    response: fallbackResult.response,
+                    sessionId: fallbackResult.sessionId
+                )
+            } catch {
+                thrownError = error
+            }
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+
+        if let error = thrownError {
+            throw error
+        }
+
+        guard let finalResult = result else {
+            throw ClaudeInvokerError.invalidOutput
+        }
+
+        return finalResult
     }
 
     /// Invokes Claude with the given prompt and returns the response (legacy single-message interface)
@@ -262,6 +345,26 @@ final class ClaudeInvoker {
     private func sanitizeResponse(_ text: String) -> (sanitized: String, filtered: String?) {
         var result = text
         var filtered: [String] = []
+
+        // Strip meta-commentary prefixes that describe actions rather than being the response
+        // These leak when the model confuses "output for user" with "narration of actions"
+        let metaCommentaryPrefixes = [
+            #"^Sent my response[^:]*:"#,
+            #"^I(?:'ve|'ll| have| will) (?:send|respond|reply|message|text)[^:]*:"#,
+            #"^(?:My )?[Rr]esponse to the (?:group )?chat[^:]*:"#,
+            #"^Here(?:'s| is) (?:my |the )?(?:response|message|reply)[^:]*:"#,
+            #"^Sending(?:\sto)?\s+(?:the )?(?:group|chat)?[^:]*:"#
+        ]
+        for prefixPattern in metaCommentaryPrefixes {
+            if let regex = try? NSRegularExpression(pattern: prefixPattern, options: [.caseInsensitive]) {
+                let range = NSRange(result.startIndex..., in: result)
+                if let match = regex.firstMatch(in: result, options: [], range: range),
+                   let matchRange = Range(match.range, in: result) {
+                    filtered.append("META_PREFIX: \(result[matchRange])")
+                    result = String(result[matchRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
 
         // Strip <thinking>...</thinking> blocks (extended thinking traces)
         let thinkingPattern = #"<thinking>[\s\S]*?</thinking>"#

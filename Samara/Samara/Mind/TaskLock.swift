@@ -52,6 +52,14 @@ final class TaskLock {
     /// Legacy single lock path for backward compatibility
     static let legacyLockPath = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/claude.lock"
 
+    /// Configurable threshold for considering a task stuck (default: 2 hours)
+    /// This is used by detectAndClearStuck() for long-running task recovery
+    static var stuckThreshold: TimeInterval = 7200  // 2 hours
+
+    /// Short stale threshold for PID-dead processes (default: 30 minutes)
+    /// This catches processes that crashed without cleaning up their lock
+    static var staleThreshold: TimeInterval = 1800  // 30 minutes
+
     /// Initialize locks directory
     static func ensureLocksDirectory() {
         let fm = FileManager.default
@@ -186,10 +194,11 @@ final class TaskLock {
             return true
         }
 
-        // Also consider a lock stale if it's been held for more than 30 minutes
-        let staleDuration: TimeInterval = 30 * 60  // 30 minutes
-        if Date().timeIntervalSince(info.started) > staleDuration {
-            log("Lock is stale - held for more than 30 minutes", level: .warn, component: "TaskLock")
+        // Also consider a lock stale if it's been held for more than staleThreshold
+        if Date().timeIntervalSince(info.started) > staleThreshold {
+            let elapsed = Int(Date().timeIntervalSince(info.started) / 60)
+            log("Lock is stale - held for \(elapsed) minutes (threshold: \(Int(staleThreshold / 60)) min)",
+                level: .warn, component: "TaskLock")
             return true
         }
 
@@ -263,8 +272,8 @@ final class TaskLock {
                     if result == -1 && errno == ESRCH {
                         return true
                     }
-                    // Check for timeout
-                    if Date().timeIntervalSince(info.started) > 30 * 60 {
+                    // Check for timeout using stale threshold
+                    if Date().timeIntervalSince(info.started) > staleThreshold {
                         return true
                     }
                 }
@@ -289,12 +298,12 @@ final class TaskLock {
                 let path = "\(locksDir)/\(file)"
                 if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
                    let info = try? decoder.decode(TaskInfo.self, from: data) {
-                    // Check if stale
+                    // Check if stale (PID dead or exceeded staleThreshold)
                     let result = kill(info.pid, 0)
-                    let isStale = (result == -1 && errno == ESRCH) ||
-                                  Date().timeIntervalSince(info.started) > 30 * 60
+                    let isLockStale = (result == -1 && errno == ESRCH) ||
+                                      Date().timeIntervalSince(info.started) > staleThreshold
 
-                    if isStale {
+                    if isLockStale {
                         try? fm.removeItem(atPath: path)
                         log("Cleaned up stale lock: \(file)", level: .info, component: "TaskLock")
                     }
@@ -302,6 +311,87 @@ final class TaskLock {
             }
         } catch {
             log("Failed to cleanup stale locks: \(error)", level: .warn, component: "TaskLock")
+        }
+    }
+
+    /// Detect and clear tasks that have been running too long (stuck)
+    /// Uses the longer stuckThreshold (default 2 hours) vs staleThreshold (30 min)
+    /// - Returns: Array of TaskInfo for tasks that were cleared
+    static func detectAndClearStuck() -> [TaskInfo] {
+        var clearedTasks: [TaskInfo] = []
+        let fm = FileManager.default
+        ensureLocksDirectory()
+
+        do {
+            let files = try fm.contentsOfDirectory(atPath: locksDir)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+
+            for file in files where file.hasSuffix(".lock") {
+                let path = "\(locksDir)/\(file)"
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                   let info = try? decoder.decode(TaskInfo.self, from: data) {
+                    let elapsed = Date().timeIntervalSince(info.started)
+
+                    // Use the longer stuckThreshold for detecting truly stuck tasks
+                    if elapsed > stuckThreshold {
+                        let elapsedMinutes = Int(elapsed / 60)
+                        let thresholdMinutes = Int(stuckThreshold / 60)
+                        log("Stuck task detected: \(info.task) on \(info.scope.description) - running for \(elapsedMinutes) min (threshold: \(thresholdMinutes) min)",
+                            level: .warn, component: "TaskLock")
+
+                        // Clear the lock
+                        try? fm.removeItem(atPath: path)
+                        clearedTasks.append(info)
+                        log("Cleared stuck task: \(info.task)", level: .info, component: "TaskLock")
+                    }
+                }
+            }
+        } catch {
+            log("Failed to detect stuck tasks: \(error)", level: .warn, component: "TaskLock")
+        }
+
+        if !clearedTasks.isEmpty {
+            log("Cleared \(clearedTasks.count) stuck task(s)", level: .info, component: "TaskLock")
+        }
+
+        return clearedTasks
+    }
+
+    /// Check if any task has been running longer than the stuck threshold
+    static func hasStuckTasks() -> Bool {
+        let fm = FileManager.default
+        ensureLocksDirectory()
+
+        do {
+            let files = try fm.contentsOfDirectory(atPath: locksDir)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+
+            for file in files where file.hasSuffix(".lock") {
+                let path = "\(locksDir)/\(file)"
+                if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+                   let info = try? decoder.decode(TaskInfo.self, from: data) {
+                    if Date().timeIntervalSince(info.started) > stuckThreshold {
+                        return true
+                    }
+                }
+            }
+        } catch {
+            // Ignore
+        }
+        return false
+    }
+
+    /// Configure thresholds from Configuration
+    static func configure(stuckThreshold: TimeInterval? = nil, staleThreshold: TimeInterval? = nil) {
+        if let stuck = stuckThreshold {
+            self.stuckThreshold = stuck
+            log("Stuck threshold configured: \(Int(stuck / 60)) minutes", level: .info, component: "TaskLock")
+        }
+        if let stale = staleThreshold {
+            self.staleThreshold = stale
+            log("Stale threshold configured: \(Int(stale / 60)) minutes", level: .info, component: "TaskLock")
         }
     }
 
