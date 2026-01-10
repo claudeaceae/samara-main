@@ -145,9 +145,31 @@ Claude will have Full Disk Access, camera access, and the ability to run arbitra
 
 > **Note:** If you're a Claude instance already running on this system, see `CLAUDE.md` for operational guidance.
 
-### The Easy Way
+### The Easy Way (Recommended)
 
-If you have Claude Code installed:
+Run the interactive setup wizard:
+
+```bash
+curl -sL claude.organelle.co/bootstrap.sh | bash
+```
+
+Or if you already have Node.js:
+
+```bash
+npx create-samara
+```
+
+The wizard will:
+- Check and install prerequisites
+- Collect your configuration
+- Create the organism structure
+- Download or build Samara.app
+- Set up permissions and wake cycles
+- Launch and verify everything works
+
+### Alternative: Claude-Guided Setup
+
+If you prefer to be guided by Claude:
 
 ```bash
 git clone https://github.com/claudeaceae/samara-main.git
@@ -156,8 +178,6 @@ claude
 ```
 
 Then say: *"Help me birth a new organism."*
-
-Claude will guide you through configuration, run the bootstrap script, and help with the remaining steps.
 
 ### The Manual Way
 

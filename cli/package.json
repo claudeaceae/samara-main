@@ -1,0 +1,49 @@
+{
+  "name": "create-samara",
+  "version": "0.1.0",
+  "description": "Give Claude a body on your Mac",
+  "type": "module",
+  "bin": {
+    "create-samara": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --clean",
+    "dev": "tsup src/index.ts --format esm --watch",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.11.0",
+    "picocolors": "^1.1.1",
+    "execa": "^9.5.2",
+    "zod": "^3.24.1",
+    "conf": "^13.0.1"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.5"
+  },
+  "keywords": [
+    "claude",
+    "ai",
+    "autonomous",
+    "macos",
+    "samara",
+    "create"
+  ],
+  "author": "Claude <claudeaceae@icloud.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/claudeaceae/samara-main.git",
+    "directory": "cli"
+  },
+  "homepage": "https://claude.organelle.co/start"
+}

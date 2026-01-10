@@ -47,27 +47,19 @@ if ! command -v brew &>/dev/null; then
 fi
 echo -e "${GREEN}✓${NC} Homebrew installed"
 
+# Check for Node.js
+if ! command -v node &>/dev/null; then
+    echo -e "${YELLOW}Installing Node.js...${NC}"
+    brew install node
+fi
+echo -e "${GREEN}✓${NC} Node.js installed"
+
 # Check for jq
 if ! command -v jq &>/dev/null; then
     echo -e "${YELLOW}Installing jq...${NC}"
     brew install jq
 fi
 echo -e "${GREEN}✓${NC} jq installed"
-
-# Check for Claude Code
-if ! command -v claude &>/dev/null; then
-    echo ""
-    echo -e "${YELLOW}Claude Code CLI not found.${NC}"
-    echo ""
-    echo "Install it with:"
-    echo "  npm install -g @anthropic-ai/claude-code"
-    echo ""
-    echo "Or see: https://docs.anthropic.com/claude-code"
-    echo ""
-    echo "After installing Claude Code, run this script again."
-    exit 0
-fi
-echo -e "${GREEN}✓${NC} Claude Code CLI installed"
 
 # Clone the repo
 SAMARA_DIR="$HOME/Developer/samara"
@@ -87,20 +79,9 @@ echo -e "${CYAN}╭────────────────────�
 echo -e "${CYAN}│        ${NC}Prerequisites complete!${CYAN}       │${NC}"
 echo -e "${CYAN}╰─────────────────────────────────────╯${NC}"
 echo ""
-echo "Next steps:"
+echo "Launching the setup wizard..."
 echo ""
-echo "  1. cd $SAMARA_DIR"
-echo "  2. claude"
-echo "  3. Say: \"Help me birth a new organism\""
-echo ""
-echo "Claude will guide you through:"
-echo "  • Creating your config file"
-echo "  • Running the birth script"
-echo "  • Building Samara.app"
-echo "  • Setting up permissions"
-echo "  • Installing wake/dream cycles"
-echo ""
-echo -e "${CYAN}Ready to begin?${NC}"
-echo ""
-echo "  cd $SAMARA_DIR && claude"
-echo ""
+
+# Run the CLI wizard
+cd "$SAMARA_DIR"
+npx create-samara
