@@ -591,6 +591,32 @@ Full Disk Access is tied to the app's **designated requirement**:
 
 ## Development Notes
 
+### Plan Management (Immutable Plans)
+
+**Plans are never overwritten.** When planning work, create new plan files rather than modifying existing ones. This preserves decision history and intent evolution.
+
+**Automated safeguard:** The `archive-plan-before-write.sh` hook automatically archives any existing plan before a write, creating timestamped copies in `~/.claude/plans/archive/`.
+
+**Convention for new plans:**
+
+1. **New file per plan iteration** — Don't modify existing plans; create a successor
+2. **Reference predecessors** — Add `supersedes: previous-plan-name.md` in the plan header
+3. **Explain evolution** — Note why the plan changed (new information, pivot, refinement)
+
+**Naming pattern:**
+```
+~/.claude/plans/
+├── 2026-01-10-001-initial-approach.md
+├── 2026-01-10-002-revised-after-discovery.md  # supersedes: 001
+├── archive/                                    # Hook-created backups
+│   └── precious-napping-star-2026-01-10-143022.md
+```
+
+**Why this matters:**
+- **Decision archaeology** — Trace why something was planned vs. what happened
+- **Intent preservation** — Original framing before reality intervened
+- **Learning from pivots** — Changes reveal friction points and assumptions
+
 ### AppleScript over MCP
 
 Prefer direct AppleScript for Mac-native functionality:
