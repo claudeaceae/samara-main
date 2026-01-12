@@ -8,8 +8,18 @@ from typing import Optional, List, Dict, Any, Tuple
 import os
 import math
 
-STATE_DIR = os.path.expanduser("~/.claude-mind/state")
-SENSES_DIR = os.path.expanduser("~/.claude-mind/senses")
+
+def resolve_mind_dir() -> str:
+    override = os.environ.get("SAMARA_MIND_PATH") or os.environ.get("MIND_PATH")
+    if override:
+        return os.path.expanduser(override)
+    return os.path.expanduser("~/.claude-mind")
+
+
+MIND_DIR = resolve_mind_dir()
+STATE_DIR = os.path.join(MIND_DIR, "state")
+SENSES_DIR = os.path.join(MIND_DIR, "senses")
+PORT = int(os.environ.get("SAMARA_LOCATION_PORT", "8081"))
 LOCATION_FILE = os.path.join(STATE_DIR, "location.json")
 HISTORY_FILE = os.path.join(STATE_DIR, "location-history.jsonl")
 TRIPS_FILE = os.path.join(STATE_DIR, "trips.jsonl")
@@ -297,6 +307,53 @@ class TripSegmenter:
 trip_segmenter = TripSegmenter()
 
 
+def load_places() -> List[Dict]:
+    """Load places from places.json."""
+    try:
+        if os.path.exists(PLACES_FILE):
+            with open(PLACES_FILE) as f:
+                data = json.load(f)
+                return data.get('places', [])
+    except Exception as e:
+        print(f"Warning: Could not load places: {e}")
+    return []
+
+
+def find_matched_place(lat: float, lon: float, wifi: Optional[str] = None) -> Optional[Dict]:
+    """
+    Find a matching place by WiFi (preferred) or coordinates.
+    Returns dict with name, label, type, and match_method.
+    """
+    places = load_places()
+
+    # First try WiFi match (most reliable for indoors)
+    if wifi:
+        for place in places:
+            wifi_hints = place.get('wifi_hints', [])
+            if wifi in wifi_hints:
+                return {
+                    'name': place['name'],
+                    'label': place.get('label', place['name']),
+                    'type': place.get('type'),
+                    'match_method': 'wifi'
+                }
+
+    # Fall back to coordinate match
+    if lat is not None and lon is not None:
+        for place in places:
+            dist = haversine_distance(lat, lon, place['lat'], place['lon'])
+            if dist <= place.get('radius_m', 100):
+                return {
+                    'name': place['name'],
+                    'label': place.get('label', place['name']),
+                    'type': place.get('type'),
+                    'match_method': 'coordinates',
+                    'distance_m': round(dist)
+                }
+
+    return None
+
+
 def write_sense_event(event_type: str, data: Dict, priority: str = "normal", suggested_prompt: str = None):
     """Write a sense event in the canonical format for Samara's SenseDirectoryWatcher."""
     os.makedirs(SENSES_DIR, exist_ok=True)
@@ -336,15 +393,23 @@ class LocationHandler(BaseHTTPRequestHandler):
                 coords = latest.get('geometry', {}).get('coordinates', [])
                 props = latest.get('properties', {})
 
+                lat = coords[1] if len(coords) > 1 else None
+                lon = coords[0] if len(coords) > 0 else None
+                wifi = props.get('wifi')
+
+                # Find matched place by WiFi or coordinates
+                matched_place = find_matched_place(lat, lon, wifi)
+
                 location_data = {
                     'timestamp': datetime.now().isoformat(),
-                    'lon': coords[0] if len(coords) > 0 else None,
-                    'lat': coords[1] if len(coords) > 1 else None,
+                    'lon': lon,
+                    'lat': lat,
                     'altitude': coords[2] if len(coords) > 2 else None,
                     'speed': props.get('speed'),
                     'battery': props.get('battery_level'),
-                    'wifi': props.get('wifi'),
+                    'wifi': wifi,
                     'motion': props.get('motion', []),
+                    'matched_place': matched_place,
                     'raw': latest
                 }
 
@@ -389,8 +454,9 @@ class LocationHandler(BaseHTTPRequestHandler):
                         suggested_prompt=f"A trip just completed: {completed_trip['start_place']} → {completed_trip['end_place']} ({completed_trip['distance_m']}m in {completed_trip['duration_s']}s). Consider if this is notable or if any context is relevant."
                     )
 
-                print(f"[{location_data['timestamp']}] Location: {location_data['lat']}, {location_data['lon']}"
-                      + (f" [in trip]" if trip_segmenter.current_trip else ""))
+                place_str = f" @ {matched_place['name']}" if matched_place else ""
+                trip_str = " [in trip]" if trip_segmenter.current_trip else ""
+                print(f"[{location_data['timestamp']}] Location: {location_data['lat']}, {location_data['lon']}{place_str}{trip_str}")
 
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -412,6 +478,6 @@ class LocationHandler(BaseHTTPRequestHandler):
         pass  # Suppress default logging
 
 if __name__ == '__main__':
-    server = HTTPServer(('0.0.0.0', 8081), LocationHandler)
-    print("Location receiver running on port 8081")
+    server = HTTPServer(('0.0.0.0', PORT), LocationHandler)
+    print(f"Location receiver running on port {PORT}")
     server.serve_forever()
