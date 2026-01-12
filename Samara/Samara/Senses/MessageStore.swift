@@ -170,15 +170,15 @@ struct Message {
 
 /// Reads messages from the macOS Messages database
 final class MessageStore {
-    private let dbPath: String
+    let dbPath: String
     private var db: OpaquePointer?
 
     /// Identifiers to filter messages from (phone numbers or emails)
     private let targetHandles: Set<String>
 
-    init(targetHandles: [String]) {
+    init(targetHandles: [String], dbPath: String? = nil) {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-        self.dbPath = "\(homeDir)/Library/Messages/chat.db"
+        self.dbPath = dbPath ?? "\(homeDir)/Library/Messages/chat.db"
         self.targetHandles = Set(targetHandles)
     }
 
@@ -497,7 +497,8 @@ final class MessageStore {
             return nil
         }
 
-        sqlite3_bind_text(statement, 1, cleanGuid, -1, nil)
+        let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(statement, 1, cleanGuid, -1, SQLITE_TRANSIENT)
 
         if sqlite3_step(statement) == SQLITE_ROW {
             if let textPtr = sqlite3_column_text(statement, 0) {
@@ -559,6 +560,7 @@ final class MessageStore {
     }
 
     /// Get the ROWID of the most recent outgoing message to target handles
+    /// DEPRECATED: Use getLastOutgoingMessageRowId(forChat:) for concurrent session safety
     func getLastOutgoingMessageRowId() -> Int64? {
         guard let db = db else {
             return nil
@@ -594,6 +596,52 @@ final class MessageStore {
             return sqlite3_column_int64(statement, 0)
         }
 
+        return nil
+    }
+
+    /// Get the ROWID of the most recent outgoing message to a specific chat
+    /// This is concurrent-session-safe - only returns messages for the specified chat
+    func getLastOutgoingMessageRowId(forChat chatIdentifier: String) -> Int64? {
+        guard let db = db else {
+            return nil
+        }
+
+        // Build the chat ID pattern - AppleScript uses "any;{+|-};{identifier}"
+        // Group chats use "+", 1:1 chats use "-"
+        let isGroupChat = chatIdentifier.count == 32 &&
+            chatIdentifier.allSatisfy { $0.isHexDigit }
+        let chatIdPattern = isGroupChat ? "any;+;\(chatIdentifier)" : "any;-;\(chatIdentifier)"
+
+        let query = """
+            SELECT m.ROWID
+            FROM message m
+            JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
+            JOIN chat c ON cmj.chat_id = c.ROWID
+            WHERE m.is_from_me = 1
+              AND c.chat_identifier = ?
+            ORDER BY m.ROWID DESC
+            LIMIT 1
+            """
+
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+
+        guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
+            log("Failed to prepare chat-specific ROWID query: \(String(cString: sqlite3_errmsg(db)))", level: .error, component: "MessageStore")
+            return nil
+        }
+
+        // SQLITE_TRANSIENT tells SQLite to copy the string immediately
+        let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(statement, 1, chatIdentifier, -1, SQLITE_TRANSIENT)
+
+        if sqlite3_step(statement) == SQLITE_ROW {
+            let rowId = sqlite3_column_int64(statement, 0)
+            log("Found last outgoing message ROWID \(rowId) for chat \(chatIdentifier)", level: .debug, component: "MessageStore")
+            return rowId
+        }
+
+        log("No outgoing messages found for chat \(chatIdentifier)", level: .debug, component: "MessageStore")
         return nil
     }
 }

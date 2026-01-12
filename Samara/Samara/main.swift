@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 
 // Single instance lock - prevent multiple Samara processes
-let lockFilePath = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/samara.lock"
+let lockFilePath = MindPaths.mindPath("samara.lock")
 let lockFileDescriptor = open(lockFilePath, O_WRONLY | O_CREAT, 0o600)
 if lockFileDescriptor == -1 || flock(lockFileDescriptor, LOCK_EX | LOCK_NB) != 0 {
     // Can't use log() here since Logger may not be initialized yet
@@ -99,7 +99,7 @@ var processingMessages = Set<Int64>()
 let processingLock = NSLock()
 
 // Path to distill-session script
-let distillSessionPath = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/bin/distill-session"
+let distillSessionPath = MindPaths.mindPath("bin/distill-session")
 
 // Session manager for batching and continuity
 var sessionManager: SessionManager!
@@ -236,7 +236,13 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
             }
 
             // Get the ROWID of the response we just sent (for read tracking)
-            let responseRowId = store.getLastOutgoingMessageRowId()
+            // Use chat-specific lookup to avoid race condition with concurrent sessions
+            let responseRowId: Int64?
+            if let firstMessage = messages.first {
+                responseRowId = store.getLastOutgoingMessageRowId(forChat: firstMessage.chatIdentifier)
+            } else {
+                responseRowId = store.getLastOutgoingMessageRowId()  // Fallback (shouldn't happen)
+            }
 
             // Update session state with new session ID and response ROWID
             if let sessionId = result.sessionId, let firstMessage = messages.first {
@@ -580,9 +586,9 @@ mailWatcher.start()
 log("[Main] Samara running. Press Ctrl+C to stop.")
 log("[Main] Watching for messages from \(targetPhone) or \(targetEmail)...")
 log("[Main] Watching notes: Claude Scratchpad")
-log("[Main] Watching location file: ~/.claude-mind/state/location.json")
+log("[Main] Watching location file: \(MindPaths.mindPath("state/location.json"))")
 log("[Main] Watching email inbox for messages from \(targetEmail)")
-log("[Main] Watching sense directory: ~/.claude-mind/senses/")
+log("[Main] Watching sense directory: \(MindPaths.mindPath("senses"))")
 
 // Keep the app running - use NSApp.run() to properly handle GCD main queue
 app.run()
