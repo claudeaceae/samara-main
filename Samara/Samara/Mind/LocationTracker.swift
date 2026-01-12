@@ -170,8 +170,8 @@ final class LocationTracker {
     /// Distance threshold for transit proximity (100 meters)
     private let transitProximityThreshold: Double = 100
 
-    /// Time threshold for lingering at unknown location (30 minutes)
-    private let lingeringThreshold: TimeInterval = 30 * 60
+    /// Time threshold for lingering at unknown location (5 minutes)
+    private let lingeringThreshold: TimeInterval = 5 * 60
 
     /// Minimum time between proactive messages (1 hour)
     private let messageCooldown: TimeInterval = 60 * 60
@@ -179,8 +179,8 @@ final class LocationTracker {
     /// Data age threshold for adding staleness qualifier to messages (2 minutes)
     private let stalenessQualifierThreshold: TimeInterval = 2 * 60
 
-    /// Data age threshold for suppressing lingering alerts (10 minutes)
-    private let lingeringStalenessThreshold: TimeInterval = 10 * 60
+    /// Data age threshold for suppressing lingering alerts (3 minutes)
+    private let lingeringStalenessThreshold: TimeInterval = 3 * 60
 
     /// Data age threshold for suppressing stationary alerts (15 minutes)
     private let stationaryStalenessThreshold: TimeInterval = 15 * 60
@@ -205,12 +205,12 @@ final class LocationTracker {
     // MARK: - Initialization
 
     init(
-        historyPath: String = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/state/location-history.jsonl",
-        knownPlacesPath: String = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/memory/known-places.json",
-        placesPath: String = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/state/places.json",
-        subwayPath: String = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/state/subway-stations.json",
-        patternsPath: String = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/state/location-patterns.json",
-        statePath: String = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/state/location-tracker-state.json"
+        historyPath: String = MindPaths.mindPath("state/location-history.jsonl"),
+        knownPlacesPath: String = MindPaths.mindPath("memory/known-places.json"),
+        placesPath: String = MindPaths.mindPath("state/places.json"),
+        subwayPath: String = MindPaths.mindPath("state/subway-stations.json"),
+        patternsPath: String = MindPaths.mindPath("state/location-patterns.json"),
+        statePath: String = MindPaths.mindPath("state/location-tracker-state.json")
     ) {
         self.historyPath = historyPath
         self.knownPlacesPath = knownPlacesPath
