@@ -273,9 +273,7 @@ final class ClaudeInvoker {
         // 1. Sessions are stored consistently in ~/.claude/projects/{hash-of-mind}/
         // 2. Project-specific .claude/ features (agents, hooks) can be loaded
         // 3. CLAUDE.md in ~/.claude-mind/ will be read if present
-        let mindDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude-mind")
-        process.currentDirectoryURL = mindDir
+        process.currentDirectoryURL = MindPaths.mindURL()
 
         // Read pipes asynchronously to prevent race conditions
         // The process might exit before we can read all output if we wait first
@@ -588,9 +586,20 @@ final class ClaudeInvoker {
         var combinedMessageText = ""
         for message in messages {
             let timestamp = dateFormatter.string(from: message.date)
-            // Use sender-aware description for group chats
-            let content = message.fullDescriptionWithSender(targetHandles: targetHandles)
             combinedMessageText += " " + message.text
+
+            // Build sender prefix with resolved name for group chats
+            var senderPrefix = ""
+            if isGroupChat && !message.isFromE(targetHandles: targetHandles) {
+                // Resolve name from contacts, falling back to handle if unknown
+                if let resolvedName = contactsResolver.resolveName(for: message.handleId) {
+                    senderPrefix = "[\(resolvedName)]: "
+                } else {
+                    senderPrefix = "[\(message.handleId)]: "
+                }
+            }
+
+            let content = senderPrefix + message.fullDescription
 
             // Add attachment paths if present
             var attachmentNote = ""
@@ -846,10 +855,11 @@ final class ClaudeInvoker {
             This will return city, region, coordinates, and timezone. Use this when \(collaboratorName) asks where you are or needs location-aware information.
 
             ## Autonomous Time
-            You have autonomous wake cycles 3x daily:
-            - 9:00 AM - Morning session
-            - 2:00 PM - Afternoon session
-            - 8:00 PM - Evening session
+            You have autonomous wake cycles via adaptive scheduler:
+            - ~9 AM - Morning session (base schedule)
+            - ~2 PM - Afternoon session (base schedule)
+            - ~8 PM - Evening session (base schedule)
+            - Adaptive - Early wakes for calendar events, priority items
 
             Plus a nightly dream cycle at 3:00 AM for reflection.
 
