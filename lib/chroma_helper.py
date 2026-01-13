@@ -62,6 +62,7 @@ class MemoryIndex:
             "learnings": 0,
             "observations": 0,
             "decisions": 0,
+            "people": 0,
             "total": 0
         }
 
@@ -106,6 +107,18 @@ class MemoryIndex:
             self._add_documents(docs)
             stats["decisions"] += len(docs)
 
+        # Index person profiles
+        people_dir = MIND_PATH / "memory" / "people"
+        if people_dir.exists():
+            for person_dir in people_dir.iterdir():
+                if person_dir.is_dir():
+                    profile_file = person_dir / "profile.md"
+                    if profile_file.exists():
+                        person_name = person_dir.name
+                        docs = self._parse_person_profile(profile_file, person_name)
+                        self._add_documents(docs)
+                        stats["people"] += len(docs)
+
         stats["total"] = sum(v for v in stats.values() if isinstance(v, int))
         return stats
 
@@ -119,6 +132,103 @@ class MemoryIndex:
         # For now, just do a full rebuild
         # TODO: Implement incremental sync based on mtime
         return self.rebuild()
+
+    def index_single_file(self, filepath: Path) -> dict:
+        """
+        Re-index a single file without full rebuild.
+
+        Useful for updating the index after profile updates from meeting debriefs.
+        Automatically detects file type based on path.
+
+        Args:
+            filepath: Path to the file to index
+
+        Returns:
+            Dict with {success, documents_added, file_type}
+        """
+        filepath = Path(filepath)
+        if not filepath.exists():
+            return {"success": False, "error": "File not found", "documents_added": 0}
+
+        # Determine file type based on path
+        path_str = str(filepath)
+        docs = []
+        file_type = "unknown"
+
+        if "/memory/people/" in path_str and filepath.name == "profile.md":
+            # Person profile
+            person_name = filepath.parent.name
+            docs = self._parse_person_profile(filepath, person_name)
+            file_type = "person_profile"
+        elif "/memory/episodes/" in path_str:
+            # Episode file
+            date = filepath.stem
+            docs = self._parse_episode(filepath, date)
+            file_type = "episode"
+        elif "/memory/reflections/" in path_str:
+            # Reflection file
+            date = filepath.stem
+            docs = self._parse_reflection(filepath, date)
+            file_type = "reflection"
+        elif filepath.name == "learnings.md":
+            docs = self._parse_dated_sections(filepath, "learning")
+            file_type = "learnings"
+        elif filepath.name == "observations.md":
+            docs = self._parse_dated_sections(filepath, "observation")
+            file_type = "observations"
+        elif filepath.name == "decisions.md":
+            docs = self._parse_decisions(filepath)
+            file_type = "decisions"
+        else:
+            return {"success": False, "error": f"Unknown file type: {filepath.name}", "documents_added": 0}
+
+        # Delete existing documents for this file
+        self._delete_documents_for_file(filepath, file_type)
+
+        # Add new documents
+        if docs:
+            self._add_documents(docs)
+
+        return {
+            "success": True,
+            "file_type": file_type,
+            "documents_added": len(docs),
+            "filepath": str(filepath)
+        }
+
+    def _delete_documents_for_file(self, filepath: Path, file_type: str):
+        """Delete existing documents for a file before re-indexing."""
+        # Build a where filter based on file type
+        where = {}
+
+        if file_type == "person_profile":
+            person_name = filepath.parent.name
+            where = {"$and": [{"source": "person"}, {"person": person_name}]}
+        elif file_type == "episode":
+            date = filepath.stem
+            where = {"$and": [{"source": "episode"}, {"date": date}]}
+        elif file_type == "reflection":
+            date = filepath.stem
+            where = {"$and": [{"source": "reflection"}, {"date": date}]}
+        else:
+            # For learnings/observations/decisions, just use source type
+            source_map = {
+                "learnings": "learning",
+                "observations": "observation",
+                "decisions": "decision"
+            }
+            if file_type in source_map:
+                where = {"source": source_map[file_type]}
+
+        if where:
+            try:
+                # Get IDs to delete
+                results = self.collection.get(where=where, include=[])
+                if results["ids"]:
+                    self.collection.delete(ids=results["ids"])
+            except Exception:
+                # If delete fails, continue anyway - duplicates will just add noise
+                pass
 
     def search(self, query: str, n_results: int = 5,
                source_filter: Optional[str] = None,
@@ -273,6 +383,64 @@ class MemoryIndex:
 
         return docs
 
+    def _parse_person_profile(self, filepath: Path, person_name: str) -> list:
+        """Parse a person profile into indexable documents."""
+        content = filepath.read_text()
+        docs = []
+
+        # Split by dated section headers (## YYYY-MM-DD)
+        sections = re.split(r'^## (\d{4}-\d{2}-\d{2}[^\n]*)', content, flags=re.MULTILINE)
+
+        # First section is the header/intro - index as overview
+        if sections[0].strip():
+            intro_text = sections[0].strip()
+            if len(intro_text) > 50:
+                doc_id = self._make_id(f"person-{person_name}-overview-{intro_text[:100]}")
+                docs.append({
+                    "id": doc_id,
+                    "text": intro_text[:2000],
+                    "metadata": {
+                        "source": "person",
+                        "person": person_name,
+                        "section": "overview"
+                    }
+                })
+
+        # Index each dated section separately for granular search
+        for i in range(1, len(sections), 2):
+            if i + 1 < len(sections):
+                date_header = sections[i]
+                text = sections[i + 1].strip()
+
+                if len(text) < 20:
+                    continue
+
+                # Extract just the date
+                date_match = re.match(r'(\d{4}-\d{2}-\d{2})', date_header)
+                date = date_match.group(1) if date_match else "unknown"
+
+                # Extract context if present (e.g., "From Weekly Sync")
+                context_match = re.search(r'From (.+)', date_header)
+                context = context_match.group(1).strip() if context_match else None
+
+                doc_id = self._make_id(f"person-{person_name}-{date}-{i}-{text[:50]}")
+                metadata = {
+                    "source": "person",
+                    "person": person_name,
+                    "date": date,
+                    "section": "observation"
+                }
+                if context:
+                    metadata["context"] = context
+
+                docs.append({
+                    "id": doc_id,
+                    "text": f"About {person_name}: {text}"[:2000],
+                    "metadata": metadata
+                })
+
+        return docs
+
     def _parse_decisions(self, filepath: Path) -> list:
         """Parse the decisions file into documents."""
         content = filepath.read_text()
@@ -324,10 +492,11 @@ def main():
     if len(sys.argv) < 2:
         print("Usage: chroma_helper.py <command> [args]")
         print("Commands:")
-        print("  rebuild     - Full rebuild of index")
-        print("  sync        - Incremental sync")
-        print("  query <text> [n]  - Search for text")
-        print("  stats       - Show index stats")
+        print("  rebuild            - Full rebuild of index")
+        print("  sync               - Incremental sync")
+        print("  query <text> [n]   - Search for text")
+        print("  stats              - Show index stats")
+        print("  index-file <path>  - Re-index a single file")
         sys.exit(1)
 
     command = sys.argv[1]
@@ -358,6 +527,17 @@ def main():
     elif command == "stats":
         stats = index.get_stats()
         print(json.dumps(stats, indent=2))
+
+    elif command == "index-file":
+        if len(sys.argv) < 3:
+            print("Usage: chroma_helper.py index-file <path>")
+            sys.exit(1)
+        filepath = Path(sys.argv[2])
+        print(f"Indexing {filepath}...")
+        result = index.index_single_file(filepath)
+        print(json.dumps(result, indent=2))
+        if not result.get("success"):
+            sys.exit(1)
 
     else:
         print(f"Unknown command: {command}")

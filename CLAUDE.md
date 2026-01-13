@@ -15,7 +15,7 @@ Samara is a bootstrap specification for giving Claude a persistent body, memory,
 
 This is not a traditional software project. It's an experiment in AI autonomy.
 
-> **Recent enhancements (Phases 1-4):** Model fallback, semantic memory, proactive messaging, adaptive scheduling. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) for user-facing summary.
+> **Recent enhancements (Phases 1-5):** Model fallback, semantic memory, proactive messaging, adaptive scheduling, meeting awareness. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) for user-facing summary.
 
 ---
 
@@ -410,6 +410,52 @@ Messages are automatically paced to avoid spam:
 - Priority-based ordering
 
 **Implementation:** `ContextTriggers.swift`, `ProactiveQueue.swift`
+
+### Meeting Awareness (Phase 5)
+
+Samara proactively provides meeting context and captures post-meeting learnings.
+
+**Pre-Meeting Prep (15 min before):**
+
+When a calendar event is approaching:
+1. Loads attendee profiles from `memory/people/`
+2. Runs FTS5 + Chroma search on meeting title and attendee names
+3. Sends contextual prep message with relevant history and open questions
+
+**Post-Meeting Debrief (15 min after):**
+
+When a meeting ends:
+1. Prompts for quick debrief (how it went, observations, action items)
+2. Parses response for attendee-specific insights
+3. Auto-appends observations to person profiles with context
+4. Triggers incremental Chroma re-index for immediate searchability
+
+**Configuration:**
+
+Preferences file: `~/.claude-mind/state/meeting-prefs.json`
+```json
+{
+  "debrief_all_events": true,
+  "skip_calendars": ["Claude", "Birthdays", "US Holidays"],
+  "skip_patterns": ["Lunch", "Break", "Block", "Focus"],
+  "prep_cooldown_min": 60,
+  "debrief_cooldown_min": 240
+}
+```
+
+**launchd Service:**
+
+Runs every 15 minutes via `com.claude.meeting-check.plist`:
+```bash
+launchctl load ~/Library/LaunchAgents/com.claude.meeting-check.plist
+```
+
+**Implementation:**
+- `scripts/meeting-check` — Detects meetings in prep/debrief windows, writes sense events
+- `lib/calendar_analyzer.py` — Attendee extraction and resolution
+- `SenseRouter.swift` — `meeting_prep` and `meeting_debrief` handlers
+- `ClaudeInvoker.swift` — `loadPendingDebriefContext()` for profile updates
+- `lib/chroma_helper.py` — `index_single_file()` for incremental indexing
 
 ### Iteration Mode (Phase 3)
 

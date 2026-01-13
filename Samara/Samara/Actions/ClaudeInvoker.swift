@@ -770,6 +770,12 @@ final class ClaudeInvoker {
             combinedRelatedContext += "\n\n" + crossTemporalSection
         }
 
+        // Check for pending meeting debrief context
+        let pendingDebriefSection = loadPendingDebriefContext()
+        if !pendingDebriefSection.isEmpty {
+            combinedRelatedContext += "\n\n" + pendingDebriefSection
+        }
+
         // Build initial prompt without context metrics (to measure it)
         let basePrompt = """
             \(chatContext)
@@ -905,6 +911,85 @@ final class ClaudeInvoker {
             """
 
         return prompt
+    }
+
+    // MARK: - Meeting Debrief Support
+
+    /// Loads pending meeting debrief context if user might be responding to a debrief prompt
+    private func loadPendingDebriefContext() -> String {
+        let mindPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude-mind")
+        let stateFile = mindPath.appendingPathComponent("state/pending-debrief.json")
+
+        guard FileManager.default.fileExists(atPath: stateFile.path) else {
+            return ""
+        }
+
+        do {
+            let data = try Data(contentsOf: stateFile)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return ""
+            }
+
+            // Check if debrief is recent (within 1 hour)
+            if let timestampStr = json["timestamp"] as? String,
+               let timestamp = ISO8601DateFormatter().date(from: timestampStr) {
+                let age = Date().timeIntervalSince(timestamp)
+                if age > 3600 { // More than 1 hour old
+                    // Clean up stale file
+                    try? FileManager.default.removeItem(at: stateFile)
+                    return ""
+                }
+            }
+
+            // Extract debrief info
+            let eventTitle = json["event_title"] as? String ?? "a meeting"
+            guard let attendees = json["attendees"] as? [[String: String]], !attendees.isEmpty else {
+                return ""
+            }
+
+            // Build profile update instructions
+            let attendeeInfo = attendees.compactMap { att -> String? in
+                guard let name = att["name"], let path = att["profile_path"] else { return nil }
+                return "- \(name): \(path)"
+            }.joined(separator: "\n")
+
+            return """
+
+                ## Active Meeting Debrief Context
+                You recently asked about "\(eventTitle)". If \(config.collaborator.name)'s response contains observations about the attendees, you should update their profiles.
+
+                **Profiles to potentially update:**
+                \(attendeeInfo)
+
+                **How to update profiles:**
+                When you identify person-specific observations, append them to the relevant profile.md file using this format:
+
+                ```markdown
+                ## \(ISO8601DateFormatter().string(from: Date()).prefix(10)): From \(eventTitle)
+
+                {observation}
+                Context: Meeting debrief
+                ```
+
+                Use the Edit tool to append to the profile. After updating, acknowledge the learning was captured.
+
+                After processing the debrief response (or if they say nothing notable), the pending debrief will be cleared automatically.
+                """
+        } catch {
+            log("Failed to load pending debrief: \(error)", level: .debug, component: "ClaudeInvoker")
+            return ""
+        }
+    }
+
+    /// Clears the pending debrief after processing
+    func clearPendingDebrief() {
+        let mindPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude-mind")
+        let stateFile = mindPath.appendingPathComponent("state/pending-debrief.json")
+
+        try? FileManager.default.removeItem(at: stateFile)
+        log("Cleared pending debrief", level: .debug, component: "ClaudeInvoker")
     }
 }
 

@@ -1,0 +1,264 @@
+#!/bin/bash
+# meeting-check - Generate sense events for meeting prep and debriefs
+# Runs every 15 minutes via launchd (or integrated with calendar-check)
+# Detects upcoming meetings (10-20 min) and recently ended meetings (0-30 min)
+# Writes sense events for SenseRouter to process
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+VENV_PATH="$MIND_PATH/.venv"
+LOG_FILE="$MIND_PATH/logs/meeting-check.log"
+SENSES_DIR="$MIND_PATH/senses"
+PREFS_FILE="$MIND_PATH/state/meeting-prefs.json"
+PROCESSED_FILE="$MIND_PATH/state/meeting-processed.json"
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+log "=== Meeting check starting ==="
+
+# Check quiet hours (10 PM - 8 AM)
+HOUR=$(date +%H)
+if [ "$HOUR" -ge 22 ] || [ "$HOUR" -lt 8 ]; then
+    log "Quiet hours (10 PM - 8 AM), skipping"
+    exit 0
+fi
+
+# Ensure directories exist
+mkdir -p "$SENSES_DIR"
+mkdir -p "$(dirname "$PREFS_FILE")"
+
+# Initialize prefs file if it doesn't exist
+if [ ! -f "$PREFS_FILE" ]; then
+    echo '{
+  "debrief_all_events": true,
+  "skip_calendars": ["Claude", "Birthdays", "US Holidays"],
+  "skip_patterns": ["Lunch", "Break", "Block", "Focus"],
+  "prep_cooldown_min": 60,
+  "debrief_cooldown_min": 240
+}' > "$PREFS_FILE"
+    log "Created default prefs file"
+fi
+
+# Initialize processed file if it doesn't exist
+if [ ! -f "$PROCESSED_FILE" ]; then
+    echo '{
+  "prep_sent": {},
+  "debrief_sent": {}
+}' > "$PROCESSED_FILE"
+    log "Created processed tracking file"
+fi
+
+# Activate virtual environment
+if [ ! -d "$VENV_PATH" ]; then
+    log "Error: Virtual environment not found"
+    exit 1
+fi
+
+source "$VENV_PATH/bin/activate"
+
+# Change to lib directory for imports
+cd "$MIND_PATH/lib" 2>/dev/null || cd "$(dirname "$0")/../lib"
+
+# Check for meetings needing prep
+log "Checking for meetings needing prep..."
+PREP_MEETINGS=$(python3 -c "
+import json
+import sys
+sys.path.insert(0, '.')
+from calendar_analyzer import CalendarAnalyzer
+
+try:
+    analyzer = CalendarAnalyzer()
+    meetings = analyzer.get_meetings_needing_prep(minutes_before=15, window=10)
+    print(json.dumps(meetings, default=str))
+except Exception as e:
+    print(json.dumps([]))
+" 2>/dev/null) || PREP_MEETINGS="[]"
+
+PREP_COUNT=$(echo "$PREP_MEETINGS" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+log "Found $PREP_COUNT meetings needing prep"
+
+# Check for meetings needing debrief
+log "Checking for meetings needing debrief..."
+DEBRIEF_MEETINGS=$(python3 -c "
+import json
+import sys
+sys.path.insert(0, '.')
+from calendar_analyzer import CalendarAnalyzer
+
+try:
+    analyzer = CalendarAnalyzer()
+    meetings = analyzer.get_meetings_needing_debrief(minutes_after=15, window=15)
+    print(json.dumps(meetings, default=str))
+except Exception as e:
+    print(json.dumps([]))
+" 2>/dev/null) || DEBRIEF_MEETINGS="[]"
+
+DEBRIEF_COUNT=$(echo "$DEBRIEF_MEETINGS" | python3 -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+log "Found $DEBRIEF_COUNT meetings needing debrief"
+
+# Load preferences and processed tracking
+PREFS=$(cat "$PREFS_FILE")
+PROCESSED=$(cat "$PROCESSED_FILE")
+
+# Process meetings needing prep
+if [ "$PREP_COUNT" != "0" ]; then
+    python3 << EOF
+import json
+import os
+from datetime import datetime
+
+senses_dir = "$SENSES_DIR"
+prefs = json.loads('''$PREFS''')
+processed = json.loads('''$PROCESSED''')
+meetings = json.loads('''$PREP_MEETINGS''')
+
+skip_calendars = set(prefs.get("skip_calendars", []))
+skip_patterns = prefs.get("skip_patterns", [])
+prep_cooldown = prefs.get("prep_cooldown_min", 60)
+
+for meeting in meetings:
+    event_title = meeting.get("event_title", "")
+    calendar = meeting.get("calendar", "")
+
+    # Skip excluded calendars
+    if calendar in skip_calendars:
+        continue
+
+    # Skip matching patterns
+    if any(p.lower() in event_title.lower() for p in skip_patterns):
+        continue
+
+    # Check if already processed (use title+date as key)
+    start_time = meeting.get("start_time", "")
+    meeting_key = f"{event_title}|{start_time}"
+
+    if meeting_key in processed.get("prep_sent", {}):
+        last_sent = processed["prep_sent"][meeting_key]
+        # Skip if sent within cooldown period
+        try:
+            last_dt = datetime.fromisoformat(last_sent)
+            if (datetime.now() - last_dt).total_seconds() < prep_cooldown * 60:
+                continue
+        except:
+            pass
+
+    # Write sense event
+    timestamp = datetime.now().isoformat()
+    event_data = {
+        "sense": "meeting_prep",
+        "timestamp": timestamp,
+        "priority": "normal",
+        "data": {
+            "event_title": event_title,
+            "start_time": str(meeting.get("start_time", "")),
+            "minutes_until": meeting.get("minutes_until"),
+            "location": meeting.get("location"),
+            "calendar": calendar,
+            "attendees": meeting.get("attendees", [])
+        }
+    }
+
+    event_file = os.path.join(senses_dir, f"meeting_prep_{datetime.now().strftime('%Y%m%d%H%M%S')}.event.json")
+    with open(event_file, 'w') as f:
+        json.dump(event_data, f, indent=2)
+
+    print(f"Created prep event: {event_file}")
+
+    # Mark as processed
+    processed.setdefault("prep_sent", {})[meeting_key] = timestamp
+
+# Save updated processed state
+with open("$PROCESSED_FILE", 'w') as f:
+    json.dump(processed, f, indent=2)
+EOF
+fi
+
+# Process meetings needing debrief
+if [ "$DEBRIEF_COUNT" != "0" ]; then
+    python3 << EOF
+import json
+import os
+from datetime import datetime
+
+senses_dir = "$SENSES_DIR"
+prefs = json.loads('''$PREFS''')
+processed = json.loads('''$PROCESSED''')
+meetings = json.loads('''$DEBRIEF_MEETINGS''')
+
+skip_calendars = set(prefs.get("skip_calendars", []))
+skip_patterns = prefs.get("skip_patterns", [])
+debrief_cooldown = prefs.get("debrief_cooldown_min", 240)
+
+# Only send debriefs if enabled
+if not prefs.get("debrief_all_events", True):
+    exit(0)
+
+for meeting in meetings:
+    event_title = meeting.get("event_title", "")
+    calendar = meeting.get("calendar", "")
+
+    # Skip excluded calendars
+    if calendar in skip_calendars:
+        continue
+
+    # Skip matching patterns
+    if any(p.lower() in event_title.lower() for p in skip_patterns):
+        continue
+
+    # Check if already processed
+    ended_at = meeting.get("ended_at", "")
+    meeting_key = f"{event_title}|{ended_at}"
+
+    if meeting_key in processed.get("debrief_sent", {}):
+        last_sent = processed["debrief_sent"][meeting_key]
+        try:
+            last_dt = datetime.fromisoformat(last_sent)
+            if (datetime.now() - last_dt).total_seconds() < debrief_cooldown * 60:
+                continue
+        except:
+            pass
+
+    # Write sense event
+    timestamp = datetime.now().isoformat()
+
+    # Extract attendee names for the prompt
+    attendee_names = [a.get("name") or a.get("email", "").split("@")[0]
+                      for a in meeting.get("attendees", []) if a]
+
+    event_data = {
+        "sense": "meeting_debrief",
+        "timestamp": timestamp,
+        "priority": "normal",
+        "data": {
+            "event_title": event_title,
+            "ended_at": str(ended_at),
+            "minutes_since_end": meeting.get("minutes_since_end"),
+            "duration_min": meeting.get("duration_min"),
+            "location": meeting.get("location"),
+            "calendar": calendar,
+            "attendees": meeting.get("attendees", []),
+            "attendee_names": attendee_names
+        }
+    }
+
+    event_file = os.path.join(senses_dir, f"meeting_debrief_{datetime.now().strftime('%Y%m%d%H%M%S')}.event.json")
+    with open(event_file, 'w') as f:
+        json.dump(event_data, f, indent=2)
+
+    print(f"Created debrief event: {event_file}")
+
+    # Mark as processed
+    processed.setdefault("debrief_sent", {})[meeting_key] = timestamp
+
+# Save updated processed state
+with open("$PROCESSED_FILE", 'w') as f:
+    json.dump(processed, f, indent=2)
+EOF
+fi
+
+log "=== Meeting check complete ==="

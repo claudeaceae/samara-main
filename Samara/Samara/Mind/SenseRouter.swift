@@ -254,6 +254,16 @@ final class SenseRouter {
         handlers["webhook"] = { [weak self] event in
             self?.handleWebhookEvent(event)
         }
+
+        // Meeting prep events (upcoming meetings)
+        handlers["meeting_prep"] = { [weak self] event in
+            self?.handleMeetingPrepEvent(event)
+        }
+
+        // Meeting debrief events (recently ended meetings)
+        handlers["meeting_debrief"] = { [weak self] event in
+            self?.handleMeetingDebriefEvent(event)
+        }
     }
 
     private func handleLocationEvent(_ event: SenseEvent) {
@@ -575,6 +585,247 @@ final class SenseRouter {
         default:
             // Default: notify for unknown sources (safer)
             return true
+        }
+    }
+
+    // MARK: - Meeting Event Handlers
+
+    private func handleMeetingPrepEvent(_ event: SenseEvent) {
+        let eventTitle = event.getString("event_title") ?? "an upcoming meeting"
+        let minutesUntil = event.getInt("minutes_until") ?? 15
+        let location = event.getString("location")
+
+        log("Meeting prep event: \(eventTitle) in \(minutesUntil) min", level: .info, component: "SenseRouter")
+
+        // Extract attendee information
+        var attendeeNames: [String] = []
+        var attendeeProfiles: [String] = []
+
+        if let attendees = event.getArray("attendees") as? [[String: Any]] {
+            for attendee in attendees {
+                if let name = attendee["name"] as? String, !name.isEmpty {
+                    attendeeNames.append(name)
+                } else if let email = attendee["email"] as? String {
+                    // Use email prefix as name fallback
+                    let nameFromEmail = email.components(separatedBy: "@").first ?? email
+                    attendeeNames.append(nameFromEmail)
+                }
+
+                // Load profile content if available
+                if let profilePath = attendee["profile_path"] as? String {
+                    if let profileContent = try? String(contentsOfFile: profilePath, encoding: .utf8) {
+                        // Extract relevant portions (first 500 chars)
+                        let preview = String(profileContent.prefix(500))
+                        let name = attendee["name"] as? String ?? "Unknown"
+                        attendeeProfiles.append("### \(name)\n\(preview)...")
+                    }
+                }
+            }
+        }
+
+        // Build context with memory context and semantic search
+        let baseContext = memoryContext.buildContext()
+
+        // Search for related past discussions about this meeting/attendees
+        let searchQuery = "\(eventTitle) \(attendeeNames.joined(separator: " "))"
+        let relatedMemories = memoryContext.buildRelatedMemoriesSection(for: searchQuery) ?? ""
+        let semanticContext = memoryContext.findRelatedPastContext(for: searchQuery) ?? ""
+
+        // Build the prep prompt
+        let attendeeList = attendeeNames.isEmpty ? "No attendees listed" : attendeeNames.joined(separator: ", ")
+        let locationInfo = location.map { "Location: \($0)" } ?? ""
+
+        var prompt = """
+            You have a meeting coming up and should send \(collaboratorName) a brief prep message.
+
+            ## Upcoming Meeting
+            - Title: \(eventTitle)
+            - In: \(minutesUntil) minutes
+            - Attendees: \(attendeeList)
+            \(locationInfo)
+
+            """
+
+        // Add attendee profiles if we have them
+        if !attendeeProfiles.isEmpty {
+            prompt += """
+
+                ## Attendee Profiles
+                These are people you know something about:
+
+                \(attendeeProfiles.joined(separator: "\n\n"))
+
+                """
+        }
+
+        // Add related past context
+        if !relatedMemories.isEmpty || !semanticContext.isEmpty {
+            prompt += """
+
+                ## Related Past Context
+                \(relatedMemories)
+                \(semanticContext)
+
+                """
+        }
+
+        prompt += """
+
+            ## Task
+            Send a brief prep message (1-3 sentences) to help \(collaboratorName) prepare.
+            Consider:
+            - Who are the attendees? What do you know about them?
+            - What might be discussed based on past context?
+            - Any open questions or action items related to this meeting?
+            - Anything from their history with these people that's relevant?
+
+            Be helpful and specific, not generic. If you don't have relevant context,
+            just acknowledge the upcoming meeting briefly.
+
+            Output ONLY the message text, nothing else.
+            """
+
+        do {
+            let result = try invoker.invoke(
+                prompt: prompt,
+                context: baseContext,
+                attachmentPaths: []
+            )
+
+            log("Meeting prep message generated: \(result.prefix(50))...", level: .debug, component: "SenseRouter")
+
+            // Send to collaborator
+            try messageBus.send(result, type: .senseEvent)
+
+            // Log to episode
+            episodeLogger.logExchange(
+                from: "Meeting Prep",
+                message: "Upcoming: \(eventTitle) in \(minutesUntil) min with \(attendeeList)",
+                response: result
+            )
+
+        } catch {
+            log("Error processing meeting prep event: \(error)", level: .error, component: "SenseRouter")
+        }
+    }
+
+    private func handleMeetingDebriefEvent(_ event: SenseEvent) {
+        let eventTitle = event.getString("event_title") ?? "a meeting"
+        let durationMin = event.getInt("duration_min") ?? 0
+        let minutesSinceEnd = event.getInt("minutes_since_end") ?? 0
+
+        log("Meeting debrief event: \(eventTitle) ended \(minutesSinceEnd) min ago", level: .info, component: "SenseRouter")
+
+        // Extract attendee information
+        var attendeeNames: [String] = []
+        var attendeesWithProfiles: [(name: String, profilePath: String)] = []
+
+        if let attendees = event.getArray("attendees") as? [[String: Any]] {
+            for attendee in attendees {
+                let name: String
+                if let n = attendee["name"] as? String, !n.isEmpty {
+                    name = n
+                } else if let email = attendee["email"] as? String {
+                    name = email.components(separatedBy: "@").first ?? email
+                } else {
+                    continue
+                }
+
+                attendeeNames.append(name)
+
+                if let profilePath = attendee["profile_path"] as? String {
+                    attendeesWithProfiles.append((name: name, profilePath: profilePath))
+                }
+            }
+        }
+
+        // Build context
+        let baseContext = memoryContext.buildContext()
+
+        // Build the debrief prompt
+        let attendeeList = attendeeNames.isEmpty ? "No attendees listed" : attendeeNames.joined(separator: ", ")
+        let durationStr = durationMin > 0 ? " (\(durationMin) min)" : ""
+
+        var prompt = """
+            Your meeting "\(eventTitle)"\(durationStr) with \(attendeeList) just ended.
+
+            ## Task
+            Send a brief debrief prompt to \(collaboratorName) to capture learnings.
+
+            Ask naturally about:
+            - How did the meeting go?
+            - Any observations about the attendees worth remembering?
+            - Action items or follow-ups?
+            - Anything to note for future meetings with these people?
+
+            Vary your approach - don't always ask the same questions.
+            Keep it brief (1-2 questions) and conversational.
+
+            Output ONLY the message text, nothing else.
+            """
+
+        // Add note about profile updates
+        if !attendeesWithProfiles.isEmpty {
+            let profileNames = attendeesWithProfiles.map { $0.name }.joined(separator: ", ")
+            prompt += """
+
+                Note: You have profiles for: \(profileNames)
+                When they respond with observations about these people, you should update their profiles.
+                """
+        }
+
+        do {
+            let result = try invoker.invoke(
+                prompt: prompt,
+                context: baseContext,
+                attachmentPaths: []
+            )
+
+            log("Meeting debrief message generated: \(result.prefix(50))...", level: .debug, component: "SenseRouter")
+
+            // Send to collaborator
+            try messageBus.send(result, type: .senseEvent)
+
+            // Log to episode with metadata for later profile updates
+            var metadata = "Meeting ended: \(eventTitle) with \(attendeeList)"
+            if !attendeesWithProfiles.isEmpty {
+                let paths = attendeesWithProfiles.map { $0.profilePath }.joined(separator: ", ")
+                metadata += "\nProfiles to update: \(paths)"
+            }
+
+            episodeLogger.logExchange(
+                from: "Meeting Debrief",
+                message: metadata,
+                response: result
+            )
+
+            // Store debrief context for when user responds
+            // This allows the response handler to know which profiles to update
+            storePendingDebrief(eventTitle: eventTitle, attendees: attendeesWithProfiles)
+
+        } catch {
+            log("Error processing meeting debrief event: \(error)", level: .error, component: "SenseRouter")
+        }
+    }
+
+    private func storePendingDebrief(eventTitle: String, attendees: [(name: String, profilePath: String)]) {
+        // Store pending debrief info for profile updates when user responds
+        let mindPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude-mind")
+        let stateFile = mindPath.appendingPathComponent("state/pending-debrief.json")
+
+        let data: [String: Any] = [
+            "event_title": eventTitle,
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "attendees": attendees.map { ["name": $0.name, "profile_path": $0.profilePath] }
+        ]
+
+        do {
+            let jsonData = try JSONSerialization.data(withJSONObject: data, options: .prettyPrinted)
+            try jsonData.write(to: stateFile)
+            log("Stored pending debrief context for \(eventTitle)", level: .debug, component: "SenseRouter")
+        } catch {
+            log("Failed to store pending debrief: \(error)", level: .warn, component: "SenseRouter")
         }
     }
 }

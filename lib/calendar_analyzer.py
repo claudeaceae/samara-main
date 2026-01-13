@@ -268,7 +268,23 @@ class CalendarAnalyzer:
                     set calName to name of cal
                     set calEvents to (every event of cal whose start date >= startDate and start date < endDate)
                     repeat with evt in calEvents
-                        set evtInfo to summary of evt & "|||" & (start date of evt as string) & "|||" & (end date of evt as string) & "|||" & (location of evt as string) & "|||" & calName
+                        -- Build attendee list (email:name;email:name;...)
+                        set attendeeList to ""
+                        try
+                            set evtAttendees to attendees of evt
+                            repeat with att in evtAttendees
+                                try
+                                    set attEmail to email of att
+                                    set attName to ""
+                                    try
+                                        set attName to display name of att
+                                    end try
+                                    set attendeeList to attendeeList & attEmail & ":" & attName & ";"
+                                end try
+                            end repeat
+                        end try
+
+                        set evtInfo to summary of evt & "|||" & (start date of evt as string) & "|||" & (end date of evt as string) & "|||" & (location of evt as string) & "|||" & calName & "|||" & attendeeList
                         set end of eventList to evtInfo
                     end repeat
                 end try
@@ -295,22 +311,26 @@ class CalendarAnalyzer:
             if not raw_output:
                 return []
 
-            # Split by ", " but be careful with dates that contain commas
-            # Format: "summary|||date|||date|||location|||calendar, ..."
-            for event_str in raw_output.split("|||calendar, "):
+            # Split events - AppleScript list items are separated by ", "
+            # Format: "summary|||date|||date|||location|||calendar|||attendees, next_summary|||..."
+            # Attendees end with ";" so we split after that
+            # Use regex to split on ", " followed by non-||| content (a new summary)
+            event_strings = re.split(r',\s*(?=[^|]+\|\|\|)', raw_output)
+
+            for event_str in event_strings:
                 if not event_str.strip():
                     continue
 
-                # Handle the last item which won't have the trailing calendar
                 if "|||" not in event_str:
                     continue
 
                 parts = event_str.split("|||")
-                if len(parts) < 4:
+                if len(parts) < 5:
                     continue
 
                 summary = parts[0].strip()
-                calendar = parts[-1].strip() if len(parts) > 4 else "Unknown"
+                calendar = parts[4].strip() if len(parts) > 4 else "Unknown"
+                attendees_raw = parts[5].strip() if len(parts) > 5 else ""
 
                 # Skip excluded calendars
                 if calendar in self.excluded_calendars:
@@ -328,12 +348,25 @@ class CalendarAnalyzer:
                     if end_date > now:
                         continue  # Skip events that haven't ended
 
+                # Parse attendees (format: email:name;email:name;)
+                attendees = []
+                if attendees_raw:
+                    for att_str in attendees_raw.split(";"):
+                        if ":" in att_str:
+                            email, name = att_str.split(":", 1)
+                            if email.strip():
+                                attendees.append({
+                                    "email": email.strip(),
+                                    "name": name.strip() if name.strip() else None
+                                })
+
                 events.append({
                     "summary": summary,
                     "start": start_date,
                     "end": end_date,
                     "location": parts[3] if len(parts) > 3 else None,
-                    "calendar": calendar
+                    "calendar": calendar,
+                    "attendees": attendees
                 })
 
             return events
@@ -388,6 +421,151 @@ class CalendarAnalyzer:
 
         return f"[{date}] {text}"
 
+    def resolve_attendees(self, attendees: list) -> list:
+        """
+        Resolve attendee emails/names to person profiles.
+
+        Args:
+            attendees: List of dicts with 'email' and optional 'name' keys
+
+        Returns:
+            List of enriched attendee dicts with:
+                - email: Original email
+                - name: Display name (from calendar or profile)
+                - has_profile: Whether a profile exists
+                - profile_path: Path to profile.md if exists
+                - profile_name: Directory name in memory/people/
+        """
+        people_dir = MIND_PATH / "memory" / "people"
+
+        if not people_dir.exists():
+            return attendees
+
+        # Build lookup of existing profiles
+        profile_lookup = {}
+        for person_dir in people_dir.iterdir():
+            if not person_dir.is_dir() or person_dir.name.startswith("_"):
+                continue
+
+            profile_path = person_dir / "profile.md"
+            if not profile_path.exists():
+                continue
+
+            # Read profile to look for email/contact info
+            try:
+                content = profile_path.read_text()
+                profile_lookup[person_dir.name.lower()] = {
+                    "path": str(profile_path),
+                    "name": person_dir.name,
+                    "content": content.lower()
+                }
+            except:
+                continue
+
+        # Resolve each attendee
+        resolved = []
+        for att in attendees:
+            email = att.get("email", "").lower()
+            name = att.get("name", "")
+
+            # Try to find matching profile
+            matched_profile = None
+
+            # 1. Check if email appears in any profile
+            for profile_name, profile_info in profile_lookup.items():
+                if email and email in profile_info["content"]:
+                    matched_profile = profile_info
+                    break
+
+            # 2. Check if name matches a profile directory
+            if not matched_profile and name:
+                name_lower = name.lower().replace(" ", "")
+                for profile_name, profile_info in profile_lookup.items():
+                    if profile_name.replace(" ", "") == name_lower:
+                        matched_profile = profile_info
+                        break
+                    # Also check first name
+                    first_name = name.split()[0].lower() if name else ""
+                    if first_name and profile_name == first_name:
+                        matched_profile = profile_info
+                        break
+
+            resolved.append({
+                "email": att.get("email"),
+                "name": name or (matched_profile["name"].title() if matched_profile else None),
+                "has_profile": matched_profile is not None,
+                "profile_path": matched_profile["path"] if matched_profile else None,
+                "profile_name": matched_profile["name"] if matched_profile else None
+            })
+
+        return resolved
+
+    def get_meetings_needing_prep(self, minutes_before: int = 15, window: int = 10) -> list:
+        """
+        Get meetings that need prep context (starting in minutes_before ± window).
+
+        Returns events with enriched attendee data for meeting prep sense events.
+        """
+        # Get events starting soon
+        upcoming = self.get_upcoming_events(hours=1)
+
+        meetings = []
+        for event in upcoming:
+            mins = event.get("minutes_until", 0)
+            # Check if within the prep window (e.g., 10-20 min before for 15 min lead time)
+            lower = minutes_before - window
+            upper = minutes_before + window
+            if lower <= mins <= upper:
+                # Resolve attendees to profiles
+                attendees = event.get("attendees", [])
+                resolved_attendees = self.resolve_attendees(attendees)
+
+                meetings.append({
+                    "event_title": event.get("summary"),
+                    "start_time": event.get("start"),
+                    "minutes_until": mins,
+                    "location": event.get("location"),
+                    "calendar": event.get("calendar"),
+                    "attendees": resolved_attendees
+                })
+
+        return meetings
+
+    def get_meetings_needing_debrief(self, minutes_after: int = 15, window: int = 15) -> list:
+        """
+        Get meetings that need debrief (ended minutes_after ± window ago).
+
+        Returns events with attendee data for debrief sense events.
+        """
+        recent = self.get_recently_ended(hours=1)
+
+        meetings = []
+        for event in recent:
+            mins = event.get("minutes_since_end", 0)
+            lower = minutes_after - window
+            upper = minutes_after + window
+            if lower <= mins <= upper:
+                # Resolve attendees
+                attendees = event.get("attendees", [])
+                resolved_attendees = self.resolve_attendees(attendees)
+
+                # Calculate duration
+                duration_min = None
+                if event.get("start") and event.get("end"):
+                    duration_min = int((event["end"] - event["start"]).total_seconds() / 60)
+
+                meetings.append({
+                    "event_title": event.get("summary"),
+                    "ended_at": event.get("end"),
+                    "minutes_since_end": mins,
+                    "duration_min": duration_min,
+                    "location": event.get("location"),
+                    "calendar": event.get("calendar"),
+                    "attendees": resolved_attendees
+                })
+
+        return meetings
+
 
 def main():
     """CLI interface for calendar analyzer."""
@@ -396,11 +574,13 @@ def main():
     if len(sys.argv) < 2:
         print("Usage: calendar_analyzer.py <command>")
         print("Commands:")
-        print("  upcoming [hours]  - Get upcoming events")
-        print("  recent [hours]    - Get recently ended events")
+        print("  upcoming [hours]  - Get upcoming events (with attendees)")
+        print("  recent [hours]    - Get recently ended events (with attendees)")
         print("  free [hours]      - Find free periods")
         print("  summary           - Get calendar summary")
         print("  triggers          - Check for engagement triggers")
+        print("  prep              - Get meetings needing prep (10-20 min out)")
+        print("  debrief           - Get meetings needing debrief (ended 0-30 min ago)")
         sys.exit(1)
 
     command = sys.argv[1]
@@ -427,6 +607,14 @@ def main():
     elif command == "triggers":
         triggers = analyzer.check_for_triggers()
         print(json.dumps(triggers, indent=2, default=str))
+
+    elif command == "prep":
+        meetings = analyzer.get_meetings_needing_prep()
+        print(json.dumps(meetings, indent=2, default=str))
+
+    elif command == "debrief":
+        meetings = analyzer.get_meetings_needing_debrief()
+        print(json.dumps(meetings, indent=2, default=str))
 
     else:
         print(f"Unknown command: {command}")
