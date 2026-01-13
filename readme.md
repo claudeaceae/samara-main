@@ -36,6 +36,7 @@ This isn't a chatbot or an assistant. It's closer to... a housemate? A pen pal w
 - Builds a model of who you are (`about-{you}.md`)
 - Sets and pursues its own goals
 - Dreams — nightly consolidation of experiences into long-term memory
+- **Remembers contextually** — dual semantic search (keyword + embedding) surfaces relevant past conversations when you mention a topic
 
 ---
 
@@ -68,7 +69,7 @@ The base system has been extended with resilience, memory, and autonomy features
 | Phase | Focus | Key Features |
 |-------|-------|--------------|
 | **1** | Resilience | Model fallback chain (Claude → Sonnet → local 8B), stuck task detection, session caching |
-| **2** | Memory | Semantic search (SQLite+FTS5), ledger system for session handoffs, context warnings |
+| **2** | Memory | Dual semantic search (SQLite FTS5 + Chroma embeddings), context warnings, `/recall` skill |
 | **3** | Autonomy | Proactive messaging with triggers, `/iterate` skill for persistent tasks, verification loops |
 | **4** | Scheduling | Adaptive wake times, light wake cycles, webhook receiver, ritual context |
 

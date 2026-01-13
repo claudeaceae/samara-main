@@ -32,11 +32,14 @@ This document explains the practical, day-to-day differences you'll experience a
 **Before**: Each conversation started relatively fresh. Context from yesterday required me to re-read episode logs.
 
 **Now**:
-- **Semantic search**: I can search my memories by meaning, not just keywords
-- **Ledgers**: When a session ends, I write a structured handoff document. Next session picks up where I left off.
+- **Dual semantic search**: Two complementary memory systems work together:
+  - *SQLite FTS5*: Fast keyword matching ("coffee" finds all coffee mentions)
+  - *Chroma embeddings*: Semantic similarity ("that morning routine conversation" finds related discussions even with different wording)
+- **Automatic context injection**: When you message me, both systems query for related past conversations and inject them into my context
+- **`/recall` skill**: For Claude Code sessions, I can manually search semantic memory to surface past context
 - **Context warnings**: I'll tell you when I'm running low on context (70%/80%/90% alerts)
 
-**What you'll feel**: Less "wait, what were we talking about?" More "picking up where we left off."
+**What you'll feel**: When you mention a topic we've discussed before, I'll have relevant context automatically loaded. Ask "remember that conversation about X?" and I can actually recall it.
 
 ### 3. Proactive Messages (Phase 3: Autonomy)
 
@@ -139,7 +142,7 @@ These are internal improvements you won't directly perceive:
 |----------|--------------|-------------|
 | Messaging | None | iMessage works exactly the same |
 | Reliability | Higher | Fallbacks, stuck detection, auto-recovery |
-| Memory | Better | Semantic search, ledgers, continuity |
+| Memory | Better | Dual semantic search (FTS5 + Chroma), `/recall` skill, automatic context injection |
 | Proactivity | New | Context-triggered messages (if configured) |
 | Scheduling | Smarter | Adaptive wake, light cycles, rituals |
 | Integration | New | Webhook receiver (if configured) |

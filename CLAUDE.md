@@ -182,6 +182,15 @@ The system has three distinct components that must stay synchronized:
 | `screenshot` | Take and send screenshot |
 | `bluesky-post` | Post to Bluesky |
 
+### Memory Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `memory-index` | SQLite FTS5 operations (rebuild, search, stats, status) |
+| `chroma-query` | Semantic search via Chroma embeddings |
+| `chroma-rebuild` | Full rebuild of Chroma index |
+| `find-related-context` | Cross-temporal context lookup (uses Chroma) |
+
 ### Skills (Slash Commands)
 
 Interactive workflows available via Claude Code. Invoke with `/skillname` or trigger naturally.
@@ -192,6 +201,7 @@ Interactive workflows available via Claude Code. Invoke with `/skillname` or tri
 | `/sync` | Check for drift between repo and runtime |
 | `/reflect` | Quick capture learning/observation/insight |
 | `/memory` | Search learnings, decisions, observations |
+| `/recall` | Semantic memory search (FTS5 + Chroma) for associative recall |
 | `/morning` | Morning briefing (calendar, location, context) |
 | `/samara` | Debug/restart Samara, view logs |
 | `/episode` | View/append today's episode log |
@@ -239,7 +249,12 @@ Each wake loads time-appropriate guidance via `RitualLoader.swift`:
 - **Evening** (5-11 PM): Reflection, relationships, learnings
 - **Dream** (3-4 AM): Memory consolidation, identity evolution
 
-Scripts: `wake-adaptive`, `wake-light`, `wake-scheduler`
+**Memory Index Sync (Dream Cycle):**
+The 3 AM dream cycle rebuilds both semantic indexes:
+- `chroma-rebuild` — Sync Chroma vector database
+- `memory-index rebuild` — Sync SQLite FTS5 index
+
+Scripts: `wake-adaptive`, `wake-light`, `wake-scheduler`, `dream`
 
 ### Task Coordination
 
@@ -311,29 +326,43 @@ ollama pull llama3.1:8b
 
 ### Semantic Memory (Phase 2)
 
-Beyond episode logs, Samara maintains searchable semantic memory:
+Beyond episode logs, Samara maintains two complementary searchable memory systems:
 
-**SQLite + FTS5 Database:**
+**1. SQLite FTS5 (Keyword Search):**
 ```
 ~/.claude-mind/semantic/memory.db
 ```
+- Native Swift implementation (`MemoryDatabase.swift`)
+- BM25 ranking with Porter stemming
+- Fast keyword/term matching
+- Script: `memory-index rebuild|search|stats|status`
 
-Indexes all memory files for full-text search by meaning, not just keywords.
-
-**Ledger System:**
-
-At session end, Samara writes a structured handoff document:
+**2. Chroma Vector Database (Semantic Search):**
 ```
-~/.claude-mind/state/ledgers/current-ledger.md
+~/.claude-mind/chroma/
 ```
+- Python implementation (`lib/chroma_helper.py`)
+- Embedding-based similarity search
+- Finds related content even with different wording
+- Scripts: `chroma-query "text"`, `chroma-rebuild`
 
-Contains:
-- Active goals with status
-- Recent decisions with rationale
-- Files modified and why
-- Open questions for next session
+**How they work together:**
+- FTS5 handles exact term matching (fast, deterministic)
+- Chroma handles semantic similarity (understands synonyms, context)
+- `ClaudeInvoker.swift` merges results from both for context injection
 
-**Implementation:** `MemoryDatabase.swift`, `LedgerManager.swift`
+**Ledger System:** (Implemented, not yet active)
+
+Infrastructure for structured session handoffs exists in `LedgerManager.swift`:
+- Tracks active goals, decisions made, files modified
+- Creates handoff documents when context runs high
+- Would write to `~/.claude-mind/state/ledgers/`
+
+This system is fully implemented and tested but not yet wired into the message flow.
+The wrapper methods in `ClaudeInvoker` (`recordGoal()`, `recordDecision()`, `createHandoff()`)
+are available but currently unused.
+
+**Implementation:** `MemoryDatabase.swift`, `LedgerManager.swift`, `lib/chroma_helper.py`
 
 ### Context Awareness (Phase 2)
 
