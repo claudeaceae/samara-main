@@ -7,9 +7,9 @@
 
 set -e
 
-MIND_PATH="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 LOG_FILE="$MIND_PATH/logs/distillation.log"
-CLAUDE_PATH="$HOME/.local/bin/claude"
+CLAUDE_PATH="${CLAUDE_PATH:-$HOME/.local/bin/claude}"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"

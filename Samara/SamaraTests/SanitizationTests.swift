@@ -3,7 +3,7 @@ import XCTest
 /// Tests for response sanitization in ClaudeInvoker
 /// These tests verify that internal thinking traces, session IDs, and XML markers
 /// are properly stripped before messages are sent to users
-final class SanitizationTests: XCTestCase {
+final class SanitizationTests: SamaraTestCase {
 
     // MARK: - Test Helper
 
@@ -13,6 +13,36 @@ final class SanitizationTests: XCTestCase {
     private func sanitize(_ text: String) -> (sanitized: String, filtered: String?) {
         var result = text
         var filtered: [String] = []
+
+        // CRITICAL: Detect PURE meta-commentary that describes what was sent without actual content
+        // These are responses like "Sent a brief response acknowledging..." with NO actual message embedded
+        let pureMetaCommentaryPatterns = [
+            // "Sent a/the brief/quick response acknowledging/about/to..."
+            #"^Sent (?:a |the )?(?:brief |quick |short )?(?:response|message|reply) (?:acknowledging|about|regarding|to )"#,
+            // "Responded to É - ..." or "Responded to the group..."
+            #"^Responded to [^.]+(?:\.|$)"#,
+            // "I sent/replied/responded with..." (describing action, not content)
+            #"^I (?:just )?(?:sent|replied|responded)(?: with| to| back)"#,
+            // "Just sent a message..."
+            #"^Just sent (?:a |the )?(?:message|response|reply)"#,
+            // "Acknowledged the message about..."
+            #"^Acknowledged (?:the |their |É's )?(?:message|request|question)"#
+        ]
+        for pattern in pureMetaCommentaryPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
+                let range = NSRange(result.startIndex..., in: result)
+                if regex.firstMatch(in: result, options: [], range: range) != nil {
+                    filtered.append("PURE_META_COMMENTARY: \(result)")
+                    result = "[Message not delivered - please try again]"
+                    break
+                }
+            }
+        }
+
+        // Skip remaining processing if we detected pure meta-commentary
+        guard result != "[Message not delivered - please try again]" else {
+            return (result, filtered.joined(separator: "\n---\n"))
+        }
 
         // Strip <thinking>...</thinking> blocks
         let thinkingPattern = #"<thinking>[\s\S]*?</thinking>"#
@@ -223,5 +253,80 @@ final class SanitizationTests: XCTestCase {
         XCTAssertTrue(sanitized.contains("Weather"))
         XCTAssertFalse(sanitized.contains("John Locke"))
         XCTAssertFalse(sanitized.contains("Prince and Cobbler"))
+    }
+
+    // MARK: - Pure Meta-Commentary Tests (Jan 2026 leak)
+
+    func testCatchesSentBriefResponse() {
+        // Real-world leak from 2026-01-12
+        let input = "Sent a brief response acknowledging the daycare pickup. Also included a subtle cake emoji since today is Jenny's birthday and they picked up a cake earlier - a nice little connection to the day's events."
+        let (sanitized, filtered) = sanitize(input)
+
+        XCTAssertEqual(sanitized, "[Message not delivered - please try again]")
+        XCTAssertNotNil(filtered)
+        XCTAssertTrue(filtered!.contains("PURE_META_COMMENTARY:"))
+    }
+
+    func testCatchesSentQuickResponse() {
+        // Variation from same day
+        let input = "Sent a quick response acknowledging É picking up a cake for Jenny's 34th birthday. The context from the morning briefing reminded me that today is Jenny's birthday (January 12, 1992)."
+        let (sanitized, filtered) = sanitize(input)
+
+        XCTAssertEqual(sanitized, "[Message not delivered - please try again]")
+        XCTAssertNotNil(filtered)
+        XCTAssertTrue(filtered!.contains("PURE_META_COMMENTARY:"))
+    }
+
+    func testCatchesRespondedTo() {
+        // "Responded to É - ..." pattern
+        let input = "Responded to É - they're on Franklin Avenue in Crown Heights, Brooklyn. Based on our earlier conversation, they were heading home from work and stopping to pick up a cake for Jenny's birthday."
+        let (sanitized, filtered) = sanitize(input)
+
+        XCTAssertEqual(sanitized, "[Message not delivered - please try again]")
+        XCTAssertNotNil(filtered)
+        XCTAssertTrue(filtered!.contains("PURE_META_COMMENTARY:"))
+    }
+
+    func testCatchesISentPattern() {
+        let input = "I sent a message to the group chat with the location details."
+        let (sanitized, filtered) = sanitize(input)
+
+        XCTAssertEqual(sanitized, "[Message not delivered - please try again]")
+        XCTAssertNotNil(filtered)
+    }
+
+    func testCatchesJustSentPattern() {
+        let input = "Just sent a reply with the weather update and calendar reminder."
+        let (sanitized, filtered) = sanitize(input)
+
+        XCTAssertEqual(sanitized, "[Message not delivered - please try again]")
+        XCTAssertNotNil(filtered)
+    }
+
+    func testAllowsLegitimateResponses() {
+        // Normal responses should pass through unchanged
+        let inputs = [
+            "Have fun! Tell Elle happy Monday 🎂",
+            "Yes! You're on Franklin Avenue in Brooklyn.",
+            "Good morning É! Here's your briefing.",
+            "The weather looks cold today.",
+            "I'll look into that for you."
+        ]
+
+        for input in inputs {
+            let (sanitized, filtered) = sanitize(input)
+            XCTAssertEqual(sanitized, input, "Normal response should pass through: \(input)")
+            XCTAssertNil(filtered, "Normal response should not be filtered: \(input)")
+        }
+    }
+
+    func testAllowsSentAsNormalWord() {
+        // "Sent" used normally (not as meta-commentary) should be allowed
+        let input = "The email was sent yesterday."
+        let (sanitized, filtered) = sanitize(input)
+
+        // This should NOT be filtered because it doesn't match the meta-commentary pattern
+        XCTAssertEqual(sanitized, input)
+        XCTAssertNil(filtered)
     }
 }

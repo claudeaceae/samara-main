@@ -4,6 +4,11 @@
 
 set -e
 
+if [[ -n "${SAMARA_TEST_MODE:-}" ]]; then
+    echo "Refusing to run update-samara in SAMARA_TEST_MODE" >&2
+    exit 1
+fi
+
 SAMARA_DIR="/Users/claude/Developer/samara-main/Samara"
 ARCHIVE_PATH="/tmp/Samara.xcarchive"
 EXPORT_PATH="/tmp/SamaraExport"

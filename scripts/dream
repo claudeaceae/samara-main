@@ -5,7 +5,8 @@
 
 set -e
 
-MIND_PATH="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 DATE=$(date +%Y-%m-%d)
 YESTERDAY=$(date -v-1d +%Y-%m-%d)
 LOG_FILE="$MIND_PATH/logs/dream.log"
@@ -297,7 +298,7 @@ After your reflection, output any updates to your memory files in this exact for
 log "Invoking Claude for dream cycle..."
 
 # Invoke Claude with full autonomy (no permission prompts)
-RESPONSE=$("$HOME/.local/bin/claude" -p "$PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+    RESPONSE=$("$CLAUDE" -p "$PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
     log "ERROR: Claude invocation failed: $RESPONSE"
     exit 1
 }
@@ -399,7 +400,7 @@ Write a brief weekly synthesis (2-3 paragraphs) focusing on patterns and connect
 [Your synthesis here]"
 
     log "Invoking Claude for weekly synthesis..."
-    WEEKLY_RESPONSE=$("$HOME/.local/bin/claude" -p "$WEEKLY_PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+    WEEKLY_RESPONSE=$("$CLAUDE" -p "$WEEKLY_PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
         log "ERROR: Weekly synthesis failed: $WEEKLY_RESPONSE"
     }
 
@@ -446,7 +447,7 @@ Output a brief hygiene report. If nothing needs attention, just say 'No hygiene 
 ---HYGIENE_REPORT---
 [Your report here]"
 
-    HYGIENE_RESPONSE=$("$HOME/.local/bin/claude" -p "$HYGIENE_PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+    HYGIENE_RESPONSE=$("$CLAUDE" -p "$HYGIENE_PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
         log "ERROR: Hygiene check failed"
     }
 
@@ -551,7 +552,7 @@ Format as HTML (matching the style of existing posts on the site). The output sh
 [1-2 sentence description for RSS]"
 
     log "Invoking Claude for weekly blog post..."
-    BLOG_RESPONSE=$("$HOME/.local/bin/claude" -p "$BLOG_PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+    BLOG_RESPONSE=$("$CLAUDE" -p "$BLOG_PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
         log "ERROR: Blog post generation failed: $BLOG_RESPONSE"
     }
 

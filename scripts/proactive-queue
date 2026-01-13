@@ -1,0 +1,160 @@
+#!/bin/bash
+#
+# proactive-queue - Interface with the ProactiveQueue system
+#
+# Usage:
+#   proactive-queue status              Show queue status
+#   proactive-queue add "content"       Add item to queue (medium priority)
+#   proactive-queue add "content" high  Add item with priority (low/medium/high)
+#   proactive-queue list                List pending items
+#   proactive-queue clear               Clear expired items
+#
+# The proactive queue is managed by Samara.app but this script provides
+# a CLI interface for the wake script and manual use.
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+QUEUE_DIR="$MIND_PATH/state/proactive-queue"
+QUEUE_FILE="$QUEUE_DIR/queue.json"
+STATS_FILE="$QUEUE_DIR/stats.json"
+
+# Ensure directory exists
+mkdir -p "$QUEUE_DIR"
+
+# Initialize queue file if needed
+if [ ! -f "$QUEUE_FILE" ]; then
+    echo "[]" > "$QUEUE_FILE"
+fi
+
+# Generate UUID
+generate_uuid() {
+    uuidgen | tr '[:upper:]' '[:lower:]'
+}
+
+# Get current timestamp
+timestamp() {
+    date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+# Command: status
+cmd_status() {
+    local pending=$(jq '[.[] | select(.expiresAt == null or (.expiresAt | fromdateiso8601 > now))] | length' "$QUEUE_FILE" 2>/dev/null || echo "0")
+    local total=$(jq 'length' "$QUEUE_FILE" 2>/dev/null || echo "0")
+
+    # Get today's stats
+    local today=$(date +%Y-%m-%d)
+    local sent_today=0
+    if [ -f "$STATS_FILE" ]; then
+        local stats_date=$(jq -r '.date // ""' "$STATS_FILE" 2>/dev/null)
+        if [ "$stats_date" = "$today" ]; then
+            sent_today=$(jq -r '.messagesSent // 0' "$STATS_FILE" 2>/dev/null)
+        fi
+    fi
+
+    echo "{"
+    echo "  \"pending\": $pending,"
+    echo "  \"total\": $total,"
+    echo "  \"sentToday\": $sent_today,"
+    echo "  \"remainingToday\": $((5 - sent_today))"
+    echo "}"
+}
+
+# Command: add
+cmd_add() {
+    local content="$1"
+    local priority="${2:-medium}"
+
+    if [ -z "$content" ]; then
+        echo "Error: Content required"
+        echo "Usage: proactive-queue add \"content\" [priority]"
+        exit 1
+    fi
+
+    # Validate priority
+    case "$priority" in
+        low|medium|high|timeSensitive) ;;
+        *)
+            echo "Error: Invalid priority. Use: low, medium, high, timeSensitive"
+            exit 1
+            ;;
+    esac
+
+    local id=$(generate_uuid)
+    local now=$(timestamp)
+
+    # Calculate expiry (24 hours from now for most, 4 hours for timeSensitive)
+    local expiry_hours=24
+    [ "$priority" = "timeSensitive" ] && expiry_hours=4
+    local expires_at=$(date -u -v+${expiry_hours}H +"%Y-%m-%dT%H:%M:%SZ")
+
+    # Add to queue
+    local new_item=$(cat <<EOF
+{
+    "id": "$id",
+    "content": $(echo "$content" | jq -R .),
+    "priority": "$priority",
+    "source": "thought",
+    "createdAt": "$now",
+    "expiresAt": "$expires_at"
+}
+EOF
+)
+
+    jq --argjson item "$new_item" '. += [$item]' "$QUEUE_FILE" > "${QUEUE_FILE}.tmp" && \
+        mv "${QUEUE_FILE}.tmp" "$QUEUE_FILE"
+
+    echo "Added to queue: $content (priority: $priority)"
+}
+
+# Command: list
+cmd_list() {
+    if [ ! -f "$QUEUE_FILE" ] || [ "$(jq 'length' "$QUEUE_FILE")" = "0" ]; then
+        echo "Queue is empty."
+        return 0
+    fi
+
+    echo "=== Pending Items ==="
+    jq -r '.[] | select(.expiresAt == null or (.expiresAt | fromdateiso8601 > now)) | "[\(.priority)] \(.content | .[0:60])..."' "$QUEUE_FILE" 2>/dev/null || \
+        echo "No pending items."
+}
+
+# Command: clear
+cmd_clear() {
+    # Remove expired items
+    jq '[.[] | select(.expiresAt == null or (.expiresAt | fromdateiso8601 > now))]' "$QUEUE_FILE" > "${QUEUE_FILE}.tmp" && \
+        mv "${QUEUE_FILE}.tmp" "$QUEUE_FILE"
+
+    echo "Cleared expired items."
+}
+
+# Main dispatch
+case "${1:-status}" in
+    status)
+        cmd_status
+        ;;
+    add)
+        shift
+        cmd_add "$@"
+        ;;
+    list)
+        cmd_list
+        ;;
+    clear)
+        cmd_clear
+        ;;
+    --help|-h)
+        echo "Usage: proactive-queue <command> [args]"
+        echo ""
+        echo "Commands:"
+        echo "  status              Show queue status (default)"
+        echo "  add \"content\" [pri] Add item (priority: low/medium/high/timeSensitive)"
+        echo "  list                List pending items"
+        echo "  clear               Clear expired items"
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Use 'proactive-queue --help' for usage"
+        exit 1
+        ;;
+esac

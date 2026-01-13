@@ -10,9 +10,10 @@
 
 set -e
 
-STATE_FILE="${HOME}/.claude-mind/state/iteration-state.json"
-GOAL_FILE="${HOME}/.claude-mind/state/iteration-goal.md"
-ARCHIVE_DIR="${HOME}/.claude-mind/state/iteration-archive"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+STATE_FILE="$MIND_PATH/state/iteration-state.json"
+GOAL_FILE="$MIND_PATH/state/iteration-goal.md"
+ARCHIVE_DIR="$MIND_PATH/state/iteration-archive"
 
 # Check if iteration is active
 if [ ! -f "$STATE_FILE" ]; then
@@ -128,7 +129,7 @@ echo ""
 
 # Optionally record to decisions if successful
 if [ "$FINAL_STATUS" = "success" ]; then
-    DECISIONS_FILE="${HOME}/.claude-mind/memory/decisions.md"
+    DECISIONS_FILE="$MIND_PATH/memory/decisions.md"
     if [ -f "$DECISIONS_FILE" ]; then
         echo "" >> "$DECISIONS_FILE"
         echo "## $(date +%Y-%m-%d): Iteration Success - $GOAL" >> "$DECISIONS_FILE"

@@ -24,11 +24,12 @@ import json
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
+from mind_paths import get_mind_path
 from collections import defaultdict
 from typing import Optional, Tuple
 import sys
 
-MIND_PATH = Path(os.path.expanduser("~/.claude-mind"))
+MIND_PATH = get_mind_path()
 EPISODES_PATH = MIND_PATH / "memory" / "episodes"
 REFLECTIONS_PATH = MIND_PATH / "memory" / "reflections"
 ROUNDUPS_PATH = MIND_PATH / "roundups"

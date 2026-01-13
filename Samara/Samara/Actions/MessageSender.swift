@@ -4,6 +4,8 @@ import Foundation
 final class MessageSender {
     /// The target phone number or email to send to
     private let targetId: String
+    private let appleScriptRunner: ((String) throws -> Void)?
+    private let attachmentStagingDirectory: URL?
 
     /// Maximum retry attempts for AppleScript failures
     private let maxRetries = 3
@@ -11,8 +13,14 @@ final class MessageSender {
     /// Base delay for exponential backoff (doubles each retry: 1s, 2s, 4s)
     private let baseRetryDelay: TimeInterval = 1.0
 
-    init(targetId: String) {
+    init(
+        targetId: String,
+        appleScriptRunner: ((String) throws -> Void)? = nil,
+        attachmentStagingDirectory: URL? = nil
+    ) {
         self.targetId = targetId
+        self.appleScriptRunner = appleScriptRunner
+        self.attachmentStagingDirectory = attachmentStagingDirectory
     }
 
     // MARK: - Public API (1:1 chats via targetId)
@@ -137,7 +145,8 @@ final class MessageSender {
     /// Required workaround: AppleScript file sending only works from ~/Pictures on macOS Sequoia/Tahoe
     private func copyToPicturesFolder(filePath: String) throws -> String {
         let fileManager = FileManager.default
-        let picturesURL = fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Pictures/.imessage-send")
+        let baseDirectory = attachmentStagingDirectory ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Pictures")
+        let picturesURL = baseDirectory.appendingPathComponent(".imessage-send")
 
         // Create directory if needed
         try fileManager.createDirectory(at: picturesURL, withIntermediateDirectories: true)
@@ -241,20 +250,25 @@ final class MessageSender {
         var lastError: Error?
 
         for attempt in 0..<maxRetries {
-            let process = Process()
-            let errorPipe = Pipe()
-
-            // Ensure pipe is closed to prevent file descriptor leaks
-            let errorHandle = errorPipe.fileHandleForReading
-            defer {
-                try? errorHandle.close()
-            }
-
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-            process.arguments = ["-e", source]
-            process.standardError = errorPipe
-
             do {
+                if let runner = appleScriptRunner {
+                    try runner(source)
+                    return
+                }
+
+                let process = Process()
+                let errorPipe = Pipe()
+
+                // Ensure pipe is closed to prevent file descriptor leaks
+                let errorHandle = errorPipe.fileHandleForReading
+                defer {
+                    try? errorHandle.close()
+                }
+
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+                process.arguments = ["-e", source]
+                process.standardError = errorPipe
+
                 try process.run()
                 process.waitUntilExit()
 
@@ -265,7 +279,6 @@ final class MessageSender {
                 let errorData = errorHandle.readDataToEndOfFile()
                 let errorMessage = String(data: errorData, encoding: .utf8) ?? "Unknown error"
                 lastError = MessageSenderError.executionFailed(errorMessage)
-
             } catch {
                 lastError = MessageSenderError.executionFailed(error.localizedDescription)
             }

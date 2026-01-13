@@ -72,7 +72,7 @@ struct QueuedMessage: Codable {
 /// Manages a persistent queue of messages waiting to be processed
 final class MessageQueue {
 
-    static let queuePath = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/message-queue.json"
+    static let queuePath = MindPaths.mindPath("message-queue.json")
     static let maxQueueSize = 50  // Prevent unbounded queue growth
 
     private static let lock = NSLock()

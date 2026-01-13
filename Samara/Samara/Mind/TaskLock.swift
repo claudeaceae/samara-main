@@ -47,10 +47,10 @@ struct TaskInfo: Codable {
 final class TaskLock {
 
     /// Base directory for all lock files
-    static let locksDir = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/locks"
+    static let locksDir = MindPaths.mindPath("locks")
 
     /// Legacy single lock path for backward compatibility
-    static let legacyLockPath = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/claude.lock"
+    static let legacyLockPath = MindPaths.mindPath("claude.lock")
 
     /// Configurable threshold for considering a task stuck (default: 2 hours)
     /// This is used by detectAndClearStuck() for long-running task recovery

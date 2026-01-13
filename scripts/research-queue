@@ -2,9 +2,10 @@
 # research-queue - Manage shared items for async research
 # Items come from "share" webhook source via iOS Share Sheet
 
-QUEUE_FILE="$HOME/.claude-mind/state/research-queue/queue.jsonl"
-ARCHIVE_FILE="$HOME/.claude-mind/state/research-queue/archive.jsonl"
-SENSES_DIR="$HOME/.claude-mind/senses"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+QUEUE_FILE="$MIND_PATH/state/research-queue/queue.jsonl"
+ARCHIVE_FILE="$MIND_PATH/state/research-queue/archive.jsonl"
+SENSES_DIR="$MIND_PATH/senses"
 
 mkdir -p "$(dirname "$QUEUE_FILE")"
 touch "$QUEUE_FILE" "$ARCHIVE_FILE"

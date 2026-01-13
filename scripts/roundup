@@ -12,7 +12,7 @@
 
 set -e
 
-MIND_PATH="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 VENV_PATH="$MIND_PATH/.venv"
 LOG_FILE="$MIND_PATH/logs/roundup.log"
 LOCK_FILE="$MIND_PATH/claude.lock"

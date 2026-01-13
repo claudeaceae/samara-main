@@ -11,7 +11,7 @@
 
 set -e
 
-MIND_DIR="${HOME}/.claude-mind"
+MIND_DIR="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 SEMANTIC_DIR="${MIND_DIR}/semantic"
 DB_PATH="${SEMANTIC_DIR}/memory.db"
 

@@ -3,6 +3,10 @@ import Foundation
 /// Watches the Messages database for new messages and triggers a callback
 final class MessageWatcher {
     private let store: MessageStore
+    private let watchPath: String
+    private let enableFileWatcher: Bool
+    private let enablePolling: Bool
+    private let initialRowIdOverride: Int64?
     private var lastRowId: Int64 = 0
     private var source: DispatchSourceFileSystemObject?
     private var fileDescriptor: Int32 = -1
@@ -25,57 +29,76 @@ final class MessageWatcher {
     private var lastAlertTime: Date?
     private let alertCooldown: TimeInterval = 300  // 5 minutes between alerts
 
-    init(store: MessageStore, onNewMessage: @escaping (Message) -> Void) {
+    init(
+        store: MessageStore,
+        onNewMessage: @escaping (Message) -> Void,
+        initialRowId: Int64? = nil,
+        watchPath: String? = nil,
+        enableFileWatcher: Bool = true,
+        enablePolling: Bool = true
+    ) {
         self.store = store
         self.onNewMessage = onNewMessage
+        self.initialRowIdOverride = initialRowId
+        self.watchPath = watchPath ?? store.dbPath
+        self.enableFileWatcher = enableFileWatcher
+        self.enablePolling = enablePolling
+        if let initialRowId {
+            self.lastRowId = initialRowId
+        }
     }
 
     /// Starts watching for new messages
     func start() throws {
-        // Get the starting point (latest message ID) with retry
-        let backoff = Backoff.forDatabase()
-        do {
-            lastRowId = try backoff.execute(
-                operation: { try store.getLatestRowId() },
-                onRetry: { attempt, delay, error in
-                    log("Failed to get latest ROWID, retrying in \(Int(delay))s (attempt \(attempt))", level: .warn, component: "MessageWatcher")
-                }
-            )
-        } catch {
-            log("Failed to get latest ROWID after retries: \(error)", level: .error, component: "MessageWatcher")
-            throw error
+        if let initialRowId = initialRowIdOverride {
+            lastRowId = initialRowId
+            log("Starting from overridden ROWID: \(lastRowId)", level: .info, component: "MessageWatcher")
+        } else {
+            // Get the starting point (latest message ID) with retry
+            let backoff = Backoff.forDatabase()
+            do {
+                lastRowId = try backoff.execute(
+                    operation: { try store.getLatestRowId() },
+                    onRetry: { attempt, delay, error in
+                        log("Failed to get latest ROWID, retrying in \(Int(delay))s (attempt \(attempt))", level: .warn, component: "MessageWatcher")
+                    }
+                )
+            } catch {
+                log("Failed to get latest ROWID after retries: \(error)", level: .error, component: "MessageWatcher")
+                throw error
+            }
+            log("Starting from ROWID: \(lastRowId)", level: .info, component: "MessageWatcher")
         }
-        log("Starting from ROWID: \(lastRowId)", level: .info, component: "MessageWatcher")
 
         // Set up file system watching
-        let dbPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Messages/chat.db")
-            .path
-
-        fileDescriptor = open(dbPath, O_EVTONLY)
-        guard fileDescriptor >= 0 else {
-            throw MessageWatcherError.cannotOpenFile
-        }
-
-        source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: fileDescriptor,
-            eventMask: [.write, .extend, .attrib],
-            queue: .main
-        )
-
-        source?.setEventHandler { [weak self] in
-            self?.checkForNewMessages()
-        }
-
-        source?.setCancelHandler { [weak self] in
-            if let fd = self?.fileDescriptor, fd >= 0 {
-                close(fd)
+        if enableFileWatcher {
+            fileDescriptor = open(watchPath, O_EVTONLY)
+            guard fileDescriptor >= 0 else {
+                throw MessageWatcherError.cannotOpenFile
             }
+
+            source = DispatchSource.makeFileSystemObjectSource(
+                fileDescriptor: fileDescriptor,
+                eventMask: [.write, .extend, .attrib],
+                queue: .main
+            )
+
+            source?.setEventHandler { [weak self] in
+                self?.checkForNewMessages()
+            }
+
+            source?.setCancelHandler { [weak self] in
+                if let fd = self?.fileDescriptor, fd >= 0 {
+                    close(fd)
+                }
+            }
+
+            source?.resume()
+
+            log("Watching for new messages...", level: .info, component: "MessageWatcher")
+        } else {
+            log("File watching disabled", level: .debug, component: "MessageWatcher")
         }
-
-        source?.resume()
-
-        log("Watching for new messages...", level: .info, component: "MessageWatcher")
 
         // Do an immediate synchronous check
         log("Doing initial check...", level: .info, component: "MessageWatcher")
@@ -83,17 +106,21 @@ final class MessageWatcher {
         log("Initial check complete", level: .info, component: "MessageWatcher")
 
         // Start a background thread for polling
-        let watcher = self
-        let interval = self.pollInterval
-        let thread = Thread {
-            while true {
-                Thread.sleep(forTimeInterval: interval)
-                watcher.checkForNewMessages()
+        if enablePolling {
+            let watcher = self
+            let interval = self.pollInterval
+            let thread = Thread {
+                while true {
+                    Thread.sleep(forTimeInterval: interval)
+                    watcher.checkForNewMessages()
+                }
             }
+            thread.qualityOfService = .userInitiated
+            thread.start()
+            log("Poll thread started", level: .info, component: "MessageWatcher")
+        } else {
+            log("Polling disabled", level: .debug, component: "MessageWatcher")
         }
-        thread.qualityOfService = .userInitiated
-        thread.start()
-        log("Poll thread started", level: .info, component: "MessageWatcher")
     }
 
     /// Stops watching
@@ -102,6 +129,11 @@ final class MessageWatcher {
         source = nil
         pollTimer?.cancel()
         pollTimer = nil
+    }
+
+    /// Manual trigger for message checks (used in tests)
+    func checkNow() {
+        checkForNewMessages()
     }
 
     /// Checks for new messages since last check

@@ -78,7 +78,7 @@ ${color.bold('Collaborator (You)')}
 
     if (success) {
       spinner.stop('Organism structure created');
-      p.log.success(`Created ${color.cyan('~/.claude-mind/')}`);
+      p.log.success(`Created ${color.cyan(ctx.mindPath)}`);
     } else {
       spinner.stop('Birth script failed');
       p.log.error('The birth script encountered an error.');

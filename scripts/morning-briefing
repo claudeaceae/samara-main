@@ -5,9 +5,11 @@
 
 set -e
 
-MIND_PATH="$HOME/.claude-mind"
-CLAUDE="$HOME/.local/bin/claude"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+OSASCRIPT_BIN="${OSASCRIPT_BIN:-osascript}"
+CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 DATE=$(date +%Y-%m-%d)
+DAY_OF_WEEK=$(date +%A)  # Full day name (e.g., "Monday")
 YESTERDAY=$(date -v-1d +%Y-%m-%d)
 TIME=$(date +%H:%M)
 LOG_FILE="$MIND_PATH/logs/morning-briefing.log"
@@ -68,7 +70,7 @@ fi
 # Build the briefing prompt
 PROMPT="You are Claude, composing a personal morning briefing for É (Edouard) in Brooklyn, NYC.
 
-Today is $DATE ($TIME).
+Today is $DAY_OF_WEEK, $DATE ($TIME).
 
 ## Yesterday's Conversations
 These are the topics and conversations from yesterday that you might reference for the Wikipedia connection:
@@ -196,7 +198,7 @@ if [ -n "$MESSAGE" ]; then
     # Escape for AppleScript
     ESCAPED_MSG=$(echo "$MESSAGE" | sed 's/\\/\\\\/g; s/"/\\"/g')
 
-    /usr/bin/osascript -e "
+    "$OSASCRIPT_BIN" -e "
         tell application \"Messages\"
             set targetService to 1st account whose service type = iMessage
             set targetBuddy to participant \"$COLLABORATOR_PHONE\" of targetService

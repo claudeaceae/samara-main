@@ -8,7 +8,7 @@ Shell scripts that power the Claude organism's autonomous capabilities.
 
 | Script | Required? | Purpose |
 |--------|-----------|---------|
-| `wake` | **Core** | Autonomous wake cycles (3x daily) |
+| `wake` | **Core** | Autonomous wake cycle (invoked by wake-adaptive) |
 | `dream` | **Core** | Nightly memory consolidation |
 | `message` | **Core** | Send iMessage to collaborator |
 | `send-image` | **Core** | Send image attachment |
@@ -34,7 +34,7 @@ These scripts are essential for basic organism operation.
 
 Autonomous wake cycle - self-directed sessions.
 
-**Schedule:** 9 AM, 2 PM, 8 PM via launchd
+**Schedule:** Invoked by `wake-adaptive` (~9 AM, ~2 PM, ~8 PM or adaptive triggers)
 
 **What it does:**
 1. Acquires system lock (coordinates with Samara)

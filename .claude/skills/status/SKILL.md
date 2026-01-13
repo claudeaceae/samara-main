@@ -32,15 +32,20 @@ tail -20 ~/.claude-mind/logs/samara.log 2>/dev/null || echo "No Samara log found
 launchctl list | grep claude
 ```
 Check that these are loaded:
-- com.claude.wake-morning
-- com.claude.wake-afternoon
-- com.claude.wake-evening
+- com.claude.wake-adaptive (primary scheduler, runs every 15 min)
 - com.claude.dream
 
 ### 4. Recent Wake/Dream Logs
 ```bash
+tail -10 ~/.claude-mind/logs/wake-adaptive.log 2>/dev/null
 tail -10 ~/.claude-mind/logs/wake.log 2>/dev/null
 tail -10 ~/.claude-mind/logs/dream.log 2>/dev/null
+```
+
+### 4b. Scheduler State
+```bash
+cat ~/.claude-mind/state/scheduler-state.json 2>/dev/null || echo "No scheduler state"
+~/.claude-mind/bin/wake-scheduler status 2>/dev/null || echo "Scheduler not available"
 ```
 
 ### 5. Lock File Status
@@ -64,8 +69,10 @@ df -h ~ | tail -1
 
 Summarize findings as:
 - **Samara**: Running/Not Running
-- **Wake Cycles**: All loaded / Missing X
-- **Last Wake**: timestamp
+- **Wake Adaptive**: Loaded / Not loaded
+- **Dream**: Loaded / Not loaded
+- **Last Wake**: timestamp (from scheduler state)
+- **Next Wake**: timestamp (from scheduler)
 - **Last Dream**: timestamp
 - **FDA Status**: OK / Issue
 - **Lock File**: Clear / Stale

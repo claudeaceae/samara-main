@@ -22,9 +22,7 @@ final class MemoryContext {
     private var useNativeFTS: Bool = true
 
     init() {
-        self.mindPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude-mind")
-            .path
+        self.mindPath = MindPaths.mindPath()
         self.dbPath = (mindPath as NSString).appendingPathComponent("memory.db")
 
         // Initialize native database
@@ -265,15 +263,19 @@ final class MemoryContext {
     }
 
     /// Default iMessage instructions as fallback if file loading fails
-    static let defaultIMessageInstructions = """
+    static var defaultIMessageInstructions: String {
+        let sendImagePath = MindPaths.mindPath("bin/send-image")
+        let lookPath = MindPaths.mindPath("bin/look")
+        return """
         ## Response Instructions
         Your entire output will be sent as an iMessage. Respond naturally and concisely.
         - Keep responses brief (this is texting)
         - DO NOT narrate actions or use the message script
         - DO NOT use markdown formatting - Apple Messages displays it literally
-        - To send images: ~/.claude-mind/bin/send-image /path/to/file
-        - To take photos: ~/.claude-mind/bin/look -s
+        - To send images: \(sendImagePath) /path/to/file
+        - To take photos: \(lookPath) -s
         """
+    }
 
     /// Builds location awareness summary from state files
     private func buildLocationSummary() -> String? {

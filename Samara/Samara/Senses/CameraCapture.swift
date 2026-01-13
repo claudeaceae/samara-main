@@ -3,7 +3,11 @@ import AppKit
 
 /// Captures photos from the webcam using AVFoundation
 /// This runs within Samara.app's process, using Samara's camera permission
-final class CameraCapture: NSObject {
+protocol CameraCapturing {
+    func capture(to path: String) async throws -> String
+}
+
+final class CameraCapture: NSObject, CameraCapturing {
     private var captureSession: AVCaptureSession?
     private var photoOutput: AVCapturePhotoOutput?
     private var continuation: CheckedContinuation<String, Error>?
@@ -171,16 +175,20 @@ extension CameraCapture: AVCapturePhotoCaptureDelegate {
 final class CaptureRequestWatcher {
     private let requestPath: String
     private let resultPath: String
-    private let camera: CameraCapture
+    private let camera: CameraCapturing
+    private let pollInterval: DispatchTimeInterval
     private var timer: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "samara.capture-watcher", qos: .userInitiated)
 
-    init() {
-        let statePath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude-mind/state").path
+    init(
+        statePath: String = MindPaths.mindPath("state"),
+        camera: CameraCapturing = CameraCapture(),
+        pollInterval: DispatchTimeInterval = .milliseconds(500)
+    ) {
         self.requestPath = (statePath as NSString).appendingPathComponent("capture-request.json")
         self.resultPath = (statePath as NSString).appendingPathComponent("capture-result.json")
-        self.camera = CameraCapture()
+        self.camera = camera
+        self.pollInterval = pollInterval
 
         // Ensure state directory exists
         try? FileManager.default.createDirectory(atPath: statePath, withIntermediateDirectories: true)
@@ -191,7 +199,7 @@ final class CaptureRequestWatcher {
         log("CaptureRequestWatcher started", level: .info, component: "CameraCapture")
 
         timer = DispatchSource.makeTimerSource(queue: queue)
-        timer?.schedule(deadline: .now(), repeating: .milliseconds(500))
+        timer?.schedule(deadline: .now(), repeating: pollInterval)
         timer?.setEventHandler { [weak self] in
             self?.checkForRequest()
         }

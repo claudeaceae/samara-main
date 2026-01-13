@@ -3,9 +3,28 @@ import Contacts
 
 /// Resolves phone numbers and emails to contact names from the system Contacts
 final class ContactsResolver {
-    private let store = CNContactStore()
+    typealias ContactLookup = (String) -> String?
+
+    private let store: CNContactStore
+    private let resolvePhoneHandler: ContactLookup
+    private let resolveEmailHandler: ContactLookup
     private var cache: [String: String] = [:]
     private let lock = NSLock()
+
+    init(
+        store: CNContactStore = CNContactStore(),
+        resolvePhone: ContactLookup? = nil,
+        resolveEmail: ContactLookup? = nil
+    ) {
+        self.store = store
+        let storeRef = store
+        self.resolvePhoneHandler = resolvePhone ?? { phone in
+            ContactsResolver.resolvePhoneUsingContacts(phone, store: storeRef)
+        }
+        self.resolveEmailHandler = resolveEmail ?? { email in
+            ContactsResolver.resolveEmailUsingContacts(email, store: storeRef)
+        }
+    }
 
     /// Resolve a single handle (phone number or email) to a contact name
     /// Returns nil if no matching contact is found
@@ -19,9 +38,9 @@ final class ContactsResolver {
 
         let name: String?
         if handle.contains("@") {
-            name = resolveEmail(handle)
+            name = resolveEmailHandler(handle)
         } else if handle.hasPrefix("+") || handle.first?.isNumber == true {
-            name = resolvePhone(handle)
+            name = resolvePhoneHandler(handle)
         } else {
             name = nil
         }
@@ -48,7 +67,7 @@ final class ContactsResolver {
     }
 
     /// Resolve a phone number to a contact name
-    private func resolvePhone(_ phone: String) -> String? {
+    private static func resolvePhoneUsingContacts(_ phone: String, store: CNContactStore) -> String? {
         // Normalize phone number (keep only digits and +)
         let normalized = phone.filter { $0.isNumber || $0 == "+" }
 
@@ -72,7 +91,7 @@ final class ContactsResolver {
     }
 
     /// Resolve an email address to a contact name
-    private func resolveEmail(_ email: String) -> String? {
+    private static func resolveEmailUsingContacts(_ email: String, store: CNContactStore) -> String? {
         let predicate = CNContact.predicateForContacts(matchingEmailAddress: email)
         let keysToFetch: [CNKeyDescriptor] = [
             CNContactGivenNameKey as CNKeyDescriptor,

@@ -12,7 +12,8 @@
 
 set -e
 
-STATE_DIR="${HOME}/.claude-mind/state"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+STATE_DIR="$MIND_PATH/state"
 STATE_FILE="${STATE_DIR}/iteration-state.json"
 GOAL_FILE="${STATE_DIR}/iteration-goal.md"
 

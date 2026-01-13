@@ -12,13 +12,21 @@ import sys
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
+def resolve_mind_dir() -> str:
+    override = os.environ.get("SAMARA_MIND_PATH") or os.environ.get("MIND_PATH")
+    if override:
+        return os.path.expanduser(override)
+    home_dir = os.environ.get('HOME', os.path.expanduser('~'))
+    return os.path.join(home_dir, '.claude-mind')
+
+
 # Paths
-HOME = os.environ.get('HOME', os.path.expanduser('~'))
-STATE_DIR = os.path.join(HOME, '.claude-mind', 'state')
-SENSES_DIR = os.path.join(HOME, '.claude-mind', 'senses')
-CREDS_FILE = os.path.join(HOME, '.claude-mind', 'credentials', 'bluesky.json')
+MIND_DIR = resolve_mind_dir()
+STATE_DIR = os.path.join(MIND_DIR, 'state')
+SENSES_DIR = os.path.join(MIND_DIR, 'senses')
+CREDS_FILE = os.path.join(MIND_DIR, 'credentials', 'bluesky.json')
 STATE_FILE = os.path.join(STATE_DIR, 'bluesky-state.json')
-LOG_FILE = os.path.join(HOME, '.claude-mind', 'logs', 'bluesky-watcher.log')
+LOG_FILE = os.path.join(MIND_DIR, 'logs', 'bluesky-watcher.log')
 
 
 def log(message: str):

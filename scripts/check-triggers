@@ -5,7 +5,7 @@
 
 set -e
 
-MIND_PATH="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 VENV_PATH="$MIND_PATH/.venv"
 LOG_FILE="$MIND_PATH/logs/triggers.log"
 STATE_FILE="$MIND_PATH/state/last-evaluation.json"

@@ -435,6 +435,37 @@ final class ClaudeInvoker {
             }
         }
 
+        // CRITICAL: Detect PURE meta-commentary that describes what was sent without actual content
+        // These are responses like "Sent a brief response acknowledging..." with NO actual message embedded
+        // Unlike the prefixes above (which have content after the colon), these ARE the entire response
+        let pureMetaCommentaryPatterns = [
+            // "Sent a/the brief/quick response acknowledging/about/to..."
+            #"^Sent (?:a |the )?(?:brief |quick |short )?(?:response|message|reply) (?:acknowledging|about|regarding|to )"#,
+            // "Responded to É - ..." or "Responded to the group..."
+            #"^Responded to [^.]+(?:\.|$)"#,
+            // "I sent/replied/responded with..." (describing action, not content)
+            #"^I (?:just )?(?:sent|replied|responded)(?: with| to| back)"#,
+            // "Just sent a message..."
+            #"^Just sent (?:a |the )?(?:message|response|reply)"#,
+            // "Acknowledged the message about..."
+            #"^Acknowledged (?:the |their |É's )?(?:message|request|question)"#
+        ]
+        for pattern in pureMetaCommentaryPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
+                let range = NSRange(result.startIndex..., in: result)
+                if regex.firstMatch(in: result, options: [], range: range) != nil {
+                    // This is pure meta-commentary - the ENTIRE response is describing an action
+                    // without containing the actual content. Flag it and return error placeholder.
+                    filtered.append("PURE_META_COMMENTARY: \(result)")
+                    log("CRITICAL: Pure meta-commentary detected - response describes action without content: \(result.prefix(100))...",
+                        level: .error, component: "ClaudeInvoker")
+                    // Return error placeholder - we can't extract actual content from this
+                    result = "[Message not delivered - please try again]"
+                    break  // Don't continue processing, this response is invalid
+                }
+            }
+        }
+
         // Strip <thinking>...</thinking> blocks (extended thinking traces)
         let thinkingPattern = #"<thinking>[\s\S]*?</thinking>"#
         if let regex = try? NSRegularExpression(pattern: thinkingPattern, options: []) {

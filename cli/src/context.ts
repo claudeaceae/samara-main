@@ -1,6 +1,6 @@
 import Conf from 'conf';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import type { WizardContext, SavedWizardState, StepName } from './types.js';
 
 // Persistent storage for wizard state
@@ -11,6 +11,20 @@ const store = new Conf<{ wizardState?: SavedWizardState }>({
 // State expiry time (24 hours)
 const STATE_EXPIRY_MS = 24 * 60 * 60 * 1000;
 
+function expandTilde(value: string): string {
+  if (value === '~') return homedir();
+  if (value.startsWith('~/')) return join(homedir(), value.slice(2));
+  return value;
+}
+
+function resolveMindPath(): string {
+  const override = process.env.SAMARA_MIND_PATH || process.env.MIND_PATH;
+  if (override && override.trim().length > 0) {
+    return resolve(expandTilde(override));
+  }
+  return join(homedir(), '.claude-mind');
+}
+
 /**
  * Create a fresh wizard context
  */
@@ -18,7 +32,7 @@ export function createContext(): WizardContext {
   return {
     config: {},
     repoPath: process.cwd(),
-    mindPath: join(homedir(), '.claude-mind'),
+    mindPath: resolveMindPath(),
     hasDeveloperAccount: false,
     buildFromSource: false,
     setupBluesky: false,
@@ -52,7 +66,7 @@ export function restoreFromState(saved: SavedWizardState): WizardContext {
   return {
     config: saved.config,
     repoPath: process.cwd(),
-    mindPath: join(homedir(), '.claude-mind'),
+    mindPath: resolveMindPath(),
     hasDeveloperAccount: saved.hasDeveloperAccount,
     buildFromSource: saved.buildFromSource,
     teamId: saved.teamId,

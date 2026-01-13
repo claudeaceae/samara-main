@@ -18,7 +18,8 @@ RESOLUTION=""
 WITH_TEXT=false
 REFERENCE_IMAGES=()
 # Load API key from local credentials (not in repo)
-CREDENTIALS_FILE="$HOME/.claude-mind/credentials/gemini.txt"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CREDENTIALS_FILE="$MIND_PATH/credentials/gemini.txt"
 if [ -f "$CREDENTIALS_FILE" ]; then
     API_KEY=$(cat "$CREDENTIALS_FILE" | tr -d '[:space:]')
 else

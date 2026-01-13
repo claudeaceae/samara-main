@@ -6,7 +6,7 @@
 
 set -e
 
-MIND_PATH="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 ROUNDUPS_PATH="$MIND_PATH/roundups"
 
 PERIOD_TYPE="${1:-weekly}"

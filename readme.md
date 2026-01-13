@@ -111,7 +111,7 @@ Most features require explicit configuration. See [`docs/whats-changed-phases-1-
 │   └── senses/          — satellite event files                   │
 │                                                                  │
 │   launchd                                                        │
-│   └── Scheduled wake cycles (9am, 2pm, 8pm)                      │
+│   └── Adaptive wake scheduler (every 15 min)                     │
 │   └── Dream cycle (3am)                                          │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
@@ -241,9 +241,7 @@ After initial setup, rebuild with: `~/.claude-mind/bin/update-samara`
 
 ```bash
 cp ~/.claude-mind/launchd/*.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.claude.wake-morning.plist
-launchctl load ~/Library/LaunchAgents/com.claude.wake-afternoon.plist
-launchctl load ~/Library/LaunchAgents/com.claude.wake-evening.plist
+launchctl load ~/Library/LaunchAgents/com.claude.wake-adaptive.plist
 launchctl load ~/Library/LaunchAgents/com.claude.dream.plist
 ```
 

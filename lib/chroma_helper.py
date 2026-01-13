@@ -19,12 +19,13 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
+from mind_paths import get_mind_path
 from typing import Optional
 
 import chromadb
 from chromadb.config import Settings
 
-MIND_PATH = Path(os.path.expanduser("~/.claude-mind"))
+MIND_PATH = get_mind_path()
 CHROMA_PATH = MIND_PATH / "chroma"
 COLLECTION_NAME = "memories"
 

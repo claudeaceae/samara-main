@@ -103,9 +103,7 @@ final class ProactiveQueue {
     // MARK: - Initialization
 
     init(baseDir: String? = nil) {
-        let defaultBase = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude-mind/state")
-            .path
+        let defaultBase = MindPaths.mindPath("state")
 
         let base = baseDir ?? defaultBase
         self.queueDir = (base as NSString).appendingPathComponent("proactive-queue")

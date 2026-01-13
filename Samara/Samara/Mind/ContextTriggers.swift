@@ -138,9 +138,7 @@ final class ContextTriggers {
     // MARK: - Initialization
 
     init(baseDir: String? = nil) {
-        let defaultBase = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude-mind/state")
-            .path
+        let defaultBase = MindPaths.mindPath("state")
 
         let base = baseDir ?? defaultBase
         self.triggersDir = (base as NSString).appendingPathComponent("triggers")

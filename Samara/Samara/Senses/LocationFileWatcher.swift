@@ -49,7 +49,7 @@ final class LocationFileWatcher {
     // MARK: - Initialization
 
     init(
-        locationFilePath: String = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/state/location.json",
+        locationFilePath: String = MindPaths.mindPath("state/location.json"),
         pollInterval: TimeInterval = 5,
         onLocationChanged: @escaping (LocationUpdate) -> Void
     ) {

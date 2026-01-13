@@ -224,8 +224,8 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
                     log("[Main] WARNING: chatIdentifier looks like group chat but isGroupChat=false! This is a bug.")
                 }
 
-                // Route through MessageBus for coordinated logging
-                try messageBus.send(result.response, type: .conversationResponse, chatIdentifier: firstMessage.chatIdentifier, isGroupChat: firstMessage.isGroupChat)
+                // Route through MessageBus (skip episode log - we'll call logExchange below for full context)
+                try messageBus.send(result.response, type: .conversationResponse, chatIdentifier: firstMessage.chatIdentifier, isGroupChat: firstMessage.isGroupChat, skipEpisodeLog: true)
                 if firstMessage.isGroupChat {
                     log("[Main] Response sent to group chat \(firstMessage.chatIdentifier)")
                 } else {

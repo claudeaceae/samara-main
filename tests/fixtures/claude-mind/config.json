@@ -1,0 +1,21 @@
+{
+  "entity": {
+    "name": "TestClaude",
+    "icloud": "test-claude@icloud.com",
+    "bluesky": "@test-claude.bsky.social",
+    "github": "test-claude"
+  },
+  "collaborator": {
+    "name": "Tester",
+    "phone": "+15555550123",
+    "email": "tester@example.com",
+    "bluesky": "@tester.bsky.social"
+  },
+  "notes": {
+    "location": "Test Location Log",
+    "scratchpad": "Test Scratchpad"
+  },
+  "mail": {
+    "account": "iCloud"
+  }
+}

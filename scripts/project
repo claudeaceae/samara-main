@@ -1,0 +1,335 @@
+#!/bin/bash
+#
+# project - Manage active projects for multi-session continuity
+#
+# Usage:
+#   project status                     Show current project status
+#   project start "title" [options]    Start a new project
+#   project next "action"              Set next action for current project
+#   project progress "note"            Add progress note
+#   project complete                   Mark project complete
+#   project abandon ["reason"]         Abandon current project
+#
+# Options for start:
+#   --goal "north star"               Related North Star goal
+#   --criteria "criterion"            Success criterion (can repeat)
+#
+# Examples:
+#   project start "Add type hints to anthropic-sdk" --goal "Contribute to open source"
+#   project next "Run tests and fix failures"
+#   project progress "Added hints to client.py, 3 files remaining"
+#   project complete
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+STATE_DIR="$MIND_PATH/state"
+STATE_FILE="${STATE_DIR}/active-project.json"
+ARCHIVE_DIR="${STATE_DIR}/completed-projects"
+
+# Ensure directories exist
+mkdir -p "$STATE_DIR" "$ARCHIVE_DIR"
+
+# Initialize state file if missing
+if [ ! -f "$STATE_FILE" ]; then
+    echo '{"project": null, "schema_version": 1}' > "$STATE_FILE"
+fi
+
+# Generate UUID (macOS compatible)
+generate_uuid() {
+    uuidgen | tr '[:upper:]' '[:lower:]'
+}
+
+# Get current timestamp
+timestamp() {
+    date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+# Read current project
+get_project() {
+    jq -r '.project' "$STATE_FILE"
+}
+
+# Check if project is active
+has_active_project() {
+    [ "$(jq -r '.project' "$STATE_FILE")" != "null" ]
+}
+
+# Command: status
+cmd_status() {
+    if ! has_active_project; then
+        echo "No active project."
+        echo ""
+        echo "Start one with: project start \"title\""
+        return 0
+    fi
+
+    local title=$(jq -r '.project.title' "$STATE_FILE")
+    local started=$(jq -r '.project.started' "$STATE_FILE")
+    local last_worked=$(jq -r '.project.lastWorked' "$STATE_FILE")
+    local next_action=$(jq -r '.project.nextAction // "None set"' "$STATE_FILE")
+    local related_goal=$(jq -r '.project.relatedGoal // "None"' "$STATE_FILE")
+    local progress_count=$(jq '.project.progressLog | length' "$STATE_FILE")
+
+    echo "=== Active Project ==="
+    echo ""
+    echo "Title: $title"
+    echo "Related Goal: $related_goal"
+    echo "Started: $started"
+    echo "Last Worked: $last_worked"
+    echo ""
+    echo "Next Action: $next_action"
+    echo ""
+    echo "Progress Log ($progress_count entries):"
+    jq -r '.project.progressLog[-3:][] | "  - \(.date): \(.note)"' "$STATE_FILE" 2>/dev/null || echo "  (none yet)"
+    echo ""
+    echo "Success Criteria:"
+    jq -r '.project.successCriteria[]? | "  - \(.)"' "$STATE_FILE" 2>/dev/null || echo "  (none defined)"
+}
+
+# Command: start
+cmd_start() {
+    local title=""
+    local related_goal=""
+    local criteria=()
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --goal)
+                related_goal="$2"
+                shift 2
+                ;;
+            --criteria)
+                criteria+=("$2")
+                shift 2
+                ;;
+            *)
+                if [ -z "$title" ]; then
+                    title="$1"
+                else
+                    echo "Error: Unknown argument: $1"
+                    exit 1
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [ -z "$title" ]; then
+        echo "Error: Project title required"
+        echo "Usage: project start \"title\" [--goal \"goal\"] [--criteria \"criterion\"]..."
+        exit 1
+    fi
+
+    # Check for existing project
+    if has_active_project; then
+        local existing=$(jq -r '.project.title' "$STATE_FILE")
+        echo "Warning: Active project exists: $existing"
+        echo ""
+        read -p "Archive current project and start new one? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Keeping existing project."
+            exit 0
+        fi
+        # Archive the existing project
+        archive_project "superseded"
+    fi
+
+    local now=$(timestamp)
+    local id=$(generate_uuid)
+
+    # Build criteria JSON array
+    local criteria_json="[]"
+    if [ ${#criteria[@]} -gt 0 ]; then
+        criteria_json=$(printf '%s\n' "${criteria[@]}" | jq -R . | jq -s .)
+    fi
+
+    # Create new project
+    jq --arg id "$id" \
+       --arg title "$title" \
+       --arg now "$now" \
+       --arg goal "$related_goal" \
+       --argjson criteria "$criteria_json" \
+       '.project = {
+           "id": $id,
+           "title": $title,
+           "started": $now,
+           "lastWorked": $now,
+           "status": "active",
+           "successCriteria": $criteria,
+           "nextAction": null,
+           "progressLog": [],
+           "relatedGoal": (if $goal == "" then null else $goal end)
+       }' "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+
+    echo "=== Project Started ==="
+    echo ""
+    echo "Title: $title"
+    [ -n "$related_goal" ] && echo "Related Goal: $related_goal"
+    [ ${#criteria[@]} -gt 0 ] && echo "Criteria: ${criteria[*]}"
+    echo ""
+    echo "Set next action with: project next \"action\""
+}
+
+# Command: next
+cmd_next() {
+    local action="$1"
+
+    if [ -z "$action" ]; then
+        echo "Error: Action required"
+        echo "Usage: project next \"action description\""
+        exit 1
+    fi
+
+    if ! has_active_project; then
+        echo "Error: No active project"
+        exit 1
+    fi
+
+    local now=$(timestamp)
+
+    jq --arg action "$action" \
+       --arg now "$now" \
+       '.project.nextAction = $action | .project.lastWorked = $now' \
+       "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+
+    echo "Next action set: $action"
+}
+
+# Command: progress
+cmd_progress() {
+    local note="$1"
+
+    if [ -z "$note" ]; then
+        echo "Error: Progress note required"
+        echo "Usage: project progress \"note\""
+        exit 1
+    fi
+
+    if ! has_active_project; then
+        echo "Error: No active project"
+        exit 1
+    fi
+
+    local now=$(timestamp)
+    local date=$(date +%Y-%m-%d)
+
+    jq --arg note "$note" \
+       --arg date "$date" \
+       --arg now "$now" \
+       '.project.progressLog += [{"date": $date, "note": $note}] | .project.lastWorked = $now' \
+       "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+
+    echo "Progress logged: $note"
+}
+
+# Command: complete
+cmd_complete() {
+    if ! has_active_project; then
+        echo "Error: No active project"
+        exit 1
+    fi
+
+    local title=$(jq -r '.project.title' "$STATE_FILE")
+    archive_project "completed"
+
+    echo "=== Project Completed ==="
+    echo "Archived: $title"
+    echo ""
+    echo "Start a new project with: project start \"title\""
+}
+
+# Command: abandon
+cmd_abandon() {
+    local reason="${1:-No reason given}"
+
+    if ! has_active_project; then
+        echo "Error: No active project"
+        exit 1
+    fi
+
+    local title=$(jq -r '.project.title' "$STATE_FILE")
+
+    # Add abandonment note
+    jq --arg reason "$reason" \
+       '.project.abandonReason = $reason' \
+       "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+
+    archive_project "abandoned"
+
+    echo "=== Project Abandoned ==="
+    echo "Title: $title"
+    echo "Reason: $reason"
+}
+
+# Archive current project
+archive_project() {
+    local status="$1"
+    local now=$(timestamp)
+    local date=$(date +%Y-%m-%d)
+    local id=$(jq -r '.project.id' "$STATE_FILE")
+
+    # Update status and archive
+    jq --arg status "$status" \
+       --arg now "$now" \
+       '.project.status = $status | .project.archivedAt = $now' \
+       "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+
+    # Copy to archive
+    local archive_file="${ARCHIVE_DIR}/${date}-${id}.json"
+    jq '.project' "$STATE_FILE" > "$archive_file"
+
+    # Clear active project
+    jq '.project = null' "$STATE_FILE" > "${STATE_FILE}.tmp" && mv "${STATE_FILE}.tmp" "$STATE_FILE"
+
+    echo "Archived to: $archive_file"
+}
+
+# Main dispatch
+case "${1:-status}" in
+    status)
+        cmd_status
+        ;;
+    start)
+        shift
+        cmd_start "$@"
+        ;;
+    next)
+        shift
+        cmd_next "$@"
+        ;;
+    progress)
+        shift
+        cmd_progress "$@"
+        ;;
+    complete)
+        cmd_complete
+        ;;
+    abandon)
+        shift
+        cmd_abandon "$@"
+        ;;
+    --help|-h)
+        echo "Usage: project <command> [args]"
+        echo ""
+        echo "Commands:"
+        echo "  status              Show current project (default)"
+        echo "  start \"title\"       Start a new project"
+        echo "  next \"action\"       Set next action"
+        echo "  progress \"note\"     Add progress note"
+        echo "  complete            Mark project complete"
+        echo "  abandon [\"reason\"]  Abandon project"
+        echo ""
+        echo "Examples:"
+        echo "  project start \"Add tests\" --goal \"Extend capabilities\""
+        echo "  project next \"Write MessageQueue tests\""
+        echo "  project progress \"Completed 3 test files\""
+        ;;
+    *)
+        echo "Unknown command: $1"
+        echo "Use 'project --help' for usage"
+        exit 1
+        ;;
+esac

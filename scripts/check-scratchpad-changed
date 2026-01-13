@@ -7,7 +7,8 @@
 #   1 = No change, or I made the last change (don't respond)
 #   2 = Error
 
-STATE_DIR="$HOME/.claude-mind/state"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+STATE_DIR="$MIND_PATH/state"
 HASH_FILE="$STATE_DIR/scratchpad-hash.txt"
 CONTENT_FILE="$STATE_DIR/scratchpad-content.txt"
 

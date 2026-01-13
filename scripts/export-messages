@@ -3,13 +3,23 @@
 import Foundation
 import SQLite3
 
+func resolveMindPath() -> String {
+    let env = ProcessInfo.processInfo.environment
+    if let override = env["SAMARA_MIND_PATH"] ?? env["MIND_PATH"], !override.isEmpty {
+        return (override as NSString).expandingTildeInPath
+    }
+    return (FileManager.default.homeDirectoryForCurrentUser.path as NSString)
+        .appendingPathComponent(".claude-mind")
+}
+
 let dbPath = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Messages/chat.db")
     .path
 
 let handles = ["+15206099095", "edouard@urcad.es"]
-let outputPath = FileManager.default.homeDirectoryForCurrentUser
-    .appendingPathComponent(".claude-mind/memory/backfill/imessage-history.md")
+let mindPath = resolveMindPath()
+let outputPath = URL(fileURLWithPath: "memory/backfill/imessage-history.md", relativeTo: URL(fileURLWithPath: mindPath))
+    .standardizedFileURL
     .path
 
 var db: OpaquePointer?

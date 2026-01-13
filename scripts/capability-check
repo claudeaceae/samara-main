@@ -11,7 +11,9 @@
 # session due to nested invocation limits. They work correctly when run
 # from launchd/cron/Terminal.
 
-MIND_PATH="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+OSASCRIPT_BIN="${OSASCRIPT_BIN:-osascript}"
+CLAUDE_PATH="${CLAUDE_PATH:-$HOME/.local/bin/claude}"
 
 # Load config (with fallbacks)
 source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
@@ -138,7 +140,7 @@ check "Messages DB exists" "test -f ~/Library/Messages/chat.db"
 # Check FDA by looking at Samara logs for database access
 # This catches when Samara is running but can't read Messages
 critical_check "Samara has FDA (Messages DB access)" "! tail -20 $MIND_PATH/logs/samara.log 2>/dev/null | grep -q 'FATAL.*authorization denied'"
-check "Samara lock file healthy" "test -f $HOME/.claude-mind/samara.lock && lsof $HOME/.claude-mind/samara.lock > /dev/null 2>&1"
+check "Samara lock file healthy" "test -f $MIND_PATH/samara.lock && lsof $MIND_PATH/samara.lock > /dev/null 2>&1"
 
 # === SAMARA UNIT TESTS ===
 log "--- Samara Unit Tests ---"
@@ -148,10 +150,10 @@ check "Samara unit tests" "$MIND_PATH/bin/test-samara --quick 2>&1 | tail -1 | g
 # === CLAUDE CLI ===
 log "--- Claude CLI ---"
 
-check "Claude CLI exists" "test -x $HOME/.local/bin/claude"
+check "Claude CLI exists" "test -x $CLAUDE_PATH"
 # Note: This test may fail when run FROM a Claude session (nested invocation)
 # It works correctly when run from launchd/cron/Terminal
-critical_check "Claude CLI responds" "timeout 60 $HOME/.local/bin/claude -p 'respond with just the word OK' --output-format json --model haiku --dangerously-skip-permissions 2>/dev/null | grep -q 'result'"
+critical_check "Claude CLI responds" "timeout 60 $CLAUDE_PATH -p 'respond with just the word OK' --output-format json --model haiku --dangerously-skip-permissions 2>/dev/null | grep -q 'result'"
 
 # === REQUIRED SCRIPTS ===
 log "--- Required Scripts ---"
@@ -208,7 +210,7 @@ $(echo -e "$CRITICAL_FAILURES")
 Run 'capability-check --verbose' for details."
 
         # Send alert via AppleScript (bypassing message-e in case it's the failure)
-        /usr/bin/osascript -e "
+        "$OSASCRIPT_BIN" -e "
             tell application \"Messages\"
                 set targetService to 1st account whose service type = iMessage
                 set targetBuddy to participant \"$COLLABORATOR_PHONE\" of targetService

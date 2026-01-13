@@ -1,98 +1,25 @@
 #!/usr/bin/env node
+import {
+  clearState,
+  createContext,
+  getResumeStep,
+  isValidBlueskyHandle,
+  isValidEmail,
+  isValidGitHubUsername,
+  isValidICloudEmail,
+  isValidPhone,
+  isValidTeamId,
+  loadSavedState,
+  restoreFromState,
+  saveState,
+  shouldSkipStep
+} from "./chunk-DABCOLES.js";
 
 // src/index.ts
 import * as p13 from "@clack/prompts";
 import color13 from "picocolors";
 import { existsSync as existsSync8 } from "fs";
 import { join as join8, dirname } from "path";
-
-// src/context.ts
-import Conf from "conf";
-import { homedir } from "os";
-import { join } from "path";
-var store = new Conf({
-  projectName: "create-samara"
-});
-var STATE_EXPIRY_MS = 24 * 60 * 60 * 1e3;
-function createContext() {
-  return {
-    config: {},
-    repoPath: process.cwd(),
-    mindPath: join(homedir(), ".claude-mind"),
-    hasDeveloperAccount: false,
-    buildFromSource: false,
-    setupBluesky: false,
-    setupGithub: false,
-    completedSteps: /* @__PURE__ */ new Set(),
-    currentStep: "welcome"
-  };
-}
-function loadSavedState() {
-  const saved = store.get("wizardState");
-  if (!saved) return null;
-  if (Date.now() - saved.timestamp > STATE_EXPIRY_MS) {
-    store.delete("wizardState");
-    return null;
-  }
-  return saved;
-}
-function restoreFromState(saved) {
-  return {
-    config: saved.config,
-    repoPath: process.cwd(),
-    mindPath: join(homedir(), ".claude-mind"),
-    hasDeveloperAccount: saved.hasDeveloperAccount,
-    buildFromSource: saved.buildFromSource,
-    teamId: saved.teamId,
-    setupBluesky: saved.setupBluesky,
-    setupGithub: saved.setupGithub,
-    completedSteps: new Set(saved.completedSteps),
-    currentStep: saved.currentStep
-  };
-}
-function saveState(ctx, step) {
-  ctx.completedSteps.add(step);
-  ctx.currentStep = step;
-  const state = {
-    config: ctx.config,
-    completedSteps: Array.from(ctx.completedSteps),
-    currentStep: step,
-    hasDeveloperAccount: ctx.hasDeveloperAccount,
-    buildFromSource: ctx.buildFromSource,
-    teamId: ctx.teamId,
-    setupBluesky: ctx.setupBluesky,
-    setupGithub: ctx.setupGithub,
-    timestamp: Date.now()
-  };
-  store.set("wizardState", state);
-}
-function clearState() {
-  store.delete("wizardState");
-}
-function shouldSkipStep(ctx, step) {
-  return ctx.completedSteps.has(step);
-}
-function getResumeStep(saved) {
-  const steps = [
-    "welcome",
-    "identity",
-    "collaborator",
-    "integrations",
-    "birth",
-    "app",
-    "permissions",
-    "launchd",
-    "credentials",
-    "launch",
-    "summary"
-  ];
-  for (const step of steps) {
-    if (!saved.completedSteps.includes(step)) {
-      return step;
-    }
-  }
-  return "summary";
-}
 
 // src/steps/welcome.ts
 import * as p2 from "@clack/prompts";
@@ -105,7 +32,7 @@ import color from "picocolors";
 // src/utils/shell.ts
 import { execa } from "execa";
 import { existsSync } from "fs";
-import { join as join2 } from "path";
+import { join } from "path";
 async function commandExists(command) {
   try {
     await execa("which", [command]);
@@ -135,7 +62,7 @@ async function run(command, args = [], options = {}) {
   }
 }
 async function runBirth(configPath, repoPath) {
-  const birthScript = join2(repoPath, "birth.sh");
+  const birthScript = join(repoPath, "birth.sh");
   if (!existsSync(birthScript)) {
     throw new Error(`Birth script not found at ${birthScript}`);
   }
@@ -410,64 +337,6 @@ ${color2.dim("Let's begin!")}`,
 // src/steps/identity.ts
 import * as p3 from "@clack/prompts";
 import color3 from "picocolors";
-
-// src/types.ts
-import { z } from "zod";
-var entitySchema = z.object({
-  name: z.string().min(1).max(50).default("Claude"),
-  icloud: z.string().email("Must be a valid email").refine(
-    (email) => email.endsWith("@icloud.com"),
-    "Must be an iCloud email address"
-  ),
-  bluesky: z.string().regex(/^@[\w.-]+\.bsky\.social$/, "Must be @handle.bsky.social format").optional(),
-  github: z.string().regex(/^[\w-]+$/, "Must be a valid GitHub username").optional()
-});
-var collaboratorSchema = z.object({
-  name: z.string().min(1).max(100),
-  phone: z.string().regex(/^\+[1-9]\d{1,14}$/, "Must be E.164 format: +1234567890"),
-  email: z.string().email("Must be a valid email"),
-  bluesky: z.string().regex(/^@[\w.-]+\.\w+$/, "Must be @handle.domain format").optional()
-});
-var notesSchema = z.object({
-  location: z.string().default("Claude Location Log"),
-  scratchpad: z.string().default("Claude Scratchpad")
-});
-var mailSchema = z.object({
-  account: z.string().default("iCloud")
-});
-var configSchema = z.object({
-  entity: entitySchema,
-  collaborator: collaboratorSchema,
-  notes: notesSchema.default({}),
-  mail: mailSchema.default({})
-});
-
-// src/utils/validation.ts
-function isValidEmail(email) {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
-}
-function isValidICloudEmail(email) {
-  return isValidEmail(email) && email.toLowerCase().endsWith("@icloud.com");
-}
-function isValidPhone(phone) {
-  const e164Regex = /^\+[1-9]\d{1,14}$/;
-  return e164Regex.test(phone);
-}
-function isValidBlueskyHandle(handle) {
-  const blueskyRegex = /^@[\w.-]+\.bsky\.social$/;
-  return blueskyRegex.test(handle);
-}
-function isValidGitHubUsername(username) {
-  const githubRegex = /^[\w-]+$/;
-  return githubRegex.test(username);
-}
-function isValidTeamId(teamId) {
-  const teamIdRegex = /^[A-Z0-9]{10}$/;
-  return teamIdRegex.test(teamId);
-}
-
-// src/steps/identity.ts
 async function identity(ctx) {
   p3.log.step("Entity Identity");
   p3.log.message(color3.dim("Let's set up your Claude instance's identity."));
@@ -646,7 +515,7 @@ async function integrations(ctx) {
 import * as p6 from "@clack/prompts";
 import color6 from "picocolors";
 import { writeFileSync, existsSync as existsSync2, mkdirSync } from "fs";
-import { join as join3 } from "path";
+import { join as join2 } from "path";
 import { tmpdir } from "os";
 async function birth(ctx) {
   p6.log.step("Configuration Review");
@@ -693,11 +562,11 @@ ${color6.bold("Collaborator (You)")}
     p6.cancel("Setup cancelled. Run npx create-samara to start over.");
     process.exit(0);
   }
-  const tempDir = join3(tmpdir(), "create-samara");
+  const tempDir = join2(tmpdir(), "create-samara");
   if (!existsSync2(tempDir)) {
     mkdirSync(tempDir, { recursive: true });
   }
-  const configPath = join3(tempDir, "config.json");
+  const configPath = join2(tempDir, "config.json");
   writeFileSync(configPath, JSON.stringify(config, null, 2));
   p6.log.step("Creating organism structure...");
   const spinner5 = p6.spinner();
@@ -706,7 +575,7 @@ ${color6.bold("Collaborator (You)")}
     const success = await runBirth(configPath, ctx.repoPath);
     if (success) {
       spinner5.stop("Organism structure created");
-      p6.log.success(`Created ${color6.cyan("~/.claude-mind/")}`);
+      p6.log.success(`Created ${color6.cyan(ctx.mindPath)}`);
     } else {
       spinner5.stop("Birth script failed");
       p6.log.error("The birth script encountered an error.");
@@ -735,7 +604,7 @@ ${color6.bold("Collaborator (You)")}
     p6.cancel("Setup failed. Please check the error and try again.");
     process.exit(1);
   }
-  const mindConfigPath = join3(ctx.mindPath, "config.json");
+  const mindConfigPath = join2(ctx.mindPath, "config.json");
   if (existsSync2(ctx.mindPath)) {
     writeFileSync(mindConfigPath, JSON.stringify(config, null, 2));
     p6.log.success(`Config saved to ${color6.dim(mindConfigPath)}`);
@@ -746,7 +615,7 @@ ${color6.bold("Collaborator (You)")}
 import * as p7 from "@clack/prompts";
 import color7 from "picocolors";
 import { existsSync as existsSync3, writeFileSync as writeFileSync2, mkdirSync as mkdirSync2 } from "fs";
-import { join as join4 } from "path";
+import { join as join3 } from "path";
 import { tmpdir as tmpdir2 } from "os";
 var GITHUB_RELEASES_URL = "https://api.github.com/repos/claudeaceae/samara-main/releases/latest";
 var APP_PATH = "/Applications/Samara.app";
@@ -814,12 +683,12 @@ async function downloadPrebuiltFlow(ctx) {
   const spinner5 = p7.spinner();
   spinner5.start("Fetching latest release...");
   try {
-    const tempDir = join4(tmpdir2(), "create-samara");
+    const tempDir = join3(tmpdir2(), "create-samara");
     mkdirSync2(tempDir, { recursive: true });
-    const releaseInfoPath = join4(tempDir, "release.json");
+    const releaseInfoPath = join3(tempDir, "release.json");
     await downloadFile(GITHUB_RELEASES_URL, releaseInfoPath);
     const downloadUrl = "https://github.com/claudeaceae/samara-main/releases/latest/download/Samara.app.zip";
-    const zipPath = join4(tempDir, "Samara.app.zip");
+    const zipPath = join3(tempDir, "Samara.app.zip");
     spinner5.message("Downloading Samara.app...");
     const downloaded = await downloadFile(downloadUrl, zipPath);
     if (!downloaded || !existsSync3(zipPath)) {
@@ -872,16 +741,16 @@ async function buildFromSourceFlow(ctx) {
     <string>automatic</string>
 </dict>
 </plist>`;
-  const tempDir = join4(tmpdir2(), "create-samara");
+  const tempDir = join3(tmpdir2(), "create-samara");
   mkdirSync2(tempDir, { recursive: true });
-  const exportOptionsPath = join4(tempDir, "ExportOptions.plist");
+  const exportOptionsPath = join3(tempDir, "ExportOptions.plist");
   writeFileSync2(exportOptionsPath, exportOptionsPlist);
   const spinner5 = p7.spinner();
   spinner5.start("Building Samara.app (this may take a few minutes)...");
   try {
-    const projectPath = join4(ctx.repoPath, "Samara", "Samara.xcodeproj");
-    const archivePath = join4(tempDir, "Samara.xcarchive");
-    const exportPath = join4(tempDir, "SamaraExport");
+    const projectPath = join3(ctx.repoPath, "Samara", "Samara.xcodeproj");
+    const archivePath = join3(tempDir, "Samara.xcarchive");
+    const exportPath = join3(tempDir, "SamaraExport");
     spinner5.message("Archiving...");
     const archiveSuccess = await xcodeBuildArchive(projectPath, "Samara", archivePath);
     if (!archiveSuccess) {
@@ -899,7 +768,7 @@ async function buildFromSourceFlow(ctx) {
       return;
     }
     spinner5.message("Installing...");
-    const exportedApp = join4(exportPath, "Samara.app");
+    const exportedApp = join3(exportPath, "Samara.app");
     if (!existsSync3(exportedApp)) {
       spinner5.stop("App not found after export");
       await manualXcodeFlow(ctx);
@@ -939,7 +808,7 @@ async function manualXcodeFlow(ctx) {
 ${color7.dim("Press Enter when done.")}`,
     "Xcode Instructions"
   );
-  const projectPath = join4(ctx.repoPath, "Samara", "Samara.xcodeproj");
+  const projectPath = join3(ctx.repoPath, "Samara", "Samara.xcodeproj");
   await run("open", [projectPath], { silent: true });
   await p7.text({
     message: "Press Enter when Samara.app is in /Applications/",
@@ -958,9 +827,9 @@ ${color7.dim("Press Enter when done.")}`,
 import * as p8 from "@clack/prompts";
 import color8 from "picocolors";
 import { existsSync as existsSync4, accessSync, constants } from "fs";
-import { homedir as homedir3 } from "os";
-import { join as join5 } from "path";
-var CHAT_DB_PATH = join5(homedir3(), "Library/Messages/chat.db");
+import { homedir as homedir2 } from "os";
+import { join as join4 } from "path";
+var CHAT_DB_PATH = join4(homedir2(), "Library/Messages/chat.db");
 async function permissions(ctx) {
   p8.log.step("Permissions");
   p8.log.message(color8.dim("Samara needs Full Disk Access to read messages."));
@@ -1047,15 +916,15 @@ async function hasFdaAccess() {
 import * as p9 from "@clack/prompts";
 import color9 from "picocolors";
 import { existsSync as existsSync5, readdirSync, copyFileSync } from "fs";
-import { join as join6, basename } from "path";
-import { homedir as homedir4 } from "os";
-var LAUNCH_AGENTS_DIR = join6(homedir4(), "Library/LaunchAgents");
+import { join as join5, basename } from "path";
+import { homedir as homedir3 } from "os";
+var LAUNCH_AGENTS_DIR = join5(homedir3(), "Library/LaunchAgents");
 async function launchd(ctx) {
   p9.log.step("Wake/Dream Cycles");
   p9.log.message(color9.dim("Installing scheduled tasks for autonomous operation."));
   const spinner5 = p9.spinner();
   spinner5.start("Installing launchd services...");
-  const sourcePlistDir = join6(ctx.mindPath, "launchd");
+  const sourcePlistDir = join5(ctx.mindPath, "launchd");
   const results = [];
   if (!existsSync5(sourcePlistDir)) {
     spinner5.stop("Source directory not found");
@@ -1070,8 +939,8 @@ async function launchd(ctx) {
     return;
   }
   for (const plistFile of plistFiles) {
-    const sourcePath = join6(sourcePlistDir, plistFile);
-    const destPath = join6(LAUNCH_AGENTS_DIR, plistFile);
+    const sourcePath = join5(sourcePlistDir, plistFile);
+    const destPath = join5(LAUNCH_AGENTS_DIR, plistFile);
     const label = basename(plistFile, ".plist");
     try {
       const alreadyLoaded = await isLaunchAgentLoaded(label);
@@ -1121,11 +990,11 @@ ${failed.map((f) => `  launchctl load ~/Library/LaunchAgents/${f.name}.plist`).j
   } else {
     p9.log.success(`All ${successful.length} services installed`);
     p9.note(
-      `${color9.bold("Wake Schedule")}
-  9:00 AM  - Morning wake
-  2:00 PM  - Afternoon wake
-  8:00 PM  - Evening wake
-  3:00 AM  - Dream cycle`,
+      `${color9.bold("Adaptive Wake System")}
+  Every 15 min - Scheduler checks for wake conditions
+  Base times   - ~9 AM, ~2 PM, ~8 PM (full wakes)
+  Adaptive     - Calendar events, priority items
+  3:00 AM      - Dream cycle (memory consolidation)`,
       "Autonomy Cycles"
     );
   }
@@ -1135,7 +1004,7 @@ ${failed.map((f) => `  launchctl load ~/Library/LaunchAgents/${f.name}.plist`).j
 import * as p10 from "@clack/prompts";
 import color10 from "picocolors";
 import { existsSync as existsSync6, writeFileSync as writeFileSync3, mkdirSync as mkdirSync3 } from "fs";
-import { join as join7 } from "path";
+import { join as join6 } from "path";
 async function credentials(ctx) {
   if (!ctx.setupBluesky && !ctx.setupGithub) {
     p10.log.message(color10.dim("No credentials needed (no integrations selected)."));
@@ -1143,7 +1012,7 @@ async function credentials(ctx) {
   }
   p10.log.step("Credentials");
   p10.log.message(color10.dim("Set up API keys for your integrations."));
-  const credentialsDir = join7(ctx.mindPath, "credentials");
+  const credentialsDir = join6(ctx.mindPath, "credentials");
   if (!existsSync6(credentialsDir)) {
     mkdirSync3(credentialsDir, { recursive: true });
   }
@@ -1169,7 +1038,7 @@ async function credentials(ctx) {
         identifier: blueskyHandle.replace("@", ""),
         password: blueskyPassword
       };
-      const blueskyPath = join7(credentialsDir, "bluesky.json");
+      const blueskyPath = join6(credentialsDir, "bluesky.json");
       writeFileSync3(blueskyPath, JSON.stringify(blueskyCredentials, null, 2), { mode: 384 });
       p10.log.success(`Bluesky credentials saved to ${color10.dim(blueskyPath)}`);
     } else {
@@ -1194,7 +1063,7 @@ async function credentials(ctx) {
       process.exit(0);
     }
     if (githubToken && githubToken.length > 0) {
-      const githubPath = join7(credentialsDir, "github.txt");
+      const githubPath = join6(credentialsDir, "github.txt");
       writeFileSync3(githubPath, githubToken, { mode: 384 });
       p10.log.success(`GitHub token saved to ${color10.dim(githubPath)}`);
     } else {
@@ -1264,11 +1133,15 @@ async function launch(ctx) {
 // src/steps/summary.ts
 import * as p12 from "@clack/prompts";
 import color12 from "picocolors";
+import { join as join7 } from "path";
 async function summary(ctx) {
   clearState();
   const entityName = ctx.config.entity?.name || "Claude";
   const collaboratorName = ctx.config.collaborator?.name || "You";
   const collaboratorPhone = ctx.config.collaborator?.phone || "";
+  const logsPath = join7(ctx.mindPath, "logs");
+  const configPath = join7(ctx.mindPath, "config.json");
+  const samaraLogPath = join7(logsPath, "samara.log");
   const nextSteps = `
 ${color12.bold("Setup Complete!")}
 
@@ -1290,9 +1163,9 @@ ${color12.bold("Useful commands:")}
   ${color12.cyan("/sync")}               - Check for drift
 
 ${color12.bold("Locations:")}
-  Memory:  ${color12.dim("~/.claude-mind/")}
-  Logs:    ${color12.dim("~/.claude-mind/logs/")}
-  Config:  ${color12.dim("~/.claude-mind/config.json")}
+  Memory:  ${color12.dim(ctx.mindPath)}
+  Logs:    ${color12.dim(logsPath)}
+  Config:  ${color12.dim(configPath)}
 
 ${color12.bold("Learn more:")}
   ${color12.underline("https://github.com/claudeaceae/samara-main")}
@@ -1308,7 +1181,7 @@ If you don't hear back, check if I'm running:
   ${color12.cyan("pgrep -fl Samara")}
 
 Or check the logs:
-  ${color12.cyan("tail -f ~/.claude-mind/logs/samara.log")}`,
+  ${color12.cyan(`tail -f ${samaraLogPath}`)}`,
     `From ${entityName}`
   );
 }
@@ -1418,3 +1291,4 @@ main().catch((error) => {
   console.error("Unexpected error:", error);
   process.exit(1);
 });
+//# sourceMappingURL=index.js.map

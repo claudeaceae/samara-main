@@ -24,9 +24,10 @@ import re
 import json
 import sys
 from pathlib import Path
+from mind_paths import get_mind_path
 from datetime import datetime
 
-MIND_PATH = Path(os.path.expanduser("~/.claude-mind"))
+MIND_PATH = get_mind_path()
 
 
 def filter_for_public(data: dict) -> dict:

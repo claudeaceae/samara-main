@@ -11,7 +11,8 @@
 
 set -e
 
-MIND_DIR="${HOME}/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+MIND_DIR="$MIND_PATH"
 SKILLS_DIR="${MIND_DIR}/.claude/skills"
 DEFAULT_OUTPUT="${MIND_DIR}/skills-manifest.json"
 

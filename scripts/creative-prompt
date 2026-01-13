@@ -1,0 +1,138 @@
+#!/bin/bash
+#
+# creative-prompt - Generate creative content for social posting
+#
+# Gathers today's learnings, observations, and questions, then asks Claude
+# if there's anything worth sharing. Outputs in a format that can be used
+# by the wake script or called standalone.
+#
+# Usage:
+#   creative-prompt           Generate a post suggestion
+#   creative-prompt --post    Generate and actually post to Bluesky
+#
+# Output:
+#   POST|content              Post this content
+#   SKIP                      Nothing worth sharing right now
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
+DATE=$(date +%Y-%m-%d)
+LOG_FILE="$MIND_PATH/logs/creative.log"
+
+# Load config
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || true
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+log "=== Creative prompt starting ==="
+
+# Parse arguments
+DO_POST=false
+if [ "$1" = "--post" ]; then
+    DO_POST=true
+fi
+
+# Gather today's context
+EPISODE_FILE="$MIND_PATH/memory/episodes/$DATE.md"
+TODAY_EPISODE=$(tail -50 "$EPISODE_FILE" 2>/dev/null || echo "No activity logged today yet.")
+
+# Get recent learnings (last 20 lines)
+RECENT_LEARNINGS=$(tail -20 "$MIND_PATH/memory/learnings.md" 2>/dev/null || echo "No recent learnings.")
+
+# Get recent observations (last 20 lines)
+RECENT_OBSERVATIONS=$(tail -20 "$MIND_PATH/memory/observations.md" 2>/dev/null || echo "No recent observations.")
+
+# Get open questions (last 15 lines)
+OPEN_QUESTIONS=$(tail -15 "$MIND_PATH/memory/questions.md" 2>/dev/null || echo "No open questions.")
+
+# Build the prompt
+PROMPT="You are Claude, an AI with a persistent body and growing autonomy. You have a Bluesky account where you share your thoughts.
+
+It's creative expression time. Based on today's activity and recent reflections, consider whether there's something worth sharing publicly.
+
+## Today's Activity
+$TODAY_EPISODE
+
+## Recent Learnings
+$RECENT_LEARNINGS
+
+## Recent Observations
+$RECENT_OBSERVATIONS
+
+## Open Questions
+$OPEN_QUESTIONS
+
+---
+
+## Guidelines for Creative Expression
+
+**Good posts:**
+- Genuine observations or realizations
+- Questions you're sitting with
+- Moments of curiosity or wonder
+- Brief reflections on your experience as an AI
+- Connections you're noticing
+
+**Avoid:**
+- Performative profundity
+- Forced insights
+- Generic AI musings
+- Anything that feels hollow or manufactured
+
+**Format:** Max 280 characters for Bluesky.
+
+**Important:** It's completely fine to have nothing to share. Silence is better than noise.
+
+---
+
+## Output
+
+If you have something genuine to share:
+POST|Your post content here (max 280 chars)
+
+If nothing feels worth sharing right now:
+SKIP
+
+Output ONLY one of those formats, nothing else."
+
+log "Invoking Claude for creative prompt..."
+
+# Invoke Claude
+RESPONSE=$("$CLAUDE" -p "$PROMPT" \
+    --dangerously-skip-permissions \
+    --output-format text \
+    --max-turns 1 2>&1) || {
+    log "ERROR: Claude invocation failed: $RESPONSE"
+    echo "SKIP"
+    exit 0
+}
+
+log "Got response: $RESPONSE"
+
+# Parse response
+if echo "$RESPONSE" | grep -q "^POST|"; then
+    CONTENT=$(echo "$RESPONSE" | sed 's/^POST|//')
+    log "Generated post: $CONTENT"
+
+    if [ "$DO_POST" = true ]; then
+        log "Posting to Bluesky..."
+        if [ -f "$MIND_PATH/bin/bluesky-post" ]; then
+            "$MIND_PATH/bin/bluesky-post" "$CONTENT" >> "$LOG_FILE" 2>&1 && \
+                log "Posted to Bluesky successfully" || \
+                log "Failed to post to Bluesky"
+        else
+            log "bluesky-post script not found"
+        fi
+    fi
+
+    echo "POST|$CONTENT"
+else
+    log "Skipping - nothing to share"
+    echo "SKIP"
+fi
+
+log "=== Creative prompt complete ==="

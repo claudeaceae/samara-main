@@ -10,7 +10,7 @@
 
 set -e
 
-MIND_DIR="$HOME/.claude-mind"
+MIND_DIR="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 LOG_FILE="$MIND_DIR/logs/message-watchdog.log"
 STATUS_FILE="$MIND_DIR/cache/messages-status.txt"
 BLUESKY_SCRIPT="$MIND_DIR/bin/bluesky-post"

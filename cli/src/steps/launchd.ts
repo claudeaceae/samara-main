@@ -9,9 +9,7 @@ import { loadLaunchAgent, isLaunchAgentLoaded } from '../utils/shell.js';
 const LAUNCH_AGENTS_DIR = join(homedir(), 'Library/LaunchAgents');
 
 const REQUIRED_PLISTS = [
-  'com.claude.wake-morning.plist',
-  'com.claude.wake-afternoon.plist',
-  'com.claude.wake-evening.plist',
+  'com.claude.wake-adaptive.plist',
   'com.claude.dream.plist',
 ];
 
@@ -111,11 +109,11 @@ ${failed.map((f) => `  launchctl load ~/Library/LaunchAgents/${f.name}.plist`).j
 
     // Show schedule
     p.note(
-      `${color.bold('Wake Schedule')}
-  9:00 AM  - Morning wake
-  2:00 PM  - Afternoon wake
-  8:00 PM  - Evening wake
-  3:00 AM  - Dream cycle`,
+      `${color.bold('Adaptive Wake System')}
+  Every 15 min - Scheduler checks for wake conditions
+  Base times   - ~9 AM, ~2 PM, ~8 PM (full wakes)
+  Adaptive     - Calendar events, priority items
+  3:00 AM      - Dream cycle (memory consolidation)`,
       'Autonomy Cycles'
     );
   }

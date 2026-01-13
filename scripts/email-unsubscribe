@@ -7,9 +7,9 @@
 
 set -e
 
-MIND_PATH="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 LOG_FILE="$MIND_PATH/logs/unsubscribe.log"
-CLAUDE="$HOME/.local/bin/claude"
+CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 
 log() {
     mkdir -p "$(dirname "$LOG_FILE")"

@@ -6,9 +6,10 @@
 # Use for: decision points, questions, discoveries worth sharing, or just saying hi.
 
 set -e
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 
 # Load config (with fallbacks)
-source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
     # Fallback if config.sh doesn't exist
     COLLABORATOR_PHONE="+15206099095"
 }
@@ -24,7 +25,8 @@ PHONE="$COLLABORATOR_PHONE"
 # Escape for AppleScript
 ESCAPED=$(echo "$MESSAGE" | sed 's/\\/\\\\/g; s/"/\\"/g')
 
-/usr/bin/osascript -e "
+OSASCRIPT_BIN="${OSASCRIPT_BIN:-osascript}"
+"$OSASCRIPT_BIN" -e "
     tell application \"Messages\"
         set targetService to 1st account whose service type = iMessage
         set targetBuddy to participant \"$PHONE\" of targetService
@@ -33,5 +35,5 @@ ESCAPED=$(echo "$MESSAGE" | sed 's/\\/\\\\/g; s/"/\\"/g')
 "
 
 # Log it
-LOG_FILE="$HOME/.claude-mind/logs/messages-sent.log"
+LOG_FILE="$MIND_PATH/logs/messages-sent.log"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sent: $MESSAGE" >> "$LOG_FILE"

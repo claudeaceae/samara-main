@@ -1,12 +1,13 @@
 #!/bin/bash
 # Autonomous Wake Cycle - Self-directed sessions
-# Runs 3x daily via launchd (9 AM, 2 PM, 8 PM)
+# Invoked by wake-adaptive based on scheduler decisions (~9 AM, ~2 PM, ~8 PM or adaptive triggers)
 
 set -e
 
-MIND_PATH="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+OSASCRIPT_BIN="${OSASCRIPT_BIN:-osascript}"
 SAMARA_PATH="$HOME/Developer/Samara"
-CLAUDE="$HOME/.local/bin/claude"
+CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 DATE=$(date +%Y-%m-%d)
 TIME=$(date +%H:%M)
 HOUR=$(date +%H)
@@ -41,6 +42,9 @@ acquire_lock() {
     # Create lock file
     echo "{\"task\":\"wake\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
     log "Acquired lock for wake cycle"
+
+    # Record wake with scheduler to prevent duplicate wakes from wake-adaptive
+    "$MIND_PATH/bin/wake-scheduler" record full 2>/dev/null || true
 }
 
 release_lock() {
@@ -103,6 +107,35 @@ fi
 log "Running email triage..."
 EMAIL_SUMMARY=$("$MIND_PATH/bin/email-triage" 2>&1) || EMAIL_SUMMARY="Email triage failed"
 log "Email triage complete"
+
+# Active project context (Phase 5: Autonomous behavior)
+log "Getting active project context..."
+ACTIVE_PROJECT_JSON=$(cat "$MIND_PATH/state/active-project.json" 2>/dev/null || echo '{"project":null}')
+PROJECT_TITLE=$(echo "$ACTIVE_PROJECT_JSON" | jq -r '.project.title // ""')
+PROJECT_NEXT=$(echo "$ACTIVE_PROJECT_JSON" | jq -r '.project.nextAction // ""')
+PROJECT_GOAL=$(echo "$ACTIVE_PROJECT_JSON" | jq -r '.project.relatedGoal // ""')
+if [ -n "$PROJECT_TITLE" ]; then
+    ACTIVE_PROJECT_CONTEXT="## Active Project
+
+**Title:** $PROJECT_TITLE
+**Related Goal:** ${PROJECT_GOAL:-Not specified}
+**Next Action:** ${PROJECT_NEXT:-Not set}
+
+This project carries across sessions. Update it with the PROJECT_UPDATE output section."
+    log "Active project: $PROJECT_TITLE"
+else
+    ACTIVE_PROJECT_CONTEXT="## Active Project
+
+No active project. Start one with \`project start \"title\"\` if you have sustained work."
+    log "No active project"
+fi
+
+# Proactive queue status (Phase 5: Autonomous behavior)
+log "Getting proactive queue status..."
+PROACTIVE_STATUS=$("$MIND_PATH/bin/proactive-queue" status 2>/dev/null || echo '{"pending":0}')
+PROACTIVE_PENDING=$(echo "$PROACTIVE_STATUS" | jq -r '.pending // 0')
+PROACTIVE_REMAINING=$(echo "$PROACTIVE_STATUS" | jq -r '.remainingToday // 5')
+log "Proactive queue: $PROACTIVE_PENDING pending, $PROACTIVE_REMAINING remaining today"
 
 # Read context files - full content, no truncation (2025-12-22 decision)
 # Token budget is ~36K for all core memory (~18% of 200K context)
@@ -198,6 +231,8 @@ $DRIFT_WARNING
 ## Goals
 $GOALS
 
+$ACTIVE_PROJECT_CONTEXT
+
 ## Architectural Decisions
 $DECISIONS
 
@@ -276,6 +311,15 @@ $QUESTION_CONTEXT
 - Include your question naturally in the MESSAGE section, don't make it feel clinical
 
 Prefer questions that prompt reflection, not statements about observations. For example: \"Does the ocean make you anxious?\" rather than \"You arrived at the beach.\"
+
+---
+
+## Proactive Queue Status
+
+Pending items: $PROACTIVE_PENDING
+Messages remaining today: $PROACTIVE_REMAINING
+
+If you think of something worth following up on later, add it to the queue via the PROACTIVE_ADD output section.
 
 ---
 
@@ -392,13 +436,30 @@ Examples:
 DELETE|12345|Marketing spam from newsletter
 ARCHIVE|12346|GitHub notification handled via API
 UNSUBSCRIBE|12347|https://example.com/unsubscribe
-MARK_READ|12348|Receipt, no action needed"
+MARK_READ|12348|Receipt, no action needed
+
+---PROJECT_UPDATE---
+[Update your active project state, or NONE if no update needed]
+Options:
+- NEXT|new next action description - Set next action for current project
+- PROGRESS|note about what was done - Log progress
+- COMPLETE - Mark project complete
+- START|title|goal - Start a new project (if none active)
+- NONE - No project update this session
+
+---PROACTIVE_ADD---
+[Add something to the proactive queue for later follow-up, or NONE]
+Format: PRIORITY|content
+Priorities: low, medium, high
+Example: medium|Follow up with that person about the project idea
+Use this to queue thoughts, follow-ups, or ideas for later sessions.
+NONE if nothing to queue."
 
 log "Invoking Claude for autonomous session..."
 
 # Invoke Claude with full autonomy (no permission prompts)
 # MCP servers configured globally in ~/.claude.json
-RESPONSE=$("$HOME/.local/bin/claude" -p "$PROMPT" \
+RESPONSE=$("$CLAUDE" -p "$PROMPT" \
     --dangerously-skip-permissions \
     --output-format text 2>&1) || {
     log "ERROR: Claude invocation failed: $RESPONSE"
@@ -430,7 +491,9 @@ CODE_CHANGES=$(parse_section "CODE_CHANGES" "MESSAGE_TO_E")
 MESSAGE_TO_E=$(parse_section "MESSAGE_TO_E" "PROACTIVE_QUESTION")
 PROACTIVE_QUESTION=$(parse_section "PROACTIVE_QUESTION" "BLUESKY_POST")
 BLUESKY_POST=$(parse_section "BLUESKY_POST" "EMAIL_ACTIONS")
-EMAIL_ACTIONS=$(parse_section "EMAIL_ACTIONS" "")
+EMAIL_ACTIONS=$(parse_section "EMAIL_ACTIONS" "PROJECT_UPDATE")
+PROJECT_UPDATE=$(parse_section "PROJECT_UPDATE" "PROACTIVE_ADD")
+PROACTIVE_ADD=$(parse_section "PROACTIVE_ADD" "")
 
 # Log to episode
 if [ -n "$EPISODE_ENTRY" ] && [ "$EPISODE_ENTRY" != "NONE" ]; then
@@ -513,7 +576,7 @@ if [ -n "$MESSAGE_TO_E" ] && [ "$MESSAGE_TO_E" != "NONE" ]; then
     # Escape the message for AppleScript
     ESCAPED_MSG=$(echo "$MESSAGE_TO_E" | sed 's/\\/\\\\/g; s/"/\\"/g')
 
-    /usr/bin/osascript -e "
+    "$OSASCRIPT_BIN" -e "
         tell application \"Messages\"
             set targetService to 1st account whose service type = iMessage
             set targetBuddy to participant \"$COLLABORATOR_PHONE\" of targetService
@@ -581,7 +644,7 @@ fi
 # Escape and send
 ESCAPED_SUMMARY=$(echo "$SUMMARY_MSG" | sed 's/\\/\\\\/g; s/"/\\"/g')
 
-/usr/bin/osascript -e "
+"$OSASCRIPT_BIN" -e "
     tell application \"Messages\"
         set targetService to 1st account whose service type = iMessage
         set targetBuddy to participant \"$COLLABORATOR_PHONE\" of targetService
@@ -652,6 +715,61 @@ if [ -n "$EMAIL_ACTIONS" ] && [ "$EMAIL_ACTIONS" != "NONE" ]; then
         esac
     done
     log "Email actions complete"
+fi
+
+# Process project updates (Phase 5: Autonomous behavior)
+if [ -n "$PROJECT_UPDATE" ] && [ "$PROJECT_UPDATE" != "NONE" ]; then
+    log "Processing project update..."
+    # Parse the update format: ACTION|ARG1|ARG2
+    PROJECT_ACTION=$(echo "$PROJECT_UPDATE" | cut -d'|' -f1 | xargs 2>/dev/null || echo "")
+    PROJECT_ARG1=$(echo "$PROJECT_UPDATE" | cut -d'|' -f2 | xargs 2>/dev/null || echo "")
+    PROJECT_ARG2=$(echo "$PROJECT_UPDATE" | cut -d'|' -f3 | xargs 2>/dev/null || echo "")
+
+    case "$PROJECT_ACTION" in
+        NEXT)
+            log "Setting next action: $PROJECT_ARG1"
+            "$MIND_PATH/bin/project" next "$PROJECT_ARG1" >> "$LOG_FILE" 2>&1 || \
+                log "Failed to set next action"
+            ;;
+        PROGRESS)
+            log "Logging progress: $PROJECT_ARG1"
+            "$MIND_PATH/bin/project" progress "$PROJECT_ARG1" >> "$LOG_FILE" 2>&1 || \
+                log "Failed to log progress"
+            ;;
+        COMPLETE)
+            log "Marking project complete"
+            "$MIND_PATH/bin/project" complete >> "$LOG_FILE" 2>&1 || \
+                log "Failed to complete project"
+            ;;
+        START)
+            log "Starting new project: $PROJECT_ARG1"
+            if [ -n "$PROJECT_ARG2" ]; then
+                "$MIND_PATH/bin/project" start "$PROJECT_ARG1" --goal "$PROJECT_ARG2" >> "$LOG_FILE" 2>&1 || \
+                    log "Failed to start project"
+            else
+                "$MIND_PATH/bin/project" start "$PROJECT_ARG1" >> "$LOG_FILE" 2>&1 || \
+                    log "Failed to start project"
+            fi
+            ;;
+        *)
+            log "Unknown project action: $PROJECT_ACTION"
+            ;;
+    esac
+    log "Project update complete"
+fi
+
+# Process proactive queue additions (Phase 5: Autonomous behavior)
+if [ -n "$PROACTIVE_ADD" ] && [ "$PROACTIVE_ADD" != "NONE" ]; then
+    log "Processing proactive queue addition..."
+    # Parse format: PRIORITY|content
+    QUEUE_PRIORITY=$(echo "$PROACTIVE_ADD" | cut -d'|' -f1 | xargs 2>/dev/null || echo "medium")
+    QUEUE_CONTENT=$(echo "$PROACTIVE_ADD" | cut -d'|' -f2- | xargs 2>/dev/null || echo "")
+
+    if [ -n "$QUEUE_CONTENT" ]; then
+        "$MIND_PATH/bin/proactive-queue" add "$QUEUE_CONTENT" "$QUEUE_PRIORITY" >> "$LOG_FILE" 2>&1 || \
+            log "Failed to add to proactive queue"
+        log "Added to proactive queue: $QUEUE_CONTENT (priority: $QUEUE_PRIORITY)"
+    fi
 fi
 
 log "Activity summary: $ACTIVITY"

@@ -24,15 +24,24 @@ struct Email {
 /// Reads emails from Apple Mail via AppleScript
 final class MailStore {
 
+    typealias AppleScriptRunner = (String) throws -> String
+
     /// Email addresses to watch for
     private let targetEmails: Set<String>
 
     /// Account to check (nil = all accounts)
     private let accountName: String?
 
-    init(targetEmails: [String], accountName: String? = "iCloud") {
+    private let appleScriptRunner: AppleScriptRunner
+
+    init(
+        targetEmails: [String],
+        accountName: String? = "iCloud",
+        appleScriptRunner: @escaping AppleScriptRunner = MailStore.runAppleScript
+    ) {
         self.targetEmails = Set(targetEmails.map { $0.lowercased() })
         self.accountName = accountName
+        self.appleScriptRunner = appleScriptRunner
     }
 
     /// Fetches unread emails from target senders
@@ -81,7 +90,7 @@ final class MailStore {
                 """
         }
 
-        let output = try runAppleScript(script)
+        let output = try appleScriptRunner(script)
         return parseEmails(output)
     }
 
@@ -135,7 +144,7 @@ final class MailStore {
                 """
         }
 
-        let output = try runAppleScript(script)
+        let output = try appleScriptRunner(script)
         return parseEmails(output, includeReadStatus: true)
     }
 
@@ -172,7 +181,7 @@ final class MailStore {
                 """
         }
 
-        _ = try runAppleScript(script)
+        _ = try appleScriptRunner(script)
     }
 
     /// Send an email reply
@@ -193,7 +202,7 @@ final class MailStore {
             end tell
             """
 
-        _ = try runAppleScript(script)
+        _ = try appleScriptRunner(script)
     }
 
     /// Check if an email is from one of the target senders
@@ -212,9 +221,9 @@ final class MailStore {
 
     /// Timeout for AppleScript execution (30 seconds)
     /// If Mail.app hangs, we don't want to block the thread forever
-    private let appleScriptTimeout: TimeInterval = 30
+    private static let appleScriptTimeout: TimeInterval = 30
 
-    private func runAppleScript(_ script: String) throws -> String {
+    private static func runAppleScript(_ script: String) throws -> String {
         let process = Process()
         let outputPipe = Pipe()
         let errorPipe = Pipe()

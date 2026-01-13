@@ -71,9 +71,7 @@ final class VerificationService {
             self.localInvoker = LocalModelInvoker(endpoint: endpoint, timeout: 30)
         }
 
-        self.checklistsDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude-mind/state/checklists")
-            .path
+        self.checklistsDir = MindPaths.mindPath("state/checklists")
 
         // Ensure directory exists
         try? FileManager.default.createDirectory(atPath: checklistsDir, withIntermediateDirectories: true)
@@ -120,6 +118,9 @@ final class VerificationService {
 
     /// Run domain-specific checklist
     func runChecklist(domain: String, context: String) async -> [ChecklistResult] {
+        if checklists[domain] == nil {
+            loadChecklists()
+        }
         guard let checklist = checklists[domain] else {
             return []
         }

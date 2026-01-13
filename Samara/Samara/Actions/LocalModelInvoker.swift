@@ -74,14 +74,18 @@ final class LocalModelInvoker {
     /// - Parameters:
     ///   - endpoint: Ollama API endpoint (default: http://localhost:11434)
     ///   - timeout: Request timeout in seconds (default: 60)
-    init(endpoint: URL? = nil, timeout: TimeInterval = 60) {
+    init(endpoint: URL? = nil, timeout: TimeInterval = 60, session: URLSession? = nil) {
         self.endpoint = endpoint ?? URL(string: "http://localhost:11434")!
         self.timeout = timeout
 
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = timeout
-        configuration.timeoutIntervalForResource = timeout
-        self.session = URLSession(configuration: configuration)
+        if let session {
+            self.session = session
+        } else {
+            let configuration = URLSessionConfiguration.default
+            configuration.timeoutIntervalForRequest = timeout
+            configuration.timeoutIntervalForResource = timeout
+            self.session = URLSession(configuration: configuration)
+        }
     }
 
     // MARK: - Public Methods

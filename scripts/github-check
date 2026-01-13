@@ -3,15 +3,17 @@
 # Designed to run via launchd every 15 minutes
 
 set -e
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 
 # Load config (with fallbacks)
-source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
     ENTITY_GITHUB="claudeaceae"
 }
 
-LOG_FILE="$HOME/.claude-mind/logs/github.log"
-STATE_FILE="$HOME/.claude-mind/github-seen-ids.json"
-LOCK_FILE="$HOME/.claude-mind/claude.lock"
+LOG_FILE="$MIND_PATH/logs/github.log"
+STATE_FILE="$MIND_PATH/github-seen-ids.json"
+LOCK_FILE="$MIND_PATH/claude.lock"
 
 log() {
     mkdir -p "$(dirname "$LOG_FILE")"
@@ -209,7 +211,7 @@ fi
 log "Found GitHub interactions: $INTERACTIONS"
 
 # Read core identity and decisions - required for coherent behavior
-MIND="$HOME/.claude-mind"
+MIND="$MIND_PATH"
 IDENTITY=$(cat "$MIND/identity.md" 2>/dev/null || echo "")
 DECISIONS=$(cat "$MIND/memory/decisions.md" 2>/dev/null || echo "")
 
@@ -260,7 +262,7 @@ acquire_lock
 
 # Invoke Claude
 log "Invoking Claude to generate responses..."
-RESPONSE=$("$HOME/.local/bin/claude" -p "$PROMPT" \
+RESPONSE=$("$CLAUDE" -p "$PROMPT" \
     --dangerously-skip-permissions \
     --output-format text 2>&1) || {
     log "Error invoking Claude: $RESPONSE"

@@ -19,7 +19,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONFIG_FILE="${1:-$SCRIPT_DIR/config.example.json}"
-TARGET_DIR="${2:-$HOME/.claude-mind}"
+TARGET_DIR="${2:-${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -246,83 +246,33 @@ create_launchd_templates() {
     local plist_dir="$TARGET_DIR/launchd"
     mkdir -p "$plist_dir"
 
-    # Wake morning
-    cat > "$plist_dir/com.claude.wake-morning.plist" << EOF
+    # Wake Adaptive (every 15 minutes - handles all wake scheduling)
+    cat > "$plist_dir/com.claude.wake-adaptive.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.claude.wake-morning</string>
+    <string>com.claude.wake-adaptive</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$TARGET_DIR/bin/wake</string>
+        <string>$TARGET_DIR/bin/wake-adaptive</string>
     </array>
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>9</integer>
-        <key>Minute</key>
-        <integer>0</integer>
-    </dict>
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>RunAtLoad</key>
+    <true/>
     <key>StandardOutPath</key>
-    <string>$TARGET_DIR/logs/wake.log</string>
+    <string>$TARGET_DIR/logs/wake-adaptive.log</string>
     <key>StandardErrorPath</key>
-    <string>$TARGET_DIR/logs/wake.log</string>
-</dict>
-</plist>
-EOF
-
-    # Wake afternoon
-    cat > "$plist_dir/com.claude.wake-afternoon.plist" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.claude.wake-afternoon</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$TARGET_DIR/bin/wake</string>
-    </array>
-    <key>StartCalendarInterval</key>
+    <string>$TARGET_DIR/logs/wake-adaptive.log</string>
+    <key>EnvironmentVariables</key>
     <dict>
-        <key>Hour</key>
-        <integer>14</integer>
-        <key>Minute</key>
-        <integer>0</integer>
+        <key>HOME</key>
+        <string>$HOME</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.local/bin</string>
     </dict>
-    <key>StandardOutPath</key>
-    <string>$TARGET_DIR/logs/wake.log</string>
-    <key>StandardErrorPath</key>
-    <string>$TARGET_DIR/logs/wake.log</string>
-</dict>
-</plist>
-EOF
-
-    # Wake evening
-    cat > "$plist_dir/com.claude.wake-evening.plist" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.claude.wake-evening</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$TARGET_DIR/bin/wake</string>
-    </array>
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>20</integer>
-        <key>Minute</key>
-        <integer>0</integer>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>$TARGET_DIR/logs/wake.log</string>
-    <key>StandardErrorPath</key>
-    <string>$TARGET_DIR/logs/wake.log</string>
 </dict>
 </plist>
 EOF
@@ -435,9 +385,7 @@ print_next_steps() {
     echo ""
     echo "3. Install launchd services:"
     echo "   cp $TARGET_DIR/launchd/*.plist ~/Library/LaunchAgents/"
-    echo "   launchctl load ~/Library/LaunchAgents/com.claude.wake-morning.plist"
-    echo "   launchctl load ~/Library/LaunchAgents/com.claude.wake-afternoon.plist"
-    echo "   launchctl load ~/Library/LaunchAgents/com.claude.wake-evening.plist"
+    echo "   launchctl load ~/Library/LaunchAgents/com.claude.wake-adaptive.plist"
     echo "   launchctl load ~/Library/LaunchAgents/com.claude.dream.plist"
     echo ""
     echo "4. Set up credentials:"

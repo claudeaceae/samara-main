@@ -10,7 +10,7 @@
 #   --verbose   Show full xcodebuild output
 #   --quick     Skip test if Samara was built recently (< 1 hour)
 
-MIND_PATH="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 SAMARA_PROJECT="$HOME/Developer/samara-main/Samara"
 LOG_FILE="$MIND_PATH/logs/test-samara.log"
 

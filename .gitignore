@@ -42,3 +42,8 @@ node_modules/
 
 # Local config (contains secrets)
 *.local.md
+# Build artifacts
+.coverage
+.coverage-node/
+.derived-data-*/
+.test-results/

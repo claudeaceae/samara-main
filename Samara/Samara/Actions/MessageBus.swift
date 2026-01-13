@@ -39,7 +39,8 @@ final class MessageBus {
     ///   - text: The message content
     ///   - type: The type of message (determines source tag in episode)
     ///   - chatIdentifier: Optional chat ID for group chats; nil sends to default target
-    func send(_ text: String, type: MessageType, chatIdentifier: String? = nil, isGroupChat: Bool = false) throws {
+    ///   - skipEpisodeLog: If true, skip logging to episode (caller will handle via logExchange)
+    func send(_ text: String, type: MessageType, chatIdentifier: String? = nil, isGroupChat: Bool = false, skipEpisodeLog: Bool = false) throws {
         log("[\(type.rawValue)] Sending: \(text.prefix(80))...", level: .info, component: "MessageBus")
 
         do {
@@ -50,8 +51,10 @@ final class MessageBus {
                 try sender.send(text)
             }
 
-            // Log to episode with source tag
-            episodeLogger.logOutbound(text, source: type.rawValue)
+            // Log to episode with source tag (unless caller will handle via logExchange)
+            if !skipEpisodeLog {
+                episodeLogger.logOutbound(text, source: type.rawValue)
+            }
 
         } catch {
             log("[\(type.rawValue)] Send failed: \(error)", level: .error, component: "MessageBus")

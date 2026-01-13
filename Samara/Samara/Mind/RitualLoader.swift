@@ -70,9 +70,7 @@ final class RitualLoader {
     // MARK: - Initialization
 
     init(mindPath: String? = nil) {
-        let basePath = mindPath ?? FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude-mind")
-            .path
+        let basePath = mindPath ?? MindPaths.mindPath()
 
         self.ritualPath = (basePath as NSString).appendingPathComponent("ritual.md")
 

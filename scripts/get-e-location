@@ -2,7 +2,8 @@
 # Get É's current location from Overland data
 # Updated 2025-12-23: Now reads from Overland webhook data instead of Apple Notes
 
-LOCATION_FILE="$HOME/.claude-mind/state/location.json"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+LOCATION_FILE="$MIND_PATH/state/location.json"
 
 if [ ! -f "$LOCATION_FILE" ]; then
     echo "Error: No location data file found"

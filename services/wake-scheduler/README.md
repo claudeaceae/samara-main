@@ -76,13 +76,13 @@ The scheduler reads from these files:
 
 ## Base Schedule
 
-The scheduler augments, not replaces, the base launchd schedule:
+The scheduler is the primary wake mechanism, running every 15 minutes via `wake-adaptive`:
 
 | Time | Behavior |
 |------|----------|
-| 9:00 AM (±15 min) | Always full wake |
-| 2:00 PM (±15 min) | Always full wake |
-| 8:00 PM (±15 min) | Always full wake |
+| ~9 AM (±15 min) | Full wake (base schedule) |
+| ~2 PM (±15 min) | Full wake (base schedule) |
+| ~8 PM (±15 min) | Full wake (base schedule) |
 | Other times | Based on confidence calculation |
 
 ## Files

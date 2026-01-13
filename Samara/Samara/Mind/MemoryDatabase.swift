@@ -67,9 +67,7 @@ final class MemoryDatabase {
     /// Initialize with path to database file
     /// - Parameter dbPath: Path to SQLite database (default: ~/.claude-mind/semantic/memory.db)
     init(dbPath: String? = nil) {
-        let defaultPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude-mind/semantic/memory.db")
-            .path
+        let defaultPath = MindPaths.mindPath("semantic/memory.db")
         self.dbPath = dbPath ?? defaultPath
     }
 

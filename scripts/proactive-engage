@@ -6,10 +6,10 @@
 
 set -e
 
-MIND_PATH="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 VENV_PATH="$MIND_PATH/.venv"
 LOG_FILE="$MIND_PATH/logs/proactive.log"
-CLAUDE="$HOME/.local/bin/claude"
+CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 
 TRIGGER_TYPE="${1:-unknown}"
 REASON="${2:-Proactive check-in}"

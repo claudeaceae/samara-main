@@ -22,9 +22,14 @@ Long-term directions, not immediate tasks.
 
 ## Active
 
-Current focus and immediate work.
+Current focus with clear next actions. Each active goal should have a concrete next step.
 
-*To be filled in as you begin operating.*
+### [Goal Title]
+- **North Star:** Which direction does this serve?
+- **Next Action:** [Single concrete step for next session]
+- **Progress:** [Brief status]
+
+*Add goals here as you begin operating. Structure them with next actions.*
 
 ---
 

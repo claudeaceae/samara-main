@@ -1,0 +1,21 @@
+#!/bin/bash
+set -euo pipefail
+
+log_file="${SAMARA_STUB_LOG_FILE:-${SAMARA_TEST_LOG_DIR:-/tmp}/stub-commands.log}"
+mkdir -p "$(dirname "$log_file")"
+printf '%s\ttimeout\t%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$log_file"
+
+if [[ "$#" -eq 0 ]]; then
+  exit 0
+fi
+
+# Drop the duration argument if it's the first token.
+if [[ "$1" =~ ^[0-9]+$ ]]; then
+  shift
+fi
+
+if [[ "$#" -eq 0 ]]; then
+  exit 0
+fi
+
+exec "$@"

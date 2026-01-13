@@ -19,9 +19,10 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timedelta
 from pathlib import Path
+from mind_paths import get_mind_path
 from typing import Optional
 
-MIND_PATH = Path(os.path.expanduser("~/.claude-mind"))
+MIND_PATH = get_mind_path()
 STATE_PATH = MIND_PATH / "state"
 LOCATION_FILE = STATE_PATH / "location.json"
 WEATHER_CACHE_FILE = STATE_PATH / "weather-cache.json"

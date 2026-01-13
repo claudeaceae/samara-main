@@ -38,7 +38,7 @@ final class SenseDirectoryWatcher {
     // MARK: - Initialization
 
     init(
-        sensesDirectory: String = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/senses",
+        sensesDirectory: String = MindPaths.mindPath("senses"),
         pollInterval: TimeInterval = 5,
         onSenseEvent: @escaping (SenseEvent) -> Void
     ) {

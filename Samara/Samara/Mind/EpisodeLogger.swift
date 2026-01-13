@@ -7,9 +7,7 @@ final class EpisodeLogger {
     private let timeFormatter: DateFormatter
 
     init() {
-        let mindPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude-mind")
-            .path
+        let mindPath = MindPaths.mindPath()
         self.episodesPath = (mindPath as NSString).appendingPathComponent("memory/episodes")
 
         self.dateFormatter = DateFormatter()
@@ -17,6 +15,16 @@ final class EpisodeLogger {
 
         self.timeFormatter = DateFormatter()
         timeFormatter.dateFormat = "HH:mm"
+
+        ensureEpisodesDirectory()
+    }
+
+    private func ensureEpisodesDirectory() {
+        do {
+            try FileManager.default.createDirectory(atPath: episodesPath, withIntermediateDirectories: true)
+        } catch {
+            log("Failed to create episodes directory: \(error)", level: .warn, component: "EpisodeLogger")
+        }
     }
 
     /// Logs a conversation exchange (message + response)

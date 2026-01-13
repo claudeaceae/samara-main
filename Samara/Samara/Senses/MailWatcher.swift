@@ -14,6 +14,12 @@ final class MailWatcher {
     /// Lock for thread safety
     private let lock = NSLock()
 
+    /// Polling thread
+    private var watchThread: Thread?
+
+    /// Flag to stop watching
+    private var shouldStop = false
+
     /// Path to persist seen email IDs
     private let seenIdsPath: String
 
@@ -26,8 +32,7 @@ final class MailWatcher {
         self.pollInterval = pollInterval
         self.onNewEmail = onNewEmail
 
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
-        self.seenIdsPath = "\(homeDir)/.claude-mind/mail-seen-ids.json"
+        self.seenIdsPath = MindPaths.mindPath("mail-seen-ids.json")
 
         // Load previously seen IDs
         loadSeenIds()
@@ -35,6 +40,9 @@ final class MailWatcher {
 
     /// Starts watching for new emails
     func start() {
+        guard watchThread == nil else { return }
+
+        shouldStop = false
         log("[MailWatcher] Starting with poll interval: \(Int(pollInterval))s")
 
         // Do initial check
@@ -43,10 +51,11 @@ final class MailWatcher {
         // Start polling thread
         let watcher = self
         let interval = pollInterval
-        let thread = Thread {
+        let thread = Thread { [weak self] in
             log("[MailWatcher] Poll thread running")
-            while true {
+            while let self = self, !self.shouldStop {
                 Thread.sleep(forTimeInterval: interval)
+                if self.shouldStop { break }
                 autoreleasepool {
                     watcher.checkForNewEmails()
                 }
@@ -54,7 +63,16 @@ final class MailWatcher {
         }
         thread.qualityOfService = .utility
         thread.start()
+        watchThread = thread
         log("[MailWatcher] Poll thread started")
+    }
+
+    /// Stop watching for emails
+    func stop() {
+        shouldStop = true
+        watchThread?.cancel()
+        watchThread = nil
+        log("[MailWatcher] Poll thread stopped")
     }
 
     /// Check for new emails from target senders

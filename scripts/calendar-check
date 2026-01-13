@@ -5,7 +5,8 @@
 
 set -e
 
-MIND_PATH="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 VENV_PATH="$MIND_PATH/.venv"
 LOG_FILE="$MIND_PATH/logs/calendar.log"
 STATE_FILE="$MIND_PATH/state/calendar-triggers.json"
@@ -177,7 +178,7 @@ fi
 log "Invoking Claude for proactive message..."
 
 # Invoke Claude
-RESPONSE=$("$HOME/.local/bin/claude" -p "$PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+RESPONSE=$("$CLAUDE" -p "$PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
     log "ERROR: Claude invocation failed"
     exit 1
 }

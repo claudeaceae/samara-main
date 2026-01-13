@@ -55,9 +55,8 @@ final class Logger {
     private let maxRotatedLogs = 7
 
     private init() {
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser
-        mindPath = homeDir.appendingPathComponent(".claude-mind").path
-        let logsDir = homeDir.appendingPathComponent(".claude-mind/logs")
+        mindPath = MindPaths.mindPath()
+        let logsDir = MindPaths.mindURL("logs")
 
         // Ensure logs directory exists
         try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)

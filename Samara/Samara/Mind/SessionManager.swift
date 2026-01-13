@@ -91,7 +91,7 @@ final class SessionManager {
     // MARK: - Initialization
 
     init(
-        sessionStateDir: String = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.claude-mind/sessions",
+        sessionStateDir: String = MindPaths.mindPath("sessions"),
         onBatchReady: @escaping ([Message], String?) -> Void,
         checkReadStatus: @escaping (Int64) -> ReadStatus?,
         onSessionExpired: ((String, [Message]) -> Void)? = nil

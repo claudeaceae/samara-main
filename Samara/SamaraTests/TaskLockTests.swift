@@ -1,57 +1,67 @@
 import XCTest
 
-final class TaskLockTests: XCTestCase {
+final class TaskLockTests: SamaraTestCase {
 
     override func setUp() {
         super.setUp()
-        // Clean up any existing lock before each test
-        TaskLock.release()
+        clearLocks()
     }
 
     override func tearDown() {
-        // Clean up after each test
-        TaskLock.release()
+        clearLocks()
         super.tearDown()
+    }
+
+    private func clearLocks() {
+        for lock in TaskLock.activeLocks() {
+            TaskLock.release(scope: lock.scope)
+        }
     }
 
     // MARK: - Basic Lock Tests
 
     func testAcquireLock() {
         // Should successfully acquire lock when none exists
-        let acquired = TaskLock.acquire(task: "test")
+        let scope = LockScope.systemTask(name: "test")
+        let acquired = TaskLock.acquire(scope: scope, task: "test")
         XCTAssertTrue(acquired, "Should acquire lock when none exists")
-        XCTAssertTrue(TaskLock.isLocked(), "Lock should be held after acquisition")
+        XCTAssertTrue(TaskLock.isLocked(scope: scope), "Lock should be held after acquisition")
     }
 
     func testAcquireLockTwiceFails() {
+        let scope = LockScope.systemTask(name: "test")
+
         // First acquisition should succeed
-        let first = TaskLock.acquire(task: "test1")
+        let first = TaskLock.acquire(scope: scope, task: "test")
         XCTAssertTrue(first)
 
         // Second acquisition should fail
-        let second = TaskLock.acquire(task: "test2")
-        XCTAssertFalse(second, "Should not acquire lock when one already exists")
+        let second = TaskLock.acquire(scope: scope, task: "test")
+        XCTAssertFalse(second, "Should not acquire lock when one already exists for the same scope")
     }
 
     func testReleaseLock() {
-        TaskLock.acquire(task: "test")
-        XCTAssertTrue(TaskLock.isLocked())
+        let scope = LockScope.systemTask(name: "test")
+        XCTAssertTrue(TaskLock.acquire(scope: scope, task: "test"))
+        XCTAssertTrue(TaskLock.isLocked(scope: scope))
 
-        TaskLock.release()
-        XCTAssertFalse(TaskLock.isLocked(), "Lock should not be held after release")
+        TaskLock.release(scope: scope)
+        XCTAssertFalse(TaskLock.isLocked(scope: scope), "Lock should not be held after release")
     }
 
     func testReleaseNonexistentLockDoesNotCrash() {
         // Should not crash when releasing a lock that doesn't exist
-        XCTAssertFalse(TaskLock.isLocked())
-        TaskLock.release()  // Should not crash
-        XCTAssertFalse(TaskLock.isLocked())
+        let scope = LockScope.systemTask(name: "test")
+        XCTAssertFalse(TaskLock.isLocked(scope: scope))
+        TaskLock.release(scope: scope)  // Should not crash
+        XCTAssertFalse(TaskLock.isLocked(scope: scope))
     }
 
     // MARK: - Task Info Tests
 
     func testCurrentTaskInfo() {
-        TaskLock.acquire(task: "wake", chat: "test-chat-123")
+        let scope = LockScope.conversation(chatIdentifier: "test-chat-123")
+        XCTAssertTrue(TaskLock.acquire(scope: scope, task: "wake"))
 
         let info = TaskLock.currentTask()
         XCTAssertNotNil(info)
@@ -66,25 +76,29 @@ final class TaskLockTests: XCTestCase {
     }
 
     func testTaskDescription() {
-        TaskLock.acquire(task: "wake")
+        let scope = LockScope.systemTask(name: "wake")
+        XCTAssertTrue(TaskLock.acquire(scope: scope, task: "wake"))
         let desc = TaskLock.taskDescription()
         XCTAssertEqual(desc, "a wake cycle")
     }
 
     func testTaskDescriptionDream() {
-        TaskLock.acquire(task: "dream")
+        let scope = LockScope.systemTask(name: "dream")
+        XCTAssertTrue(TaskLock.acquire(scope: scope, task: "dream"))
         let desc = TaskLock.taskDescription()
         XCTAssertEqual(desc, "a dream cycle")
     }
 
     func testTaskDescriptionMessage() {
-        TaskLock.acquire(task: "message")
+        let scope = LockScope.systemTask(name: "message")
+        XCTAssertTrue(TaskLock.acquire(scope: scope, task: "message"))
         let desc = TaskLock.taskDescription()
         XCTAssertEqual(desc, "another conversation")
     }
 
     func testTaskDescriptionUnknown() {
-        TaskLock.acquire(task: "custom-task")
+        let scope = LockScope.systemTask(name: "custom-task")
+        XCTAssertTrue(TaskLock.acquire(scope: scope, task: "custom-task"))
         let desc = TaskLock.taskDescription()
         XCTAssertEqual(desc, "custom-task")
     }
@@ -92,13 +106,15 @@ final class TaskLockTests: XCTestCase {
     // MARK: - Stale Lock Tests
 
     func testNotStaleWhenFresh() {
-        TaskLock.acquire(task: "test")
+        let scope = LockScope.systemTask(name: "test")
+        XCTAssertTrue(TaskLock.acquire(scope: scope, task: "test"))
         XCTAssertFalse(TaskLock.isStale(), "Fresh lock should not be stale")
     }
 
     func testNotStaleWithCurrentProcess() {
         // Lock from current process should not be stale
-        TaskLock.acquire(task: "test")
+        let scope = LockScope.systemTask(name: "test")
+        XCTAssertTrue(TaskLock.acquire(scope: scope, task: "test"))
 
         // Since we're the process that created it, it shouldn't be stale
         XCTAssertFalse(TaskLock.isStale())
@@ -107,10 +123,12 @@ final class TaskLockTests: XCTestCase {
     // MARK: - Acquire After Release Tests
 
     func testAcquireAfterRelease() {
-        TaskLock.acquire(task: "test1")
-        TaskLock.release()
+        let scope = LockScope.systemTask(name: "test1")
+        XCTAssertTrue(TaskLock.acquire(scope: scope, task: "test1"))
+        TaskLock.release(scope: scope)
 
-        let acquired = TaskLock.acquire(task: "test2")
+        let nextScope = LockScope.systemTask(name: "test2")
+        let acquired = TaskLock.acquire(scope: nextScope, task: "test2")
         XCTAssertTrue(acquired, "Should be able to acquire lock after release")
 
         let info = TaskLock.currentTask()

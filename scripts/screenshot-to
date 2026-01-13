@@ -33,7 +33,8 @@ if [ ! -f "$TEMP_FILE" ]; then
 fi
 
 # Send it
-~/.claude-mind/bin/send-attachment "$TEMP_FILE" "$CHAT_ID"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+"$MIND_PATH/bin/send-attachment" "$TEMP_FILE" "$CHAT_ID"
 
 # Clean up
 rm -f "$TEMP_FILE"

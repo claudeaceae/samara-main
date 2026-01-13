@@ -1,5 +1,6 @@
 import * as p from '@clack/prompts';
 import color from 'picocolors';
+import { join } from 'path';
 import type { WizardContext } from '../types.js';
 import { clearState } from '../context.js';
 
@@ -10,6 +11,9 @@ export async function summary(ctx: WizardContext): Promise<void> {
   const entityName = ctx.config.entity?.name || 'Claude';
   const collaboratorName = ctx.config.collaborator?.name || 'You';
   const collaboratorPhone = ctx.config.collaborator?.phone || '';
+  const logsPath = join(ctx.mindPath, 'logs');
+  const configPath = join(ctx.mindPath, 'config.json');
+  const samaraLogPath = join(logsPath, 'samara.log');
 
   const nextSteps = `
 ${color.bold('Setup Complete!')}
@@ -32,9 +36,9 @@ ${color.bold('Useful commands:')}
   ${color.cyan('/sync')}               - Check for drift
 
 ${color.bold('Locations:')}
-  Memory:  ${color.dim('~/.claude-mind/')}
-  Logs:    ${color.dim('~/.claude-mind/logs/')}
-  Config:  ${color.dim('~/.claude-mind/config.json')}
+  Memory:  ${color.dim(ctx.mindPath)}
+  Logs:    ${color.dim(logsPath)}
+  Config:  ${color.dim(configPath)}
 
 ${color.bold('Learn more:')}
   ${color.underline('https://github.com/claudeaceae/samara-main')}
@@ -52,7 +56,7 @@ If you don't hear back, check if I'm running:
   ${color.cyan('pgrep -fl Samara')}
 
 Or check the logs:
-  ${color.cyan('tail -f ~/.claude-mind/logs/samara.log')}`,
+  ${color.cyan(`tail -f ${samaraLogPath}`)}`,
     `From ${entityName}`
   );
 }

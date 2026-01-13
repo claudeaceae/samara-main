@@ -23,6 +23,9 @@ final class NoteWatcher {
     /// Callback when a note changes
     private let onNoteChanged: (NoteUpdate) -> Void
 
+    /// Read note content by name (injectable for tests)
+    private var noteReader: (String) -> (html: String, plainText: String)?
+
     // MARK: - State
 
     /// Last known content hash for each note
@@ -39,11 +42,16 @@ final class NoteWatcher {
     init(
         watchedNotes: [String] = ["Claude Location Log", "Claude Scratchpad"],
         pollInterval: TimeInterval = 30,
+        noteReader: ((String) -> (html: String, plainText: String)?)? = nil,
         onNoteChanged: @escaping (NoteUpdate) -> Void
     ) {
         self.watchedNotes = watchedNotes
         self.pollInterval = pollInterval
         self.onNoteChanged = onNoteChanged
+        self.noteReader = { _ in nil }
+        self.noteReader = noteReader ?? { [weak self] name in
+            self?.readNote(named: name)
+        }
     }
 
     // MARK: - Public Interface
@@ -54,7 +62,7 @@ final class NoteWatcher {
 
         // Initialize hashes for all watched notes
         for noteName in watchedNotes {
-            if let (htmlContent, _) = readNote(named: noteName) {
+            if let (htmlContent, _) = noteReader(noteName) {
                 contentHashes[noteName] = hashContent(htmlContent)
                 log("Initialized watch for '\(noteName)' (hash: \(contentHashes[noteName]?.prefix(8) ?? "nil"))", level: .debug, component: "NoteWatcher")
             } else {
@@ -82,7 +90,7 @@ final class NoteWatcher {
 
     /// Manually check a specific note (useful for on-demand checks)
     func checkNote(named noteName: String) -> NoteUpdate? {
-        guard let (htmlContent, plainText) = readNote(named: noteName) else {
+        guard let (htmlContent, plainText) = noteReader(noteName) else {
             return nil
         }
 
@@ -110,7 +118,7 @@ final class NoteWatcher {
 
     private func checkForChanges() {
         for noteName in watchedNotes {
-            guard let (htmlContent, plainText) = readNote(named: noteName) else {
+            guard let (htmlContent, plainText) = noteReader(noteName) else {
                 continue
             }
 

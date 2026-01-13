@@ -22,7 +22,14 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
 # Configuration
-MIND_DIR = Path.home() / ".claude-mind"
+def resolve_mind_dir() -> Path:
+    override = os.environ.get("SAMARA_MIND_PATH") or os.environ.get("MIND_PATH")
+    if override:
+        return Path(os.path.expanduser(override))
+    return Path.home() / ".claude-mind"
+
+
+MIND_DIR = resolve_mind_dir()
 MEMORY_DIR = MIND_DIR / "memory"
 EPISODES_DIR = MEMORY_DIR / "episodes"
 

@@ -14,12 +14,20 @@ import sys
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
+def resolve_mind_dir() -> str:
+    override = os.environ.get("SAMARA_MIND_PATH") or os.environ.get("MIND_PATH")
+    if override:
+        return os.path.expanduser(override)
+    home_dir = os.environ.get('HOME', os.path.expanduser('~'))
+    return os.path.join(home_dir, '.claude-mind')
+
+
 # Paths
-HOME = os.environ.get('HOME', os.path.expanduser('~'))
-STATE_DIR = os.path.join(HOME, '.claude-mind', 'state')
-SENSES_DIR = os.path.join(HOME, '.claude-mind', 'senses')
+MIND_DIR = resolve_mind_dir()
+STATE_DIR = os.path.join(MIND_DIR, 'state')
+SENSES_DIR = os.path.join(MIND_DIR, 'senses')
 STATE_FILE = os.path.join(STATE_DIR, 'github-seen-ids.json')
-LOG_FILE = os.path.join(HOME, '.claude-mind', 'logs', 'github-watcher.log')
+LOG_FILE = os.path.join(MIND_DIR, 'logs', 'github-watcher.log')
 
 
 def log(message: str):

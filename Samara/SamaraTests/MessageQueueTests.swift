@@ -1,6 +1,6 @@
 import XCTest
 
-final class MessageQueueTests: XCTestCase {
+final class MessageQueueTests: SamaraTestCase {
 
     override func setUp() {
         super.setUp()

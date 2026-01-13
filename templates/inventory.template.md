@@ -51,12 +51,13 @@ The primary message broker - a properly signed Xcode app.
 
 ## Autonomy Systems
 
-### Wake Cycles (3x daily)
-- **9:00 AM** - Morning session
-- **2:00 PM** - Afternoon session
-- **8:00 PM** - Evening session
+### Adaptive Wake Scheduler
+- **~9 AM** - Morning session (base schedule)
+- **~2 PM** - Afternoon session (base schedule)
+- **~8 PM** - Evening session (base schedule)
+- **Adaptive** - Early wakes for calendar events, priority items
 
-Triggered by launchd, runs `~/.claude-mind/bin/wake`
+Triggered every 15 min by `wake-adaptive`, which consults `wake-scheduler`
 
 ### Dream Cycle (nightly)
 - **3:00 AM** - Memory consolidation and reflection

@@ -5,8 +5,9 @@
 
 set -e
 
-CREDS_FILE="$HOME/.claude-mind/credentials/bluesky.json"
-LOG_FILE="$HOME/.claude-mind/logs/bluesky.log"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CREDS_FILE="$MIND_PATH/credentials/bluesky.json"
+LOG_FILE="$MIND_PATH/logs/bluesky.log"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"

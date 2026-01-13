@@ -22,7 +22,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple
 
-MIND_DIR = Path.home() / ".claude-mind"
+def resolve_mind_dir() -> Path:
+    override = os.environ.get("SAMARA_MIND_PATH") or os.environ.get("MIND_PATH")
+    if override:
+        return Path(os.path.expanduser(override))
+    return Path.home() / ".claude-mind"
+
+
+MIND_DIR = resolve_mind_dir()
 STATE_DIR = MIND_DIR / "state"
 TRIGGERS_FILE = STATE_DIR / "triggers" / "triggers.json"
 QUEUE_FILE = STATE_DIR / "proactive-queue" / "queue.json"

@@ -114,9 +114,8 @@ Key insight: *"Keep Markdown as canonical, reviewable source of truth, but add s
 #### Samara Approach
 
 **launchd Schedules**:
-- `com.claude.wake-{morning,afternoon,evening}` - Fixed 9/14/20
+- `com.claude.wake-adaptive` - Every 15 min (handles ~9/14/20 base times + adaptive)
 - `com.claude.dream` - Nightly 3 AM
-- `com.claude.wake-adaptive` - Every 15 min confidence check
 
 **Adaptive Wake** (`wake-scheduler/scheduler.py`):
 ```python

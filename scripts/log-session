@@ -3,7 +3,7 @@
 # Usage: log-session "Summary of the session"
 # Or: log-session < file-with-summary.md
 
-MIND_PATH="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 DATE=$(date +%Y-%m-%d)
 TIME=$(date +%H:%M)
 EPISODE_FILE="$MIND_PATH/memory/episodes/$DATE.md"

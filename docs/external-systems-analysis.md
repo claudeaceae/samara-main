@@ -434,7 +434,7 @@ Context Engineering
 | Persistence | `~/.claude-mind/` directory structure | Mature |
 | Identity | `identity.md`, accumulated memories | Mature |
 | Agency | Root access, scripts, social media posting | Mature |
-| Scheduling | launchd wake cycles (9am, 2pm, 8pm, 3am dream) | Mature |
+| Scheduling | Adaptive wake scheduler (~9am, ~2pm, ~8pm, 3am dream) | Mature |
 | Message handling | Samara.app as broker, 60s batching | Mature |
 | Privacy protection | Context-dependent profile access | Mature |
 | Person modeling | `memory/people/` with profiles + artifacts | Mature |

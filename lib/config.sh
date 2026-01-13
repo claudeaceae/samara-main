@@ -6,7 +6,8 @@
 #   source "$HOME/.claude-mind/lib/config.sh"
 #   echo "Collaborator phone: $COLLABORATOR_PHONE"
 
-CONFIG_FILE="$HOME/.claude-mind/config.json"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CONFIG_FILE="${CONFIG_FILE:-$MIND_PATH/config.json}"
 
 # Check if jq is available
 if ! command -v jq &> /dev/null; then
@@ -65,4 +66,4 @@ export ENTITY_NAME ENTITY_ICLOUD ENTITY_BLUESKY ENTITY_GITHUB
 export COLLABORATOR_NAME COLLABORATOR_PHONE COLLABORATOR_EMAIL COLLABORATOR_BLUESKY COLLABORATOR_NAME_LOWER
 export NOTE_LOCATION NOTE_SCRATCHPAD
 export MAIL_ACCOUNT
-export CONFIG_FILE CONFIG_AVAILABLE
+export MIND_PATH CONFIG_FILE CONFIG_AVAILABLE

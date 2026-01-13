@@ -25,6 +25,7 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from mind_paths import get_mind_path
 
 # Try to import Chroma for semantic context
 try:
@@ -33,7 +34,7 @@ try:
 except ImportError:
     CHROMA_AVAILABLE = False
 
-MIND_PATH = Path(os.path.expanduser("~/.claude-mind"))
+MIND_PATH = get_mind_path()
 STATE_PATH = MIND_PATH / "state"
 
 

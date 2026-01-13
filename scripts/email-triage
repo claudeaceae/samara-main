@@ -10,7 +10,7 @@
 
 set -e
 
-MIND_PATH="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 LOG_FILE="$MIND_PATH/logs/email-triage.log"
 STATE_FILE="$MIND_PATH/state/email-seen-ids.json"
 

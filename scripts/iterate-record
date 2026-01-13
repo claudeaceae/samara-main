@@ -10,8 +10,9 @@
 
 set -e
 
-STATE_FILE="${HOME}/.claude-mind/state/iteration-state.json"
-GOAL_FILE="${HOME}/.claude-mind/state/iteration-goal.md"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+STATE_FILE="$MIND_PATH/state/iteration-state.json"
+GOAL_FILE="$MIND_PATH/state/iteration-goal.md"
 
 # Check if iteration is active
 if [ ! -f "$STATE_FILE" ]; then

@@ -9,7 +9,8 @@
 set -e
 
 REPO_DIR="$HOME/Developer/samara-main"
-RUNTIME_DIR="$HOME/.claude-mind"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+RUNTIME_DIR="$MIND_PATH"
 REPO_SCRIPTS="$REPO_DIR/scripts"
 RUNTIME_SCRIPTS="$RUNTIME_DIR/bin"
 

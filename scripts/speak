@@ -1,0 +1,157 @@
+#!/bin/bash
+# speak: Generate speech from text using ElevenLabs API
+#
+# Usage: speak "Text to speak" [options]
+#
+# Options:
+#   --voice VOICE_ID    Voice to use (default: from config or 'Rachel')
+#   --send CHAT_ID      Send as voice note to this chat
+#   --output FILE       Save to specific file (default: temp file)
+#   --model MODEL       Model ID (default: eleven_multilingual_v2)
+#   --list-voices       List available voices
+#
+# Examples:
+#   speak "Hello, world!"
+#   speak "Good morning!" --send +15206099095
+#   speak "Testing" --output ~/Desktop/test.mp3
+#   speak --list-voices
+
+set -e
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+
+# Configuration
+CREDS_FILE="$MIND_PATH/credentials/elevenlabs.txt"
+VOICE_CONFIG="$MIND_PATH/state/voice-config.json"
+DEFAULT_MODEL="eleven_multilingual_v2"
+DEFAULT_VOICE_ID="21m00Tcm4TlvDq8ikWAM"  # Rachel (ElevenLabs default)
+
+# Parse arguments
+TEXT=""
+VOICE_ID=""
+OUTPUT_FILE=""
+SEND_TO=""
+MODEL="$DEFAULT_MODEL"
+LIST_VOICES=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --voice)
+            VOICE_ID="$2"
+            shift 2
+            ;;
+        --send)
+            SEND_TO="$2"
+            shift 2
+            ;;
+        --output)
+            OUTPUT_FILE="$2"
+            shift 2
+            ;;
+        --model)
+            MODEL="$2"
+            shift 2
+            ;;
+        --list-voices)
+            LIST_VOICES=true
+            shift
+            ;;
+        *)
+            if [ -z "$TEXT" ]; then
+                TEXT="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Load API key
+if [ ! -f "$CREDS_FILE" ]; then
+    echo "Error: ElevenLabs API key not found at $CREDS_FILE"
+    echo ""
+    echo "To set up:"
+    echo "  1. Get an API key from https://elevenlabs.io/api"
+    echo "  2. Save it: echo 'your-api-key' > $CREDS_FILE && chmod 600 $CREDS_FILE"
+    exit 1
+fi
+
+API_KEY=$(cat "$CREDS_FILE" | tr -d '\n')
+
+# List voices if requested
+if [ "$LIST_VOICES" = true ]; then
+    curl -s "https://api.elevenlabs.io/v1/voices" \
+        -H "xi-api-key: $API_KEY" | \
+        jq -r '.voices[] | "\(.voice_id)\t\(.name)\t\(.labels.accent // "N/A")"' | \
+        column -t -s $'\t'
+    exit 0
+fi
+
+# Require text
+if [ -z "$TEXT" ]; then
+    echo "Usage: speak \"Text to speak\" [options]"
+    echo ""
+    echo "Options:"
+    echo "  --voice VOICE_ID    Voice to use"
+    echo "  --send CHAT_ID      Send as voice note to this chat"
+    echo "  --output FILE       Save to specific file"
+    echo "  --model MODEL       Model ID (default: eleven_multilingual_v2)"
+    echo "  --list-voices       List available voices"
+    exit 1
+fi
+
+# Load voice from config if not specified
+if [ -z "$VOICE_ID" ] && [ -f "$VOICE_CONFIG" ]; then
+    VOICE_ID=$(jq -r '.default_voice_id // empty' "$VOICE_CONFIG" 2>/dev/null || true)
+fi
+VOICE_ID="${VOICE_ID:-$DEFAULT_VOICE_ID}"
+
+# Generate output filename if not specified
+if [ -z "$OUTPUT_FILE" ]; then
+    TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+    OUTPUT_FILE="$MIND_PATH/media/voice-${TIMESTAMP}.mp3"
+    mkdir -p "$MIND_PATH/media"
+fi
+
+# Call ElevenLabs API
+HTTP_CODE=$(curl -s -w "%{http_code}" -o "$OUTPUT_FILE" \
+    "https://api.elevenlabs.io/v1/text-to-speech/$VOICE_ID" \
+    -H "xi-api-key: $API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{
+        \"text\": $(echo "$TEXT" | jq -Rs .),
+        \"model_id\": \"$MODEL\",
+        \"voice_settings\": {
+            \"stability\": 0.5,
+            \"similarity_boost\": 0.75
+        }
+    }")
+
+# Check for errors
+if [ "$HTTP_CODE" != "200" ]; then
+    ERROR_MSG=$(cat "$OUTPUT_FILE" 2>/dev/null || echo "Unknown error")
+    rm -f "$OUTPUT_FILE"
+    echo "Error: ElevenLabs API returned HTTP $HTTP_CODE"
+    echo "$ERROR_MSG"
+    exit 1
+fi
+
+# Verify we got audio
+FILE_SIZE=$(stat -f%z "$OUTPUT_FILE" 2>/dev/null || stat --printf="%s" "$OUTPUT_FILE")
+if [ "$FILE_SIZE" -lt 1000 ]; then
+    echo "Error: Generated file too small ($FILE_SIZE bytes), likely an error"
+    cat "$OUTPUT_FILE"
+    rm -f "$OUTPUT_FILE"
+    exit 1
+fi
+
+echo "Generated: $OUTPUT_FILE ($(echo "scale=1; $FILE_SIZE/1024" | bc)KB)"
+
+# Send via iMessage if requested
+if [ -n "$SEND_TO" ]; then
+    "$MIND_PATH/bin/send-attachment" "$OUTPUT_FILE" "$SEND_TO"
+    echo "Sent voice note to $SEND_TO"
+fi
+
+# Log it
+LOG_FILE="$MIND_PATH/logs/voice.log"
+mkdir -p "$(dirname "$LOG_FILE")"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] speak: \"${TEXT:0:50}...\" -> $OUTPUT_FILE${SEND_TO:+ -> $SEND_TO}" >> "$LOG_FILE"

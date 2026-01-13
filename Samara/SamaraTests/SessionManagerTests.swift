@@ -1,6 +1,6 @@
 import XCTest
 
-final class SessionManagerTests: XCTestCase {
+final class SessionManagerTests: SamaraTestCase {
 
     var sessionManager: SessionManager!
     var batchReadyMessages: [Message]?

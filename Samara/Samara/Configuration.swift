@@ -1,5 +1,45 @@
 import Foundation
 
+enum MindPaths {
+    static func mindPath(_ relativePath: String? = nil) -> String {
+        mindURL(relativePath).path
+    }
+
+    static func mindURL(_ relativePath: String? = nil) -> URL {
+        let base = mindDir
+        guard let relativePath, !relativePath.isEmpty else {
+            return base
+        }
+        return URL(fileURLWithPath: relativePath, relativeTo: base).standardizedFileURL
+    }
+
+    static var mindDir: URL {
+        if let override = resolveMindOverride() {
+            return URL(fileURLWithPath: expandTilde(override)).standardizedFileURL
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude-mind")
+    }
+
+    private static func resolveMindOverride() -> String? {
+        let env = ProcessInfo.processInfo.environment
+        if let value = env["SAMARA_MIND_PATH"] ?? env["MIND_PATH"] {
+            return value
+        }
+        if let raw = getenv("SAMARA_MIND_PATH") {
+            return String(cString: raw)
+        }
+        if let raw = getenv("MIND_PATH") {
+            return String(cString: raw)
+        }
+        return nil
+    }
+
+    private static func expandTilde(_ path: String) -> String {
+        (path as NSString).expandingTildeInPath
+    }
+}
+
 /// Loads configuration from ~/.claude-mind/config.json
 /// Falls back to hardcoded defaults if config is missing
 struct Configuration: Codable {
@@ -104,8 +144,7 @@ struct Configuration: Codable {
     /// Load configuration from ~/.claude-mind/config.json
     /// Returns defaults if file doesn't exist or can't be parsed
     static func load() -> Configuration {
-        let configPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude-mind/config.json")
+        let configPath = MindPaths.mindURL("config.json")
 
         guard FileManager.default.fileExists(atPath: configPath.path) else {
             log("config.json not found, using defaults", level: .info, component: "Configuration")

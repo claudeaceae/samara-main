@@ -7,7 +7,9 @@
 # Usage: screenshot
 
 # Load config (with fallbacks)
-source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
     COLLABORATOR_PHONE="+15206099095"
 }
 
@@ -22,7 +24,7 @@ if [ ! -f "$TEMP_FILE" ]; then
 fi
 
 # Send it
-~/.claude-mind/bin/send-attachment "$TEMP_FILE" "$COLLABORATOR_PHONE"
+"$MIND_PATH/bin/send-attachment" "$TEMP_FILE" "$COLLABORATOR_PHONE"
 
 # Clean up
 rm -f "$TEMP_FILE"

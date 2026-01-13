@@ -145,9 +145,7 @@ final class LedgerManager {
     // MARK: - Initialization
 
     init(baseDir: String? = nil) {
-        let defaultBase = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".claude-mind/state")
-            .path
+        let defaultBase = MindPaths.mindPath("state")
 
         let base = baseDir ?? defaultBase
         self.ledgersDir = (base as NSString).appendingPathComponent("ledgers")

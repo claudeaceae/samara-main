@@ -6,8 +6,10 @@
 #
 # Usage: send-image /path/to/file
 
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+
 # Load config (with fallbacks)
-source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
     COLLABORATOR_PHONE="+15206099095"
 }
 
@@ -16,4 +18,4 @@ if [ -z "$1" ]; then
     exit 1
 fi
 
-~/.claude-mind/bin/send-attachment "$1" "$COLLABORATOR_PHONE"
+"$MIND_PATH/bin/send-attachment" "$1" "$COLLABORATOR_PHONE"

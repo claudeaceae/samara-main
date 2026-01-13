@@ -96,9 +96,7 @@ cp -R /tmp/SamaraExport/Samara.app /Applications/
 
 ```bash
 cp ~/.claude-mind/launchd/*.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.claude.wake-morning.plist
-launchctl load ~/Library/LaunchAgents/com.claude.wake-afternoon.plist
-launchctl load ~/Library/LaunchAgents/com.claude.wake-evening.plist
+launchctl load ~/Library/LaunchAgents/com.claude.wake-adaptive.plist
 launchctl load ~/Library/LaunchAgents/com.claude.dream.plist
 ```
 
@@ -215,32 +213,27 @@ Skills are defined in `.claude/skills/` and symlinked to `~/.claude/skills/`.
 
 ### Autonomy Schedule
 
-**Base Schedule (via launchd):**
+**Unified Adaptive System (via `wake-adaptive` launchd service):**
 
-| Time | Event |
-|------|-------|
-| 9:00 AM | Wake cycle |
-| 2:00 PM | Wake cycle |
-| 8:00 PM | Wake cycle |
-| 3:00 AM | Dream cycle |
+The scheduler runs every 15 minutes and decides whether to wake based on multiple factors:
 
-**Adaptive Scheduling (Phase 4):**
+| Trigger | Wake Type | Description |
+|---------|-----------|-------------|
+| ~9 AM, ~2 PM, ~8 PM | `full` | Base schedule (±15 min window) |
+| Calendar event < 30 min | `full` | Early wake for upcoming events |
+| High-priority queue item | `full` or `light` | Process urgent items |
+| 3:00 AM | Dream | Memory consolidation (separate launchd job) |
 
-The base schedule can be augmented by `wake-scheduler` which calculates optimal wake times:
+**Wake Types:**
 
-| Wake Type | Duration | Context |
-|-----------|----------|---------|
-| `full` | 5+ min | Full context, all capabilities |
-| `light` | 30 sec | Quick scan for urgent items only |
+| Type | Duration | Context |
+|------|----------|---------|
+| `full` | 5+ min | Full memory, all capabilities |
+| `light` | 30 sec | Quick scan for urgent items |
 | `emergency` | Immediate | High-priority external trigger |
 
-**Adaptive triggers:**
-- Calendar event within 30 minutes → early wake
-- High-priority queue item pending → wake now
-- Webhook received (if configured) → process event
-
 **Ritual Context:**
-Each wake type loads time-appropriate guidance via `RitualLoader.swift`:
+Each wake loads time-appropriate guidance via `RitualLoader.swift`:
 - **Morning** (5-11 AM): Planning, goals, calendar review
 - **Afternoon** (12-4 PM): Work focus, progress check
 - **Evening** (5-11 PM): Reflection, relationships, learnings

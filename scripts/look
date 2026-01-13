@@ -13,12 +13,14 @@
 set -e
 
 # Load config
-source "$HOME/.claude-mind/lib/config.sh" 2>/dev/null || {
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
     COLLABORATOR_PHONE="+15206099095"
 }
 
 # Paths for Samara capture mechanism
-STATE_DIR="$HOME/.claude-mind/state"
+STATE_DIR="$MIND_PATH/state"
 REQUEST_FILE="$STATE_DIR/capture-request.json"
 RESULT_FILE="$STATE_DIR/capture-result.json"
 
@@ -179,7 +181,7 @@ echo "$OUTPUT"
 
 # Send if requested
 if [ "$SEND" = true ]; then
-    ~/.claude-mind/bin/send-image "$OUTPUT" "Webcam capture"
+    "$MIND_PATH/bin/send-image" "$OUTPUT" "Webcam capture"
     echo "Sent to collaborator"
 fi
 

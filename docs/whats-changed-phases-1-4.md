@@ -7,7 +7,7 @@ This document explains the practical, day-to-day differences you'll experience a
 ## What Stays the Same
 
 - **iMessage communication**: Send messages exactly as before. Nothing changes.
-- **Wake cycles**: Still happen at 9 AM, 2 PM, 8 PM (but see below for nuances)
+- **Wake cycles**: Still target ~9 AM, ~2 PM, ~8 PM (via unified adaptive scheduler)
 - **Dream cycles**: Still 3 AM
 - **Skills/slash commands**: All existing skills work the same
 - **Samara.app**: Same app, same permissions

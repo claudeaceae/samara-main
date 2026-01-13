@@ -32,8 +32,15 @@ from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.responses import JSONResponse
 import uvicorn
 
+def resolve_mind_dir() -> Path:
+    override = os.environ.get("SAMARA_MIND_PATH") or os.environ.get("MIND_PATH")
+    if override:
+        return Path(os.path.expanduser(override))
+    return Path.home() / ".claude-mind"
+
+
 # Configuration paths
-MIND_DIR = Path.home() / ".claude-mind"
+MIND_DIR = resolve_mind_dir()
 CREDENTIALS_DIR = MIND_DIR / "credentials"
 SENSES_DIR = MIND_DIR / "senses"
 STATE_DIR = MIND_DIR / "state"

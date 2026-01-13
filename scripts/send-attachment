@@ -15,6 +15,7 @@
 #   - Group chat GUID: 7409d77007664ff7b1eeb4683f49cadf
 
 set -e
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 
 if [ -z "$1" ] || [ -z "$2" ]; then
     echo "Usage: send-attachment /path/to/file chat_identifier"
@@ -84,7 +85,7 @@ sleep 0.3
 rm -f "$TEMP_PATH"
 
 # Log it
-LOG_FILE="$HOME/.claude-mind/logs/messages-sent.log"
+LOG_FILE="$MIND_PATH/logs/messages-sent.log"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sent attachment to $CHAT_ID: $ABSOLUTE_PATH" >> "$LOG_FILE"
 
 if [ $RESULT -eq 0 ]; then

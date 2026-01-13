@@ -36,6 +36,7 @@ import re
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
+from mind_paths import get_mind_path
 from typing import Optional
 
 # Import other analyzers
@@ -75,7 +76,7 @@ try:
 except ImportError:
     QUESTIONS_AVAILABLE = False
 
-MIND_PATH = Path(os.path.expanduser("~/.claude-mind"))
+MIND_PATH = get_mind_path()
 STATE_PATH = MIND_PATH / "state"
 EPISODES_PATH = MIND_PATH / "memory" / "episodes"
 
