@@ -362,6 +362,36 @@ EOF
 </plist>
 EOF
 
+    # X/Twitter Watcher (every 15 minutes)
+    cat > "$plist_dir/com.claude.x-watcher.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claude.x-watcher</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>$SCRIPT_DIR/services/x-watcher/server.py</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>900</integer>
+    <key>StandardOutPath</key>
+    <string>$TARGET_DIR/logs/x-watcher.log</string>
+    <key>StandardErrorPath</key>
+    <string>$TARGET_DIR/logs/x-watcher.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>$HOME</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+    </dict>
+</dict>
+</plist>
+EOF
+
     log_success "launchd templates created in $plist_dir/"
     log_info "To install: cp $plist_dir/*.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/com.claude.*.plist"
 }

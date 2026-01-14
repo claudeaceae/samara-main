@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claude.x-watcher</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>/Users/claude/Developer/samara-main/services/x-watcher/server.py</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>900</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/claude/.claude-mind/logs/x-watcher.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/claude/.claude-mind/logs/x-watcher.log</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/claude</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/claude/.local/bin</string>
+    </dict>
+</dict>
+</plist>

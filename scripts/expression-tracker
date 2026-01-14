@@ -1,0 +1,276 @@
+#!/bin/bash
+# expression-tracker - Track and query creative expression state
+#
+# Usage:
+#   expression-tracker status          Show current expression state (JSON)
+#   expression-tracker check           Check if expression opportunity active
+#   expression-tracker record TYPE DESC  Record an expression (image|bluesky|message)
+#   expression-tracker history         Show recent expressions
+#   expression-tracker seed [visual|text]  Get a random seed prompt
+#
+# The state file lives at ~/.claude-mind/state/expression-state.json
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+STATE_FILE="$MIND_PATH/state/expression-state.json"
+SEEDS_FILE="$MIND_PATH/state/expression-seeds.json"
+
+# Ensure state directory exists
+mkdir -p "$MIND_PATH/state"
+
+# Initialize state file if missing
+init_state() {
+    if [ ! -f "$STATE_FILE" ]; then
+        cat > "$STATE_FILE" << 'EOF'
+{
+  "date": null,
+  "last_expression": null,
+  "last_expression_type": null,
+  "expressions_today": 0,
+  "recent_expressions": []
+}
+EOF
+    fi
+}
+
+# Reset daily count if new day
+reset_daily_if_needed() {
+    local today=$(date +%Y-%m-%d)
+    local state_date=$(jq -r '.date // ""' "$STATE_FILE")
+
+    if [ "$state_date" != "$today" ]; then
+        jq --arg date "$today" '.date = $date | .expressions_today = 0' "$STATE_FILE" > "$STATE_FILE.tmp"
+        mv "$STATE_FILE.tmp" "$STATE_FILE"
+    fi
+}
+
+# Get hours since last expression
+hours_since_last() {
+    local last=$(jq -r '.last_expression // ""' "$STATE_FILE")
+    if [ -z "$last" ] || [ "$last" = "null" ]; then
+        echo "999"  # Never expressed, return large number
+        return
+    fi
+
+    # Parse ISO 8601 UTC timestamp (ending in Z)
+    # Convert to epoch using Python for reliable cross-platform parsing
+    local last_ts=$(python3 -c "
+from datetime import datetime
+ts = '$last'.replace('Z', '+00:00')
+dt = datetime.fromisoformat(ts)
+print(int(dt.timestamp()))
+" 2>/dev/null || echo "0")
+
+    local now_ts=$(date "+%s")
+    local diff=$((now_ts - last_ts))
+    echo $((diff / 3600))
+}
+
+# Calculate expression opportunity
+calculate_opportunity() {
+    init_state
+    reset_daily_if_needed
+
+    local hour=$(date +%H | sed 's/^0//')
+    local hours_since=$(hours_since_last)
+    local expressions_today=$(jq -r '.expressions_today // 0' "$STATE_FILE")
+
+    # Check quiet hours (22-08)
+    if [ "$hour" -ge 22 ] || [ "$hour" -lt 8 ]; then
+        echo '{"eligible": false, "reason": "Quiet hours (10 PM - 8 AM)", "confidence": 0}'
+        return
+    fi
+
+    # Check daily limit
+    if [ "$expressions_today" -ge 2 ]; then
+        echo '{"eligible": false, "reason": "Daily limit reached (2/day)", "confidence": 0}'
+        return
+    fi
+
+    # Check minimum interval (18 hours)
+    if [ "$hours_since" -lt 18 ]; then
+        echo "{\"eligible\": false, \"reason\": \"Too soon (${hours_since}h since last, need 18h)\", \"confidence\": 0}"
+        return
+    fi
+
+    # Calculate confidence score
+    local confidence=0
+    local reasons=()
+
+    # Time-of-day weighting (evening favored)
+    local time_weight=30
+    case $hour in
+        17|18) time_weight=50 ;;
+        19|20) time_weight=70 ;;
+        21) time_weight=60 ;;
+        8|9|10) time_weight=40 ;;
+        *) time_weight=30 ;;
+    esac
+    confidence=$time_weight
+    reasons+=("time_weight=$time_weight")
+
+    # Hours-since boost (increases as time passes beyond 18h)
+    local time_boost=0
+    if [ "$hours_since" -gt 24 ]; then
+        time_boost=$(( (hours_since - 18) * 2 ))
+        [ "$time_boost" -gt 30 ] && time_boost=30
+        confidence=$((confidence + time_boost))
+        reasons+=("time_boost=$time_boost")
+    fi
+
+    # Date-based "spark" (pseudo-random daily variance)
+    local date_hash=$(date +%Y%m%d | cksum | cut -d' ' -f1)
+    local spark=$((date_hash % 100))
+    if [ "$spark" -gt 70 ]; then
+        confidence=$((confidence + 20))
+        reasons+=("daily_spark=20")
+    fi
+
+    # Normalize to 0-100
+    [ "$confidence" -gt 100 ] && confidence=100
+
+    local reason_str=$(IFS=','; echo "${reasons[*]}")
+
+    if [ "$confidence" -ge 60 ]; then
+        echo "{\"eligible\": true, \"reason\": \"Expression opportunity ($reason_str)\", \"confidence\": $confidence, \"hours_since\": $hours_since}"
+    elif [ "$confidence" -ge 40 ]; then
+        echo "{\"eligible\": true, \"reason\": \"Moderate opportunity ($reason_str)\", \"confidence\": $confidence, \"hours_since\": $hours_since, \"subtle\": true}"
+    else
+        echo "{\"eligible\": false, \"reason\": \"Low confidence ($reason_str)\", \"confidence\": $confidence, \"hours_since\": $hours_since}"
+    fi
+}
+
+# Record an expression
+record_expression() {
+    local type="$1"
+    local description="$2"
+    local prompt_used="${3:-}"
+
+    if [ -z "$type" ] || [ -z "$description" ]; then
+        echo "Usage: expression-tracker record TYPE DESCRIPTION [PROMPT]" >&2
+        exit 1
+    fi
+
+    init_state
+    reset_daily_if_needed
+
+    local timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    local today=$(date +%Y-%m-%d)
+
+    # Create new expression entry
+    local new_entry
+    if [ -n "$prompt_used" ]; then
+        new_entry=$(jq -n \
+            --arg ts "$timestamp" \
+            --arg type "$type" \
+            --arg desc "$description" \
+            --arg prompt "$prompt_used" \
+            '{timestamp: $ts, type: $type, description: $desc, prompt_used: $prompt}')
+    else
+        new_entry=$(jq -n \
+            --arg ts "$timestamp" \
+            --arg type "$type" \
+            --arg desc "$description" \
+            '{timestamp: $ts, type: $type, description: $desc}')
+    fi
+
+    # Update state
+    jq --arg ts "$timestamp" \
+       --arg type "$type" \
+       --arg today "$today" \
+       --argjson entry "$new_entry" \
+       '.last_expression = $ts |
+        .last_expression_type = $type |
+        .date = $today |
+        .expressions_today = (.expressions_today + 1) |
+        .recent_expressions = ([$entry] + .recent_expressions | .[0:10])' \
+       "$STATE_FILE" > "$STATE_FILE.tmp"
+    mv "$STATE_FILE.tmp" "$STATE_FILE"
+
+    echo "{\"recorded\": true, \"type\": \"$type\", \"timestamp\": \"$timestamp\"}"
+}
+
+# Get variety nudge if needed
+get_variety_nudge() {
+    init_state
+
+    local recent=$(jq -r '[.recent_expressions[0:3] | .[].type] | unique | length' "$STATE_FILE")
+    if [ "$recent" -eq 1 ]; then
+        local type=$(jq -r '.recent_expressions[0].type // "unknown"' "$STATE_FILE")
+        local count=$(jq -r '[.recent_expressions[0:5] | .[].type] | map(select(. == "'"$type"'")) | length' "$STATE_FILE")
+        if [ "$count" -ge 3 ]; then
+            echo "{\"nudge\": true, \"type\": \"$type\", \"count\": $count, \"suggestion\": \"Consider mixing it up - last $count were all $type\"}"
+            return
+        fi
+    fi
+    echo '{"nudge": false}'
+}
+
+# Get a random seed prompt
+get_seed() {
+    local category="${1:-visual}"
+
+    if [ ! -f "$SEEDS_FILE" ]; then
+        echo "Seeds file not found at $SEEDS_FILE" >&2
+        exit 1
+    fi
+
+    local array_name
+    case "$category" in
+        visual) array_name="visual_seeds" ;;
+        text) array_name="text_seeds" ;;
+        *)
+            echo "Unknown seed category: $category (use 'visual' or 'text')" >&2
+            exit 1
+            ;;
+    esac
+
+    # Get array length and pick random index
+    local length=$(jq -r ".${array_name} | length" "$SEEDS_FILE")
+    local index=$((RANDOM % length))
+    jq -r ".${array_name}[$index]" "$SEEDS_FILE"
+}
+
+# Main command dispatch
+case "${1:-}" in
+    status)
+        init_state
+        reset_daily_if_needed
+        cat "$STATE_FILE"
+        ;;
+
+    check)
+        calculate_opportunity
+        ;;
+
+    record)
+        record_expression "$2" "$3" "$4"
+        ;;
+
+    history)
+        init_state
+        jq '.recent_expressions' "$STATE_FILE"
+        ;;
+
+    nudge)
+        get_variety_nudge
+        ;;
+
+    seed)
+        get_seed "${2:-visual}"
+        ;;
+
+    *)
+        echo "Usage: expression-tracker [status|check|record|history|nudge|seed]"
+        echo ""
+        echo "Commands:"
+        echo "  status              Show current expression state (JSON)"
+        echo "  check               Check if expression opportunity active"
+        echo "  record TYPE DESC    Record an expression (image|bluesky|message)"
+        echo "  history             Show recent expressions"
+        echo "  nudge               Check if variety nudge is needed"
+        echo "  seed [visual|text]  Get a random seed prompt"
+        exit 1
+        ;;
+esac

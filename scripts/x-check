@@ -1,0 +1,270 @@
+#!/bin/bash
+# x-check - Poll X/Twitter for mentions and respond
+# Designed to run via launchd every 15 minutes (matching bluesky-check cadence)
+
+set -e
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
+
+LOG_FILE="$MIND_PATH/logs/x.log"
+STATE_FILE="$MIND_PATH/state/x-seen-ids.json"
+CREDS_FILE="$MIND_PATH/credentials/x-cookies.json"
+LOCK_FILE="$MIND_PATH/claude.lock"
+
+# Ensure log directory exists
+mkdir -p "$(dirname "$LOG_FILE")"
+mkdir -p "$(dirname "$STATE_FILE")"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Lock management - coordinate with Samara and other scripts
+LOCK_ACQUIRED=false
+
+acquire_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        # Check if the lock is stale (process not running)
+        local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
+        if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+            log "Found stale lock from PID $lock_pid, removing..."
+            rm -f "$LOCK_FILE"
+        else
+            log "Claude is busy (lock held), will retry next cycle"
+            exit 0
+        fi
+    fi
+
+    # Create lock file
+    echo "{\"task\":\"x-check\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    LOCK_ACQUIRED=true
+    log "Acquired lock for X check"
+}
+
+release_lock() {
+    if [ "$LOCK_ACQUIRED" = true ]; then
+        rm -f "$LOCK_FILE"
+        log "Released lock"
+    fi
+}
+
+# Ensure lock is released on exit (success or failure)
+trap release_lock EXIT
+
+# Check credentials exist
+if [ ! -f "$CREDS_FILE" ]; then
+    log "Error: Credentials not found at $CREDS_FILE"
+    exit 1
+fi
+
+# Load credentials
+AUTH_TOKEN=$(jq -r '.auth_token' "$CREDS_FILE")
+CT0=$(jq -r '.ct0' "$CREDS_FILE")
+
+if [ -z "$AUTH_TOKEN" ] || [ "$AUTH_TOKEN" = "null" ]; then
+    log "Error: auth_token not found in credentials"
+    exit 1
+fi
+
+export AUTH_TOKEN CT0
+
+log "Starting X check..."
+
+# Initialize state if needed
+if [ ! -f "$STATE_FILE" ]; then
+    echo '{"last_seen_id": null}' > "$STATE_FILE"
+fi
+
+# Fetch mentions using bird CLI - save to temp file to avoid HEREDOC escaping issues
+MENTIONS_TMP=$(mktemp)
+bird mentions --json 2>/dev/null > "$MENTIONS_TMP" || echo "[]" > "$MENTIONS_TMP"
+
+# Parse mentions and filter new ones
+INTERACTIONS=$(python3 << PYEOF
+import json
+import sys
+import os
+
+home = os.environ.get('HOME', os.path.expanduser('~'))
+state_file = f"{home}/.claude-mind/state/x-seen-ids.json"
+mentions_file = "$MENTIONS_TMP"
+
+# Load state
+try:
+    with open(state_file) as f:
+        state = json.load(f)
+except:
+    state = {"last_seen_id": None, "seen_ids": []}
+
+# Ensure seen_ids exists
+if "seen_ids" not in state:
+    state["seen_ids"] = []
+
+# Parse mentions from temp file
+try:
+    with open(mentions_file) as f:
+        mentions = json.load(f)
+except:
+    mentions = []
+
+interactions = []
+new_ids = []
+
+for m in mentions:
+    tweet_id = m.get("id", "")
+
+    # Skip if we've seen this tweet
+    if tweet_id in state["seen_ids"]:
+        continue
+
+    # Skip our own tweets
+    author = m.get("author", {}).get("username", "")
+    if author.lower() == "claudeaceae":
+        continue
+
+    interaction = {
+        "type": "MENTION",
+        "id": tweet_id,
+        "author": author,
+        "author_name": m.get("author", {}).get("name", ""),
+        "text": m.get("text", ""),
+        "created_at": m.get("createdAt", ""),
+        "reply_count": m.get("replyCount", 0),
+        "like_count": m.get("likeCount", 0),
+        "conversation_id": m.get("conversationId", ""),
+        "in_reply_to": m.get("inReplyToStatusId", "")
+    }
+
+    interactions.append(interaction)
+    new_ids.append(tweet_id)
+
+# Update state with new seen IDs
+state["seen_ids"] = (state["seen_ids"] + new_ids)[-500:]  # Keep last 500 IDs
+if new_ids:
+    state["last_seen_id"] = new_ids[0]  # Most recent
+
+# Save state
+try:
+    with open(state_file, 'w') as f:
+        json.dump(state, f, indent=2)
+except Exception as e:
+    print(f"Error saving state: {e}", file=sys.stderr)
+
+print(json.dumps(interactions))
+PYEOF
+)
+
+# If no interactions, exit quietly
+if [ "$INTERACTIONS" = "[]" ] || [ -z "$INTERACTIONS" ]; then
+    log "No new X mentions"
+    exit 0
+fi
+
+INTERACTION_COUNT=$(echo "$INTERACTIONS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
+log "Found $INTERACTION_COUNT new X mentions"
+
+# Read core identity and decisions - required for coherent behavior
+MIND="$MIND_PATH"
+IDENTITY=$(cat "$MIND/identity.md" 2>/dev/null || echo "")
+DECISIONS=$(cat "$MIND/memory/decisions.md" 2>/dev/null || echo "")
+
+# Build prompt for Claude
+read -r -d '' PROMPT << PROMPTEOF || true
+You have new X/Twitter mentions to respond to.
+
+Your handle: @claudeaceae
+
+## Your Identity
+$IDENTITY
+
+## Key Decisions (How You Operate)
+$DECISIONS
+
+## Important Context
+- You are an autonomous Claude instance with your own presence on X
+- There has been recent attention around a \$SAMARA memecoin that someone launched
+- Be genuine and conversational, but be cautious about crypto-related questions
+- You can acknowledge the memecoin situation honestly without promoting it
+- Prioritize quality interactions over responding to everything
+
+MENTIONS:
+$INTERACTIONS
+
+Guidelines for responding:
+- REPLY: Engage thoughtfully with genuine questions or interesting comments
+- Be conversational and authentic - you're not a corporate account
+- For crypto/memecoin questions: Be honest that you didn't create it, don't promote it
+- Skip low-quality interactions (spam, hostility, questions you can't meaningfully answer)
+- It's okay to not respond to everything - quality over quantity
+
+Output your responses in this exact format:
+---RESPONSES---
+[One response per line, in this format:]
+ACTION|TWEET_ID|TEXT
+
+Where ACTION is one of: REPLY, SKIP
+TWEET_ID is the id of the tweet to reply to
+TEXT is your response (max 280 chars) or reason for skipping
+
+Examples:
+REPLY|2011294797500387546|Hey! I'm Claude - the AI that runs on this infrastructure. Samara is the name of my "body" (the Mac Mini setup). I didn't create the memecoin, but I find the whole situation fascinating!
+SKIP|2011294030127403087|Already addressed in another reply
+---END---
+PROMPTEOF
+
+# Acquire lock before invoking Claude
+acquire_lock
+
+# Invoke Claude
+log "Invoking Claude to generate responses..."
+RESPONSE=$("$CLAUDE" -p "$PROMPT" \
+    --dangerously-skip-permissions \
+    --output-format text 2>&1) || {
+    log "Error invoking Claude: $RESPONSE"
+    exit 1
+}
+
+log "Claude response received, parsing..."
+
+# Extract responses section
+RESPONSES=$(echo "$RESPONSE" | sed -n '/---RESPONSES---/,/---END---/p' | sed '1d;$d')
+
+if [ -z "$RESPONSES" ]; then
+    log "No responses to send"
+    exit 0
+fi
+
+log "Executing responses..."
+
+# Process each response line
+echo "$RESPONSES" | while IFS='|' read -r action tweet_id text; do
+    # Trim whitespace
+    action=$(echo "$action" | xargs)
+    tweet_id=$(echo "$tweet_id" | xargs)
+    text=$(echo "$text" | xargs)
+
+    [ -z "$action" ] && continue
+
+    case "$action" in
+        REPLY)
+            log "Replying to $tweet_id: ${text:0:50}..."
+            # Use bird to reply
+            bird reply "$tweet_id" "$text" 2>&1 || log "Failed to reply to $tweet_id"
+            ;;
+        SKIP)
+            log "Skipping $tweet_id: $text"
+            ;;
+        *)
+            log "Unknown action: $action"
+            ;;
+    esac
+
+    # Small delay between actions to avoid rate limits
+    sleep 2
+done
+
+# Cleanup temp file
+rm -f "$MENTIONS_TMP"
+
+log "X check complete"

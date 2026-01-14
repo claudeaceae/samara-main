@@ -445,6 +445,8 @@ final class TaskLock {
             return "Bluesky stuff"
         case "github":
             return "GitHub notifications"
+        case "x", "x-check":
+            return "X/Twitter stuff"
         default:
             return info.task
         }

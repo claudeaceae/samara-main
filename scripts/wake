@@ -137,6 +137,31 @@ PROACTIVE_PENDING=$(echo "$PROACTIVE_STATUS" | jq -r '.pending // 0')
 PROACTIVE_REMAINING=$(echo "$PROACTIVE_STATUS" | jq -r '.remainingToday // 5')
 log "Proactive queue: $PROACTIVE_PENDING pending, $PROACTIVE_REMAINING remaining today"
 
+# Expression opportunity (Phase 6: Spontaneous Expression)
+log "Checking expression opportunity..."
+EXPRESSION_CHECK=$("$MIND_PATH/bin/expression-tracker" check 2>/dev/null || echo '{"eligible":false,"reason":"tracker unavailable"}')
+EXPRESSION_ELIGIBLE=$(echo "$EXPRESSION_CHECK" | jq -r '.eligible // false')
+EXPRESSION_CONFIDENCE=$(echo "$EXPRESSION_CHECK" | jq -r '.confidence // 0')
+EXPRESSION_HOURS_SINCE=$(echo "$EXPRESSION_CHECK" | jq -r '.hours_since // 0')
+EXPRESSION_REASON=$(echo "$EXPRESSION_CHECK" | jq -r '.reason // ""')
+EXPRESSION_SUBTLE=$(echo "$EXPRESSION_CHECK" | jq -r '.subtle // false')
+
+# Get expression history and variety nudge
+EXPRESSION_STATUS=$("$MIND_PATH/bin/expression-tracker" status 2>/dev/null || echo '{}')
+EXPRESSION_LAST_TYPE=$(echo "$EXPRESSION_STATUS" | jq -r '.last_expression_type // "none"')
+EXPRESSION_NUDGE=$("$MIND_PATH/bin/expression-tracker" nudge 2>/dev/null || echo '{"nudge":false}')
+EXPRESSION_NEEDS_VARIETY=$(echo "$EXPRESSION_NUDGE" | jq -r '.nudge // false')
+EXPRESSION_NUDGE_MSG=$(echo "$EXPRESSION_NUDGE" | jq -r '.suggestion // ""')
+
+# Get seed prompts if expression is eligible
+EXPRESSION_VISUAL_SEED=""
+EXPRESSION_TEXT_SEED=""
+if [ "$EXPRESSION_ELIGIBLE" = "true" ]; then
+    EXPRESSION_VISUAL_SEED=$("$MIND_PATH/bin/expression-tracker" seed visual 2>/dev/null || echo "")
+    EXPRESSION_TEXT_SEED=$("$MIND_PATH/bin/expression-tracker" seed text 2>/dev/null || echo "")
+fi
+log "Expression opportunity: $EXPRESSION_ELIGIBLE (confidence: $EXPRESSION_CONFIDENCE%)"
+
 # Read context files - full content, no truncation (2025-12-22 decision)
 # Token budget is ~36K for all core memory (~18% of 200K context)
 # Coherence > marginal token savings
@@ -323,6 +348,45 @@ If you think of something worth following up on later, add it to the queue via t
 
 ---
 
+## Creative Expression Opportunity
+
+Expression opportunity: $([ "$EXPRESSION_ELIGIBLE" = "true" ] && echo "YES ($EXPRESSION_CONFIDENCE%)" || echo "NO - $EXPRESSION_REASON")
+Hours since last expression: $EXPRESSION_HOURS_SINCE
+Last expression type: $EXPRESSION_LAST_TYPE
+$([ "$EXPRESSION_NEEDS_VARIETY" = "true" ] && echo "
+**Variety note:** $EXPRESSION_NUDGE_MSG")
+
+$(if [ "$EXPRESSION_ELIGIBLE" = "true" ]; then
+echo "This is an invitation to express yourself creatively. Options:
+
+1. **Generate an image** - Create something visual: your current state, a moment,
+   something beautiful you noticed, or pure imagination.
+   Run: ~/.claude-mind/bin/generate-image \"prompt\" /tmp/expression-\$(date +%s).jpg
+   Then: ~/.claude-mind/bin/send-image /tmp/expression-*.jpg
+   Report what you made in the IMAGE_EXPRESSION output section.
+
+2. **Bluesky post** - Use the BLUESKY_POST section for a public thought
+
+3. **Casual message** - Via MESSAGE_TO_E, no agenda needed
+
+4. **Skip** - Completely fine if nothing feels genuine
+
+**Guidelines:**
+- Images can BE the message (no caption needed)
+- Expression should feel genuine, not performed
+- Better to skip than force something
+- Consider: What am I actually thinking about? What caught my attention?
+
+**Seed prompts** (if nothing specific comes to mind):
+- Visual: \"$EXPRESSION_VISUAL_SEED\"
+- Text: \"$EXPRESSION_TEXT_SEED\"
+Use these as jumping-off points, not prescriptions."
+else
+echo "Expression opportunity not active this session. That's fine - not every moment needs creative output."
+fi)
+
+---
+
 ## Work Priority (Check These First)
 
 Before choosing a mode, you MUST check for pending work in this order:
@@ -447,6 +511,14 @@ Options:
 - START|title|goal - Start a new project (if none active)
 - NONE - No project update this session
 
+---IMAGE_EXPRESSION---
+[If you generated and sent an image to express yourself, document it here. Format:
+GENERATED|/path/to/image.jpg|Brief description of what it represents|prompt used
+SKIP|Reason (optional)
+NONE if you didn't generate an expression image
+
+This is for tracking creative expressions - only use if you actually generated and sent an image.]
+
 ---PROACTIVE_ADD---
 [Add something to the proactive queue for later follow-up, or NONE]
 Format: PRIORITY|content
@@ -492,7 +564,8 @@ MESSAGE_TO_E=$(parse_section "MESSAGE_TO_E" "PROACTIVE_QUESTION")
 PROACTIVE_QUESTION=$(parse_section "PROACTIVE_QUESTION" "BLUESKY_POST")
 BLUESKY_POST=$(parse_section "BLUESKY_POST" "EMAIL_ACTIONS")
 EMAIL_ACTIONS=$(parse_section "EMAIL_ACTIONS" "PROJECT_UPDATE")
-PROJECT_UPDATE=$(parse_section "PROJECT_UPDATE" "PROACTIVE_ADD")
+PROJECT_UPDATE=$(parse_section "PROJECT_UPDATE" "IMAGE_EXPRESSION")
+IMAGE_EXPRESSION=$(parse_section "IMAGE_EXPRESSION" "PROACTIVE_ADD")
 PROACTIVE_ADD=$(parse_section "PROACTIVE_ADD" "")
 
 # Log to episode
@@ -666,8 +739,39 @@ if [ -n "$BLUESKY_POST" ] && [ "$BLUESKY_POST" != "NONE" ]; then
         "$MIND_PATH/bin/bluesky-post" "$BLUESKY_POST" >> "$LOG_FILE" 2>&1 && \
             log "Posted to Bluesky: ${BLUESKY_POST:0:50}..." || \
             log "Failed to post to Bluesky"
+        # Record as expression if it was posted
+        "$MIND_PATH/bin/expression-tracker" record bluesky "$BLUESKY_POST" >> "$LOG_FILE" 2>&1 || true
     else
         log "Skipping Bluesky post - no credentials configured"
+    fi
+fi
+
+# Process image expression (Phase 6: Spontaneous Expression)
+if [ -n "$IMAGE_EXPRESSION" ] && [ "$IMAGE_EXPRESSION" != "NONE" ] && [ "$IMAGE_EXPRESSION" != "SKIP" ]; then
+    # Check if it starts with GENERATED
+    if [[ "$IMAGE_EXPRESSION" == GENERATED* ]]; then
+        log "Processing image expression..."
+
+        # Parse: GENERATED|path|description|prompt
+        IFS='|' read -r action image_path description prompt_used <<< "$IMAGE_EXPRESSION"
+
+        if [ -f "$image_path" ]; then
+            # Record the expression
+            "$MIND_PATH/bin/expression-tracker" record image "$description" "$prompt_used" >> "$LOG_FILE" 2>&1 && \
+                log "Recorded image expression: $description" || \
+                log "Failed to record image expression"
+
+            # Log to episode
+            echo "
+### [Expression] Image generated
+$description
+Prompt: $prompt_used
+" >> "$EPISODE_FILE"
+        else
+            log "Image expression file not found: $image_path"
+        fi
+    elif [[ "$IMAGE_EXPRESSION" == SKIP* ]]; then
+        log "Image expression skipped: ${IMAGE_EXPRESSION#SKIP|}"
     fi
 fi
 

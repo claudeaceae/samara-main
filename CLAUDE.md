@@ -15,7 +15,7 @@ Samara is a bootstrap specification for giving Claude a persistent body, memory,
 
 This is not a traditional software project. It's an experiment in AI autonomy.
 
-> **Recent enhancements (Phases 1-5):** Model fallback, semantic memory, proactive messaging, adaptive scheduling, meeting awareness. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) for user-facing summary.
+> **Recent enhancements (Phases 1-6):** Model fallback, semantic memory, proactive messaging, adaptive scheduling, meeting awareness, spontaneous expression. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) for user-facing summary.
 
 ---
 
@@ -146,6 +146,7 @@ The system has three distinct components that must stay synchronized:
 ├── goals.md                 # Where am I going
 ├── config.json              # Configuration
 ├── .claude/ → repo/.claude/ # Symlink for hooks, agents, skills
+├── instructions/            # Symlinked prompt guidance files
 ├── memory/
 │   ├── episodes/            # Daily logs
 │   ├── reflections/         # Dream outputs
@@ -168,7 +169,9 @@ The system has three distinct components that must stay synchronized:
 │   ├── ledgers/             # Phase 2: Session handoff documents
 │   ├── triggers/            # Phase 3: Context trigger config
 │   ├── iterations/          # Phase 3: Active iteration state
-│   └── proactive-queue/     # Phase 3: Outgoing message queue
+│   ├── proactive-queue/     # Phase 3: Outgoing message queue
+│   ├── expression-state.json    # Phase 6: Expression tracking
+│   └── expression-seeds.json    # Phase 6: Creative prompts
 ├── senses/                  # Phase 4: Incoming sense events
 └── logs/
 ```
@@ -181,6 +184,7 @@ The system has three distinct components that must stay synchronized:
 | `send-image` | Send image attachment |
 | `screenshot` | Take and send screenshot |
 | `bluesky-post` | Post to Bluesky |
+| `x-post` | Post to X/Twitter |
 
 ### Memory Scripts
 
@@ -190,6 +194,7 @@ The system has three distinct components that must stay synchronized:
 | `chroma-query` | Semantic search via Chroma embeddings |
 | `chroma-rebuild` | Full rebuild of Chroma index |
 | `find-related-context` | Cross-temporal context lookup (uses Chroma) |
+| `expression-tracker` | Creative expression state (status, check, record, history, nudge, seed) |
 
 ### Skills (Slash Commands)
 
@@ -457,6 +462,50 @@ launchctl load ~/Library/LaunchAgents/com.claude.meeting-check.plist
 - `ClaudeInvoker.swift` — `loadPendingDebriefContext()` for profile updates
 - `lib/chroma_helper.py` — `index_single_file()` for incremental indexing
 
+### Spontaneous Expression (Phase 6)
+
+Claude can autonomously generate and share creative expressions (images, Bluesky posts, casual messages) without being explicitly asked. This enriches continuous learning and builds creative voice.
+
+**How it works:**
+
+During wake cycles, the system checks if an expression opportunity is active:
+- Minimum 18 hours since last expression
+- Daily limit of 2 expressions
+- Respects quiet hours (10 PM - 8 AM)
+- Evening hours slightly favored for creative expression
+
+If eligible, Claude is offered the opportunity (not mandated) to express:
+1. **Generate an image** — Visual representation of thoughts, moods, or abstract concepts
+2. **Bluesky post** — Public text observation or question
+3. **Casual message** — Informal, agenda-free communication
+
+**Seed prompts:**
+
+Evocative prompts are provided when nothing specific comes to mind:
+- Visual: "the texture of waiting", "what curiosity looks like", "the space between messages"
+- Text: "Something I noticed today:", "A question I keep returning to:"
+
+**Variety nudging:**
+
+After 3+ expressions of the same type, Claude is gently encouraged to mix modalities.
+
+**Memory feedback:**
+
+Expressions are logged and reflected upon during dream cycles, creating a feedback loop that enriches learning about creative voice and interests.
+
+**State tracking:**
+
+Expression state stored at: `~/.claude-mind/state/expression-state.json`
+Seed prompts at: `~/.claude-mind/state/expression-seeds.json`
+
+**Script:** `expression-tracker` — CLI for status, check, record, history, nudge, seed
+
+**Implementation:**
+- `scripts/expression-tracker` — State management and opportunity calculation
+- `scripts/wake` — Expression opportunity prompt and IMAGE_EXPRESSION output section
+- `scripts/dream` — Expression history loading and EXPRESSION_REFLECTION output
+- `instructions/imessage.md` — Spontaneous expression guidance
+
 ### Iteration Mode (Phase 3)
 
 For complex tasks requiring multiple attempts, use `/iterate`:
@@ -486,6 +535,7 @@ Python services that extend the organism's capabilities:
 | `mcp-memory-bridge` | 8765 | Shared memory layer for Claude Desktop/Web |
 | `bluesky-watcher` | N/A | Polls Bluesky for notifications (launchd interval) |
 | `github-watcher` | N/A | Polls GitHub for notifications (launchd interval) |
+| `x-watcher` | N/A | Polls X/Twitter for mentions (launchd interval) |
 
 #### Webhook Receiver (Phase 4)
 
@@ -815,9 +865,11 @@ This means:
 | Scripts (`bin/`) | ✅ Yes | Canonical in repo, changes propagate |
 | Skills (`.claude/skills/`) | ✅ Yes | Canonical in repo |
 | Hooks (`.claude/hooks/`) | ✅ Yes | Via `.claude/` symlink |
+| Instructions (`instructions/`) | ✅ Yes | Canonical in repo, prompt guidance |
 | Memory files | ❌ No | Instance-specific, accumulates |
 | Config (`config.json`) | ❌ No | Instance-specific |
 | State files | ❌ No | Runtime state |
+| Expression seeds | ❌ No | Can be customized per instance |
 | Samara.app | N/A | Built binary, use `update-samara` |
 
 ### Adding New Scripts

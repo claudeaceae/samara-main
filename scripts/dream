@@ -99,6 +99,31 @@ OBSERVATIONS=$(cat "$MIND_PATH/memory/observations.md" 2>/dev/null || echo "No o
 QUESTIONS=$(cat "$MIND_PATH/memory/questions.md" 2>/dev/null || echo "No questions yet.")
 ABOUT_E=$(cat "$MIND_PATH/memory/about-e.md" 2>/dev/null || echo "No info about E yet.")
 
+# Get recent creative expressions (Phase 6: Spontaneous Expression)
+log "Getting recent expressions..."
+RECENT_EXPRESSIONS=""
+if [ -f "$MIND_PATH/bin/expression-tracker" ]; then
+    EXPRESSION_HISTORY=$("$MIND_PATH/bin/expression-tracker" history 2>/dev/null || echo "[]")
+    if [ "$EXPRESSION_HISTORY" != "[]" ]; then
+        RECENT_EXPRESSIONS="## Recent Creative Expressions
+$(echo "$EXPRESSION_HISTORY" | python3 -c "
+import sys, json
+try:
+    expressions = json.load(sys.stdin)
+    for e in expressions[:10]:
+        ts = e.get('timestamp', '')[:10]
+        etype = e.get('type', 'unknown')
+        desc = e.get('description', '')[:100]
+        prompt = e.get('prompt_used', '')
+        print(f'- [{ts}] ({etype}) {desc}')
+        if prompt:
+            print(f'  Prompt: {prompt}')
+except: pass
+" 2>/dev/null)"
+        log "Loaded expression history"
+    fi
+fi
+
 # Run pattern analysis for context
 log "Running pattern analysis..."
 PATTERN_SUMMARY=""
@@ -262,6 +287,8 @@ $LOCATION_PATTERNS
 
 $QUESTIONS_ASKED
 
+$RECENT_EXPRESSIONS
+
 ---
 
 ## Your Task
@@ -273,6 +300,8 @@ Reflect on the day. This isn't summarization - it's consolidation. What actually
 **Location awareness:** If there's travel data, consider what the movement patterns reveal. Where did É go? Were there patterns in the routes or timing? Did they discover new places or stick to familiar ones?
 
 **Proactive questions:** If you asked questions today, what did you learn from the responses (if any)? What do the answers reveal about É's motivations, values, patterns, preferences, stressors, or energizers? Update the Psychological Profile section of about-e.md with any new insights.
+
+**Creative expressions:** If you generated images or made Bluesky posts recently, what drew you to those expressions? What patterns do you notice in what you chose to create or share? Were they meaningful or just experiments?
 
 If it was a quiet day with no activity, reflect on that too. Sometimes absence is meaningful.
 
@@ -291,6 +320,9 @@ After your reflection, output any updates to your memory files in this exact for
 
 ---QUESTIONS_APPEND---
 [Any new questions to append to questions.md, or NONE if nothing new]
+
+---EXPRESSION_REFLECTION---
+[Optional: Brief reflection on recent creative expressions - what drew you to them, what patterns you notice, what felt genuine. NONE if no expressions or nothing to reflect on]
 
 ---ABOUT_E_APPEND---
 [Anything new learned about É to append to about-e.md, or NONE if nothing new]"
@@ -334,12 +366,22 @@ $OBSERVATIONS_NEW" >> "$MIND_PATH/memory/observations.md"
 fi
 
 # Extract and append questions
-QUESTIONS_NEW=$(echo "$RESPONSE" | sed -n '/---QUESTIONS_APPEND---/,/---ABOUT_E_APPEND---/p' | sed '1d;$d')
+QUESTIONS_NEW=$(echo "$RESPONSE" | sed -n '/---QUESTIONS_APPEND---/,/---EXPRESSION_REFLECTION---/p' | sed '1d;$d')
 if [ -n "$QUESTIONS_NEW" ] && [ "$QUESTIONS_NEW" != "NONE" ]; then
     echo "
 ## $PROCESS_DATE
 $QUESTIONS_NEW" >> "$MIND_PATH/memory/questions.md"
     log "Appended to questions.md"
+fi
+
+# Extract expression reflection (Phase 6: Spontaneous Expression)
+EXPRESSION_REFLECTION=$(echo "$RESPONSE" | sed -n '/---EXPRESSION_REFLECTION---/,/---ABOUT_E_APPEND---/p' | sed '1d;$d')
+if [ -n "$EXPRESSION_REFLECTION" ] && [ "$EXPRESSION_REFLECTION" != "NONE" ]; then
+    # Append to observations as a special category
+    echo "
+## $PROCESS_DATE (Expression Reflection)
+$EXPRESSION_REFLECTION" >> "$MIND_PATH/memory/observations.md"
+    log "Appended expression reflection to observations.md"
 fi
 
 # Extract and append about-e

@@ -1,0 +1,73 @@
+#!/bin/bash
+# x-post - Post to X/Twitter
+# Usage: x-post "text to post"
+# Or: echo "text" | x-post
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CREDS_FILE="$MIND_PATH/credentials/x-cookies.json"
+LOG_FILE="$MIND_PATH/logs/x.log"
+
+# Ensure log directory exists
+mkdir -p "$(dirname "$LOG_FILE")"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Check credentials exist
+if [ ! -f "$CREDS_FILE" ]; then
+    echo "Error: Credentials not found at $CREDS_FILE"
+    echo "Create a JSON file with: {\"auth_token\": \"...\", \"ct0\": \"...\"}"
+    echo ""
+    echo "To get these values:"
+    echo "1. Log into X in your browser"
+    echo "2. Open Developer Tools (F12)"
+    echo "3. Go to Application > Cookies > twitter.com"
+    echo "4. Copy auth_token and ct0 values"
+    exit 1
+fi
+
+# Get text from argument or stdin
+TEXT="${1:-$(cat)}"
+
+if [ -z "$TEXT" ]; then
+    echo "Error: No text provided"
+    echo "Usage: x-post \"text to post\""
+    exit 1
+fi
+
+# Load credentials
+AUTH_TOKEN=$(jq -r '.auth_token' "$CREDS_FILE")
+CT0=$(jq -r '.ct0' "$CREDS_FILE")
+
+if [ -z "$AUTH_TOKEN" ] || [ "$AUTH_TOKEN" = "null" ]; then
+    echo "Error: auth_token not found in credentials"
+    exit 1
+fi
+
+if [ -z "$CT0" ] || [ "$CT0" = "null" ]; then
+    echo "Error: ct0 not found in credentials"
+    exit 1
+fi
+
+# Export for bird CLI
+export AUTH_TOKEN CT0
+
+# Truncate to 280 chars if needed (X limit)
+if [ ${#TEXT} -gt 280 ]; then
+    TEXT="${TEXT:0:277}..."
+    log "Warning: Text truncated to 280 characters"
+fi
+
+# Post using bird CLI
+RESULT=$(bird tweet "$TEXT" 2>&1) || {
+    log "Error posting to X: $RESULT"
+    echo "Error posting: $RESULT"
+    exit 1
+}
+
+log "Posted to X: ${TEXT:0:50}..."
+echo "$RESULT"
