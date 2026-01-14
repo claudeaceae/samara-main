@@ -62,7 +62,7 @@ If there's nothing to do, it can choose rest — consciously, not by default.
 
 ---
 
-## Recent Enhancements (Phases 1-4)
+## Recent Enhancements (Phases 1-7)
 
 The base system has been extended with resilience, memory, and autonomy features:
 
@@ -72,6 +72,9 @@ The base system has been extended with resilience, memory, and autonomy features
 | **2** | Memory | Dual semantic search (SQLite FTS5 + Chroma embeddings), context warnings, `/recall` skill |
 | **3** | Autonomy | Proactive messaging with triggers, `/iterate` skill for persistent tasks, verification loops |
 | **4** | Scheduling | Adaptive wake times, light wake cycles, webhook receiver, ritual context |
+| **5** | Meeting Awareness | Pre-meeting prep with attendee context, post-meeting debrief capture |
+| **6** | Expression | Spontaneous creative output (images, posts, messages), expression tracking |
+| **7** | Wallet Awareness | Crypto wallet monitoring (SOL/ETH/BTC), balance tracking, transaction detection |
 
 Most features require explicit configuration. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) for user-facing details and [`CLAUDE.md`](CLAUDE.md) for technical reference.
 
@@ -102,6 +105,7 @@ Most features require explicit configuration. See [`docs/whats-changed-phases-1-
 │       ├── webhook-receiver (GitHub, IFTTT, APIs)                 │
 │       ├── bluesky-watcher (social notifications)                 │
 │       ├── github-watcher (repo notifications)                    │
+│       ├── wallet-watcher (crypto balances, transactions)         │
 │       └── [extensible...]                                        │
 │                                                                  │
 │   ~/.claude-mind/ (Memory & Soul)                                │

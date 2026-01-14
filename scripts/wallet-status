@@ -1,0 +1,85 @@
+#!/bin/bash
+# wallet-status - Display current crypto wallet balances
+# Usage: wallet-status [--json]
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+STATE_FILE="$MIND_PATH/state/wallet-state.json"
+CREDS_FILE="$MIND_PATH/credentials/wallet-apis.json"
+
+# Check for JSON output flag
+if [ "$1" = "--json" ]; then
+    if [ -f "$STATE_FILE" ]; then
+        cat "$STATE_FILE"
+    else
+        echo '{"error": "State file not found"}'
+        exit 1
+    fi
+    exit 0
+fi
+
+# Human-readable output
+if [ ! -f "$STATE_FILE" ]; then
+    echo "Wallet state not found at $STATE_FILE"
+    echo "Run the wallet-watcher service first or wait for the next 15-minute cycle."
+    exit 1
+fi
+
+python3 << 'EOF'
+import json
+import os
+from datetime import datetime
+
+state_file = os.environ.get('STATE_FILE', os.path.expanduser('~/.claude-mind/state/wallet-state.json'))
+creds_file = os.environ.get('CREDS_FILE', os.path.expanduser('~/.claude-mind/credentials/wallet-apis.json'))
+
+with open(state_file) as f:
+    state = json.load(f)
+
+# Load addresses from creds
+addresses = {}
+try:
+    with open(creds_file) as f:
+        creds = json.load(f)
+        for chain in ['solana', 'ethereum', 'bitcoin']:
+            addresses[chain] = creds.get(chain, {}).get('address', '')
+except:
+    pass
+
+# Extract balances
+sol = state.get('solana', {}).get('balance', 0)
+eth = state.get('ethereum', {}).get('balance', 0)
+btc = state.get('bitcoin', {}).get('balance', 0)
+last_check = state.get('last_check', 'never')
+
+# Approximate USD prices
+PRICES = {'sol': 150, 'eth': 3100, 'btc': 92000}
+sol_usd = sol * PRICES['sol']
+eth_usd = eth * PRICES['eth']
+btc_usd = btc * PRICES['btc']
+total = sol_usd + eth_usd + btc_usd
+
+print("╔═══════════════════════════════════════════════════════════════╗")
+print("║                    WALLET STATUS                              ║")
+print("╠═══════════════════════════════════════════════════════════════╣")
+print(f"║ Last check: {last_check[:19] if last_check != 'never' else 'never':>48} ║")
+print("╠═══════════════════════════════════════════════════════════════╣")
+print("║ Chain      │ Balance                  │ ~USD                  ║")
+print("╠════════════╪══════════════════════════╪═══════════════════════╣")
+print(f"║ Solana     │ {sol:>18.4f} SOL │ ${sol_usd:>18,.2f} ║")
+print(f"║ Ethereum   │ {eth:>18.6f} ETH │ ${eth_usd:>18,.2f} ║")
+print(f"║ Bitcoin    │ {btc:>18.8f} BTC │ ${btc_usd:>18,.2f} ║")
+print("╠════════════╧══════════════════════════╧═══════════════════════╣")
+print(f"║ TOTAL ESTIMATED VALUE:                      ${total:>18,.2f} ║")
+print("╚═══════════════════════════════════════════════════════════════╝")
+
+print()
+print("Addresses:")
+if addresses.get('solana'):
+    print(f"  SOL: {addresses['solana']}")
+if addresses.get('ethereum'):
+    print(f"  ETH: {addresses['ethereum']}")
+if addresses.get('bitcoin'):
+    print(f"  BTC: {addresses['bitcoin']}")
+EOF

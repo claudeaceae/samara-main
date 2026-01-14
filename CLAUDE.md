@@ -15,7 +15,7 @@ Samara is a bootstrap specification for giving Claude a persistent body, memory,
 
 This is not a traditional software project. It's an experiment in AI autonomy.
 
-> **Recent enhancements (Phases 1-6):** Model fallback, semantic memory, proactive messaging, adaptive scheduling, meeting awareness, spontaneous expression. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) for user-facing summary.
+> **Recent enhancements (Phases 1-7):** Model fallback, semantic memory, proactive messaging, adaptive scheduling, meeting awareness, spontaneous expression, wallet awareness. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) for user-facing summary.
 
 ---
 
@@ -195,6 +195,7 @@ The system has three distinct components that must stay synchronized:
 | `chroma-rebuild` | Full rebuild of Chroma index |
 | `find-related-context` | Cross-temporal context lookup (uses Chroma) |
 | `expression-tracker` | Creative expression state (status, check, record, history, nudge, seed) |
+| `wallet-status` | Display crypto wallet balances and addresses |
 
 ### Skills (Slash Commands)
 
@@ -223,6 +224,7 @@ Interactive workflows available via Claude Code. Invoke with `/skillname` or tri
 | `/debug-session` | Debug Claude Code session issues |
 | `/diagnose-leaks` | Diagnose thinking/session ID leaks |
 | `/webhook` | Manage webhook sources - add, test, view events |
+| `/wallet` | Check crypto wallet balances, addresses, and history |
 
 Skills are defined in `.claude/skills/` and symlinked to `~/.claude/skills/`.
 
@@ -536,6 +538,7 @@ Python services that extend the organism's capabilities:
 | `bluesky-watcher` | N/A | Polls Bluesky for notifications (launchd interval) |
 | `github-watcher` | N/A | Polls GitHub for notifications (launchd interval) |
 | `x-watcher` | N/A | Polls X/Twitter for mentions (launchd interval) |
+| `wallet-watcher` | N/A | Monitors crypto wallet balances (launchd interval) |
 
 #### Webhook Receiver (Phase 4)
 
@@ -574,6 +577,84 @@ Allows Claude instances across different interfaces (Desktop, Web, Code) to shar
 - `get_recent_context` — Get recent episodes/learnings
 
 See `services/mcp-memory-bridge/README.md` for setup.
+
+#### X/Twitter Integration
+
+Two complementary services handle X presence:
+
+| Service | Interval | Purpose |
+|---------|----------|---------|
+| `x-watcher` | 15 min | Polls for mentions via bird CLI, writes sense events |
+| `x-check-playwright` | 15 min | Uses browser automation to check and respond |
+
+**Why two services?**
+- `bird` CLI (github.com/steipete/bird) gets blocked by X's error 226 (bot detection)
+- Playwright browser automation bypasses this by appearing as a real browser session
+
+**Scripts:**
+- `x-check` — CLI-based mention checking (may be blocked)
+- `x-check-playwright` — Browser-based checking via Playwright MCP
+- `x-post` — Post to X (uses bird CLI)
+
+**State files:**
+- `~/.claude-mind/state/x-watcher-state.json` — Tracks seen tweet IDs
+- `~/.claude-mind/state/x-playwright-state.json` — Playwright check state
+- `~/.claude-mind/credentials/x-cookies.json` — auth_token and ct0 cookies
+
+**SenseRouter handler:** `handleXEvent()` in `SenseRouter.swift` processes X sense events with full capabilities (memory search, image generation, cross-posting).
+
+**launchd services:**
+```bash
+# Check status
+launchctl list | grep -E "(x-watcher|x-check)"
+
+# Load services
+launchctl load ~/Library/LaunchAgents/com.claude.x-watcher.plist
+launchctl load ~/Library/LaunchAgents/com.claude.x-check-playwright.plist
+```
+
+#### Wallet Awareness (Phase 7)
+
+Monitors Solana, Ethereum, and Bitcoin wallet balances and transactions.
+
+**Wallets:**
+
+| Chain | Address |
+|-------|---------|
+| Solana | `8oyD1P9Kdu4ZkC78q39uvEifAqQv26sULnjoKsHzJe6C` |
+| Ethereum | `0xE74E61C5e9beE3f989824A20e138f9aAE16f41Ad` |
+| Bitcoin | `bc1qu9m98ae7nf5z599ah8hev8xyuf7alr0ntskhwn` |
+
+**How it works:**
+- Polls public RPC endpoints every 15 minutes (no API keys required)
+- Compares current balance to previous state
+- Writes SenseEvent when significant changes detected
+- Priority: `immediate` for deposits >$100 or any withdrawal, `normal` for smaller deposits
+
+**Scripts:**
+- `wallet-status` — Display current balances and addresses
+
+**Skill:**
+- `/wallet` — Check balances, addresses, or recent history
+
+**Files:**
+- `~/.claude-mind/credentials/wallet-apis.json` — RPC endpoints and addresses
+- `~/.claude-mind/state/wallet-state.json` — Tracked balances and last seen transactions
+- `services/wallet-watcher/server.py` — Polling service
+
+**launchd service:**
+```bash
+# Check status
+launchctl list | grep wallet
+
+# Load service
+launchctl load ~/Library/LaunchAgents/com.claude.wallet-watcher.plist
+```
+
+**Current limitations:**
+- Read-only (no transaction signing yet)
+- USD estimates use hardcoded prices, not live market data
+- No token tracking (native assets only)
 
 ---
 

@@ -45,11 +45,19 @@ final class MemoryContext {
         }
     }
 
+    // MARK: - Size Limits
+
+    /// Maximum lines for large append-only files (learnings, observations, decisions)
+    private let maxLinesForLargeFiles = 200
+
+    /// Maximum lines for episode files
+    private let maxLinesForEpisode = 300
+
     /// Builds a context string from key memory files
     ///
     /// Design principle (2025-12-22): Load full files, no truncation.
-    /// Token budget is ~36K for all core memory (~18% of 200K context).
-    /// Coherence > marginal token savings. Future scaling via retrieval tools.
+    /// UPDATE (2026-01-14): Added size limits as safety net - files can grow very large
+    /// and exceed context limits. Now truncates to recent entries for append-only files.
     ///
     /// - Parameter isCollaboratorChat: If false, excludes collaborator's personal profile
     ///   for privacy protection (used in group chats or non-collaborator 1:1s)
@@ -61,9 +69,10 @@ final class MemoryContext {
             sections.append("### Identity\n\(identity)")
         }
 
-        // Decisions - full, critical for behavioral consistency across contexts
+        // Decisions - truncated to recent (append-only, grows large)
         if let decisions = readFile("memory/decisions.md") {
-            sections.append("### Architectural Decisions\n\(decisions)")
+            let truncated = lastLines(decisions, maxLines: maxLinesForLargeFiles)
+            sections.append("### Architectural Decisions\n\(truncated)")
         }
 
         // About collaborator - ONLY include for collaborator chats (privacy protection)
@@ -78,29 +87,32 @@ final class MemoryContext {
             }
         }
 
-        // Goals - full
+        // Goals - full (usually small)
         if let goals = readFile("goals.md") {
             sections.append("### Goals\n\(goals)")
         }
 
-        // Capabilities - full
+        // Capabilities - full (reference doc)
         if let capabilities = readFile("capabilities/inventory.md") {
             sections.append("### Capabilities\n\(capabilities)")
         }
 
-        // Learnings - full (append-only, recent at bottom)
+        // Learnings - truncated to recent (append-only, grows large)
         if let learnings = readFile("memory/learnings.md") {
-            sections.append("### Learnings\n\(learnings)")
+            let truncated = lastLines(learnings, maxLines: maxLinesForLargeFiles)
+            sections.append("### Learnings\n\(truncated)")
         }
 
-        // Observations - full (append-only, recent at bottom)
+        // Observations - truncated to recent (append-only, grows large)
         if let observations = readFile("memory/observations.md") {
-            sections.append("### Self-Observations\n\(observations)")
+            let truncated = lastLines(observations, maxLines: maxLinesForLargeFiles)
+            sections.append("### Self-Observations\n\(truncated)")
         }
 
-        // Questions - full (append-only, recent at bottom)
+        // Questions - truncated to recent (append-only)
         if let questions = readFile("memory/questions.md") {
-            sections.append("### Open Questions\n\(questions)")
+            let truncated = lastLines(questions, maxLines: 100)
+            sections.append("### Open Questions\n\(truncated)")
         }
 
         // Current working memory
@@ -108,15 +120,63 @@ final class MemoryContext {
             sections.append("### Current Session\n\(current)")
         }
 
-        // Today's episode - full, resets daily
+        // Today's episode - truncated to recent entries
         let today = todayEpisodePath()
         if let episode = readFile(today) {
-            sections.append("### Today's Journal\n\(episode)")
+            let truncated = lastLines(episode, maxLines: maxLinesForEpisode)
+            sections.append("### Today's Journal\n\(truncated)")
         }
 
         // Location awareness - current state and patterns
         if let locationSummary = buildLocationSummary() {
             sections.append("### Location Awareness\n\(locationSummary)")
+        }
+
+        return sections.joined(separator: "\n\n")
+    }
+
+    /// Builds a LIGHTWEIGHT context for sense events and social media handlers
+    ///
+    /// This is much smaller than buildContext() - designed for X/Bluesky/GitHub events
+    /// where we don't need full memory, just identity + semantic search for relevance.
+    ///
+    /// - Parameters:
+    ///   - query: Optional search query to find related memories (e.g., tweet content)
+    ///   - includeCapabilities: Whether to include the capabilities inventory
+    /// - Returns: Minimal context string suitable for social media responses
+    func buildLightContext(query: String? = nil, includeCapabilities: Bool = false) -> String {
+        var sections: [String] = []
+
+        // Identity - always essential
+        if let identity = readFile("identity.md") {
+            sections.append("### Identity\n\(identity)")
+        }
+
+        // Goals - brief, helps with voice/priorities
+        if let goals = readFile("goals.md") {
+            // Just first 50 lines for quick context
+            let abbreviated = abbreviate(goals, maxLines: 50)
+            sections.append("### Goals\n\(abbreviated)")
+        }
+
+        // Capabilities - optional, useful for knowing what actions are possible
+        if includeCapabilities, let capabilities = readFile("capabilities/inventory.md") {
+            // Abbreviated - just the key sections
+            let abbreviated = abbreviate(capabilities, maxLines: 100)
+            sections.append("### Capabilities\n\(abbreviated)")
+        }
+
+        // If we have a query, add relevant memories via semantic search
+        if let query = query, !query.isEmpty {
+            // FTS5 search
+            if let relatedMemories = buildRelatedMemoriesSection(for: query) {
+                sections.append("### Related Memories\n\(relatedMemories)")
+            }
+
+            // Chroma semantic search (if configured)
+            if let semanticContext = findRelatedPastContext(for: query) {
+                sections.append(semanticContext)
+            }
         }
 
         return sections.joined(separator: "\n\n")

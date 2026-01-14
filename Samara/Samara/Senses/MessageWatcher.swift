@@ -29,6 +29,18 @@ final class MessageWatcher {
     private var lastAlertTime: Date?
     private let alertCooldown: TimeInterval = 300  // 5 minutes between alerts
 
+    /// Thread management (matching MailWatcher pattern)
+    private var watchThread: Thread?
+    private var shouldStop = false
+
+    /// State persistence for ROWID recovery across restarts
+    private let stateFilePath = MindPaths.mindPath("state/message-watcher-state.json")
+
+    private struct WatcherState: Codable {
+        var lastRowId: Int64
+        var lastSaveTime: Date
+    }
+
     init(
         store: MessageStore,
         onNewMessage: @escaping (Message) -> Void,
@@ -48,13 +60,56 @@ final class MessageWatcher {
         }
     }
 
+    // MARK: - State Persistence
+
+    /// Save current ROWID to disk for recovery after restart
+    private func saveState() {
+        let state = WatcherState(lastRowId: lastRowId, lastSaveTime: Date())
+        do {
+            let data = try JSONEncoder().encode(state)
+            try data.write(to: URL(fileURLWithPath: stateFilePath), options: .atomic)
+        } catch {
+            log("Failed to save watcher state: \(error)", level: .warn, component: "MessageWatcher")
+        }
+    }
+
+    /// Load persisted ROWID from disk
+    private func loadState() -> Int64? {
+        guard FileManager.default.fileExists(atPath: stateFilePath) else { return nil }
+        do {
+            let data = try Data(contentsOf: URL(fileURLWithPath: stateFilePath))
+            let state = try JSONDecoder().decode(WatcherState.self, from: data)
+            return state.lastRowId
+        } catch {
+            log("Failed to load watcher state, starting fresh: \(error)", level: .warn, component: "MessageWatcher")
+            return nil
+        }
+    }
+
+    // MARK: - Lifecycle
+
     /// Starts watching for new messages
     func start() throws {
         if let initialRowId = initialRowIdOverride {
             lastRowId = initialRowId
             log("Starting from overridden ROWID: \(lastRowId)", level: .info, component: "MessageWatcher")
+        } else if let savedRowId = loadState() {
+            // Resume from saved state (e.g., after restart)
+            lastRowId = savedRowId
+            // Check how many messages we may have missed
+            let backoff = Backoff.forDatabase()
+            if let currentMax = try? backoff.execute(operation: { try store.getLatestRowId() }, onRetry: { _, _, _ in }) {
+                let missed = currentMax - savedRowId
+                if missed > 0 {
+                    log("Resuming from saved ROWID \(savedRowId) - \(missed) message(s) pending", level: .info, component: "MessageWatcher")
+                } else {
+                    log("Resuming from saved ROWID: \(savedRowId)", level: .info, component: "MessageWatcher")
+                }
+            } else {
+                log("Resuming from saved ROWID: \(savedRowId)", level: .info, component: "MessageWatcher")
+            }
         } else {
-            // Get the starting point (latest message ID) with retry
+            // Fresh start - get latest ROWID
             let backoff = Backoff.forDatabase()
             do {
                 lastRowId = try backoff.execute(
@@ -67,7 +122,7 @@ final class MessageWatcher {
                 log("Failed to get latest ROWID after retries: \(error)", level: .error, component: "MessageWatcher")
                 throw error
             }
-            log("Starting from ROWID: \(lastRowId)", level: .info, component: "MessageWatcher")
+            log("Fresh start from ROWID: \(lastRowId)", level: .info, component: "MessageWatcher")
         }
 
         // Set up file system watching
@@ -105,18 +160,24 @@ final class MessageWatcher {
         checkForNewMessages()
         log("Initial check complete", level: .info, component: "MessageWatcher")
 
-        // Start a background thread for polling
+        // Start a background thread for polling (matching MailWatcher pattern)
         if enablePolling {
-            let watcher = self
+            shouldStop = false
             let interval = self.pollInterval
-            let thread = Thread {
-                while true {
+            let thread = Thread { [weak self] in
+                log("Poll thread running", level: .info, component: "MessageWatcher")
+                while let self = self, !self.shouldStop {
                     Thread.sleep(forTimeInterval: interval)
-                    watcher.checkForNewMessages()
+                    if self.shouldStop { break }
+                    autoreleasepool {
+                        self.checkForNewMessages()
+                    }
                 }
+                log("Poll thread stopped", level: .info, component: "MessageWatcher")
             }
             thread.qualityOfService = .userInitiated
             thread.start()
+            watchThread = thread
             log("Poll thread started", level: .info, component: "MessageWatcher")
         } else {
             log("Polling disabled", level: .debug, component: "MessageWatcher")
@@ -125,10 +186,22 @@ final class MessageWatcher {
 
     /// Stops watching
     func stop() {
+        // Signal poll thread to stop
+        shouldStop = true
+
+        // Cancel file system watcher
         source?.cancel()
         source = nil
-        pollTimer?.cancel()
-        pollTimer = nil
+
+        // Cancel poll thread
+        watchThread?.cancel()
+        watchThread = nil
+
+        // Close file descriptor if still open
+        if fileDescriptor >= 0 {
+            close(fileDescriptor)
+            fileDescriptor = -1
+        }
     }
 
     /// Manual trigger for message checks (used in tests)
@@ -167,6 +240,8 @@ final class MessageWatcher {
                     log("New message from \(message.handleId): \(message.text.prefix(50))...", level: .info, component: "MessageWatcher")
                     lastRowId = message.rowId
                     checkLock.unlock()
+                    // Persist ROWID to disk for recovery after restart
+                    saveState()
                     onNewMessage(message)
                     checkLock.lock()
                 }
