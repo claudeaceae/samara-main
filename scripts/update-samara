@@ -35,6 +35,12 @@ cat > "$EXPORT_OPTIONS" << 'EOF'
 </plist>
 EOF
 
+# Unload launchd agent first to prevent KeepAlive from restarting Samara
+# before the new binary is installed
+echo "⏹️  Unloading launchd agent..."
+launchctl unload ~/Library/LaunchAgents/co.organelle.Samara.plist 2>/dev/null || true
+sleep 1
+
 # Stop running Samara with graceful shutdown attempt first
 echo "⏹️  Stopping existing Samara..."
 # Try graceful termination first (SIGTERM)
@@ -99,14 +105,19 @@ echo "📲 Installing to /Applications..."
 rm -rf /Applications/Samara.app
 cp -R "Samara.app" /Applications/
 
-# Launch (with duplicate prevention)
-echo "🚀 Launching Samara..."
+# Reload launchd agent (this will start the new binary via KeepAlive)
+echo "🔄 Reloading launchd agent..."
+launchctl load ~/Library/LaunchAgents/co.organelle.Samara.plist 2>/dev/null || true
+sleep 2
+
+# Verify it started
 if pgrep -f "Samara.app" > /dev/null 2>&1; then
-    echo "⚠️  Samara already running, skipping launch"
+    echo "🚀 Samara started successfully via launchd"
 else
+    # Fallback to direct launch if launchd didn't start it
+    echo "⚠️  launchd didn't start Samara, trying direct launch..."
     open /Applications/Samara.app
     sleep 2
-    # Verify it started
     if pgrep -f "Samara.app" > /dev/null 2>&1; then
         echo "   Samara started successfully"
     else

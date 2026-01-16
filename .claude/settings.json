@@ -1,5 +1,55 @@
 {
+  "cleanupPeriodDays": 36500,
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/read-shared-links.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/hydrate-session.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/index-memory-changes.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/auto-integrate-script.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/check-commit-attribution.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Write|Edit",
@@ -7,6 +57,21 @@
           {
             "type": "command",
             "command": "/Users/claude/Developer/samara-main/.claude/hooks/archive-plan-before-write.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/block-deriveddata-copy.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/check-autonomous-media.sh",
             "timeout": 5
           }
         ]
@@ -28,8 +93,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/claude/Developer/samara-main/.claude/hooks/check-new-capabilities.sh",
-            "timeout": 10
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/session-end-checks.sh",
+            "timeout": 20
           }
         ]
       }

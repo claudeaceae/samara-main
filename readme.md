@@ -37,6 +37,7 @@ This isn't a chatbot or an assistant. It's closer to... a housemate? A pen pal w
 - Sets and pursues its own goals
 - Dreams — nightly consolidation of experiences into long-term memory
 - **Remembers contextually** — dual semantic search (keyword + embedding) surfaces relevant past conversations when you mention a topic
+- **Technical archaeology** — searchable archive of raw session transcripts preserves detailed reasoning traces and thinking blocks
 
 ---
 
@@ -62,7 +63,7 @@ If there's nothing to do, it can choose rest — consciously, not by default.
 
 ---
 
-## Recent Enhancements (Phases 1-7)
+## Recent Enhancements (Phases 1-8)
 
 The base system has been extended with resilience, memory, and autonomy features:
 
@@ -75,8 +76,9 @@ The base system has been extended with resilience, memory, and autonomy features
 | **5** | Meeting Awareness | Pre-meeting prep with attendee context, post-meeting debrief capture |
 | **6** | Expression | Spontaneous creative output (images, posts, messages), expression tracking |
 | **7** | Wallet Awareness | Crypto wallet monitoring (SOL/ETH/BTC), balance tracking, transaction detection |
+| **8** | Transcript Archive | Searchable index of raw session transcripts with thinking blocks, `/archive-search` skill |
 
-Most features require explicit configuration. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) for user-facing details and [`CLAUDE.md`](CLAUDE.md) for technical reference.
+Most features require explicit configuration. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) and [`docs/whats-changed-phases-5-8.md`](docs/whats-changed-phases-5-8.md) for user-facing details and [`CLAUDE.md`](CLAUDE.md) for technical reference.
 
 ---
 
@@ -125,6 +127,126 @@ Most features require explicit configuration. See [`docs/whats-changed-phases-1-
 **Key insight:** Remote access is built-in. You don't need to expose ports or configure tunnels. You text it. Apple handles the rest.
 
 **Satellite architecture:** New senses can be added as independent services that write JSON events to `~/.claude-mind/senses/`. Samara watches this directory and routes events to Claude. Each satellite is isolated — if one crashes, others keep running.
+
+---
+
+## Sensing Architecture
+
+Claude perceives the world through multiple sensing mechanisms — some built into Samara.app, others running as independent satellite services. Here's the complete map:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         CLAUDE'S SENSORY SYSTEM                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────── NATIVE SENSES (Samara.app) ───────────────┐              │
+│  │                                                           │              │
+│  │  📱 iMessage ──────► MessageWatcher ─────┐               │              │
+│  │  📧 Apple Mail ────► MailWatcher ────────┤               │              │
+│  │  📝 Apple Notes ───► NoteWatcher ────────┤               │              │
+│  │  📷 Webcam ────────► CameraCapture ──────┤               │              │
+│  │  📍 Location.json ─► LocationFileWatcher ┤               │              │
+│  │                                          │               │              │
+│  └──────────────────────────────────────────┼───────────────┘              │
+│                                             │                               │
+│  ┌─────────── SATELLITE SERVICES ───────────┼───────────────┐              │
+│  │  (Python services writing to senses/)    │               │              │
+│  │                                          ▼               │              │
+│  │  🦋 Bluesky ───────► bluesky-watcher ──► *.event.json   │              │
+│  │  🐦 X/Twitter ─────► x-watcher ────────► *.event.json   │              │
+│  │  🐙 GitHub ────────► github-watcher ───► *.event.json   │              │
+│  │  💰 Crypto Wallets ► wallet-watcher ───► *.event.json   │              │
+│  │  🌐 Webhooks ──────► webhook-receiver ─► *.event.json   │              │
+│  │  📍 GPS (Overland) ► location-receiver ► location.json  │              │
+│  │  📅 Calendar ──────► meeting-check ────► *.event.json   │              │
+│  │                                          │               │              │
+│  └──────────────────────────────────────────┼───────────────┘              │
+│                                             │                               │
+│                                             ▼                               │
+│  ┌─────────────── SENSE PROCESSING ─────────────────────────┐              │
+│  │                                                           │              │
+│  │  SenseDirectoryWatcher ──► SenseRouter ──► ClaudeInvoker │              │
+│  │       (file watcher)      (priority queue)  (Claude API) │              │
+│  │                                │                          │              │
+│  │                    ┌───────────┼───────────┐              │              │
+│  │                    ▼           ▼           ▼              │              │
+│  │              [immediate]   [normal]   [background]        │              │
+│  │               (urgent)    (standard)   (idle-time)        │              │
+│  │                                                           │              │
+│  └───────────────────────────────────────────────────────────┘              │
+│                                             │                               │
+│                                             ▼                               │
+│  ┌─────────────── OUTPUT CAPABILITIES ──────────────────────┐              │
+│  │                                                           │              │
+│  │  💬 iMessage ◄──── MessageBus ◄──── Claude Response      │              │
+│  │  🦋 Bluesky  ◄──── bluesky-post / bluesky-engage         │              │
+│  │  🐦 X/Twitter ◄─── bird CLI / x-engage                   │              │
+│  │  🐙 GitHub   ◄──── gh CLI (comments, PRs)                │              │
+│  │  📧 Email    ◄──── Mail.app (AppleScript)                │              │
+│  │  🎨 Images   ◄──── generate-image skill                  │              │
+│  │                                                           │              │
+│  └───────────────────────────────────────────────────────────┘              │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Input Senses
+
+| Sense | Source | Method | Frequency | Data Captured |
+|-------|--------|--------|-----------|---------------|
+| **iMessage** | Messages.app | SQLite + file watcher | Real-time | Text, attachments, reactions, sender |
+| **Email** | Mail.app | AppleScript polling | 30 sec | Subject, sender, body |
+| **Notes** | Notes.app | AppleScript polling | 30 sec | Note content changes |
+| **Calendar** | Calendar.app | Script polling | 15 min | Meeting prep/debrief windows |
+| **Location** | Overland app | HTTP POST to port 8081 | Continuous | GPS, speed, motion, WiFi, battery |
+| **Bluesky** | Bluesky API | atproto library | 15 min | Mentions, replies, DMs, follows |
+| **X/Twitter** | X API | bird CLI | 15 min | Mentions, replies |
+| **GitHub** | GitHub API | gh CLI | 15 min | PRs, issues, mentions, reviews |
+| **Webhooks** | HTTP POST | FastAPI on port 8082 | Event-driven | Custom payloads (GitHub, IFTTT) |
+| **Wallet** | Public RPCs | JSON-RPC / REST | 15 min | SOL/ETH/BTC balances, transactions |
+| **Camera** | Webcam | AVFoundation | On-demand | JPEG image capture |
+
+### Priority System
+
+Events are classified by urgency and processed accordingly:
+
+| Priority | Queue | Examples |
+|----------|-------|----------|
+| **immediate** | High-priority, instant | DMs, large deposits (>$100), security alerts |
+| **normal** | Default queue | Mentions, replies, emails, meeting events |
+| **background** | Idle-time batch | Likes, follows, minor balance changes |
+
+### Service Schedule
+
+| Service | Interval | Purpose |
+|---------|----------|---------|
+| `wake-adaptive` | 15 min | Adaptive wake scheduler |
+| `dream` | 3 AM | Memory consolidation, index rebuilds |
+| `bluesky-watcher` | 15 min | Poll Bluesky notifications |
+| `bluesky-engage` | 4 hr min | Proactive Bluesky posts |
+| `x-watcher` | 15 min | Poll X/Twitter mentions |
+| `x-engage` | 4 hr min | Proactive X posts |
+| `github-watcher` | 15 min | Poll GitHub notifications |
+| `wallet-watcher` | 15 min | Poll crypto wallet balances |
+| `meeting-check` | 15 min | Calendar meeting detection |
+| `location-receiver` | Continuous | HTTP server for GPS |
+| `webhook-receiver` | Continuous | HTTP server for webhooks |
+
+### Adding New Senses
+
+To add a new sense:
+
+1. Create a service that writes JSON to `~/.claude-mind/senses/`:
+   ```json
+   {
+     "sense": "your-sense-type",
+     "timestamp": "2026-01-14T12:00:00Z",
+     "priority": "normal",
+     "data": { "your": "payload" }
+   }
+   ```
+2. Samara's `SenseDirectoryWatcher` picks it up automatically
+3. Optionally register a custom handler in `SenseRouter.swift`
 
 ---
 

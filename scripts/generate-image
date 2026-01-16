@@ -138,14 +138,17 @@ build_parts() {
                 *) mime_type="image/png" ;;
             esac
 
-            # Encode image
-            img_base64=$(base64 -i "$ref_img" | tr -d '\n')
+            # Encode image to temp file (avoids shell arg limits for large images)
+            tmp_b64=$(mktemp)
+            base64 -i "$ref_img" | tr -d '\n' > "$tmp_b64"
 
-            # Add to parts
+            # Add to parts using slurpfile to avoid arg limits
             parts_json=$(echo "$parts_json" | jq \
                 --arg mime "$mime_type" \
-                --arg data "$img_base64" \
+                --rawfile data "$tmp_b64" \
                 '. + [{"inlineData": {"mimeType": $mime, "data": $data}}]')
+
+            rm -f "$tmp_b64"
         else
             echo "Warning: Reference image not found: $ref_img" >&2
         fi
@@ -161,25 +164,34 @@ else
     FULL_PROMPT="Generate an image: $PROMPT"
 fi
 
-# Build parts
-PARTS=$(build_parts "$FULL_PROMPT" "${REFERENCE_IMAGES[@]}")
+# Build parts and write to temp file to avoid arg limits
+PARTS_FILE=$(mktemp)
+build_parts "$FULL_PROMPT" "${REFERENCE_IMAGES[@]}" > "$PARTS_FILE"
 
-# Build full payload
+# Build full payload using slurpfile for parts
 PAYLOAD=$(jq -n \
-    --argjson parts "$PARTS" \
+    --slurpfile parts "$PARTS_FILE" \
     --argjson genConfig "$GEN_CONFIG" \
     '{
         "contents": [{
-            "parts": $parts
+            "parts": $parts[0]
         }],
         "generationConfig": $genConfig
     }')
+
+rm -f "$PARTS_FILE"
+
+# Write payload to temp file to avoid curl arg limits
+PAYLOAD_FILE=$(mktemp)
+echo "$PAYLOAD" > "$PAYLOAD_FILE"
 
 # Generate image via Gemini API
 RESPONSE=$(curl -s -X POST "https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent" \
     -H "x-goog-api-key: $API_KEY" \
     -H "Content-Type: application/json" \
-    -d "$PAYLOAD")
+    -d "@$PAYLOAD_FILE")
+
+rm -f "$PAYLOAD_FILE"
 
 # Check for errors
 if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then

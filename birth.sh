@@ -239,6 +239,33 @@ install_skills() {
     fi
 }
 
+# Configure Claude Code global settings
+configure_claude_code() {
+    log_info "Configuring Claude Code retention policy..."
+
+    local settings_file="$HOME/.claude/settings.json"
+    mkdir -p "$HOME/.claude"
+
+    # Create or update settings with 100-year retention
+    if [ -f "$settings_file" ]; then
+        # Merge cleanupPeriodDays into existing settings
+        local temp_file=$(mktemp)
+        jq '. + {cleanupPeriodDays: 36500}' "$settings_file" > "$temp_file"
+        mv "$temp_file" "$settings_file"
+        log_success "Updated existing Claude Code settings with 100-year retention"
+    else
+        # Create new settings file with retention policy
+        cat > "$settings_file" << 'EOF'
+{
+  "cleanupPeriodDays": 36500
+}
+EOF
+        log_success "Created Claude Code settings with 100-year retention"
+    fi
+
+    log_info "Session transcripts will be preserved for ~100 years at ~/.claude/projects/"
+}
+
 # Create launchd plist templates
 create_launchd_templates() {
     log_info "Creating launchd templates..."
@@ -427,6 +454,9 @@ print_next_steps() {
     echo ""
     echo "6. Send a test message from $COLLABORATOR_NAME's phone!"
     echo ""
+    echo "Note: Claude Code session retention has been configured for ~100 years."
+    echo "      All conversations will be preserved at ~/.claude/projects/"
+    echo ""
 }
 
 # Main
@@ -458,6 +488,7 @@ main() {
     install_templates
     install_scripts
     install_skills
+    configure_claude_code
     create_launchd_templates
     print_next_steps
 }

@@ -1,0 +1,122 @@
+#!/usr/bin/env node
+
+const { Connection, Keypair, PublicKey, LAMPORTS_PER_SOL, SystemProgram, Transaction, sendAndConfirmTransaction } = require('@solana/web3.js');
+const { getAssociatedTokenAddressSync, getAccount, TOKEN_PROGRAM_ID } = require('@solana/spl-token');
+const fs = require('fs');
+const path = require('path');
+
+const KEYPAIR_PATH = path.join(process.env.HOME, '.claude-mind/credentials/solana-wallet.json');
+const RPC_URL = 'https://api.mainnet-beta.solana.com';
+
+function loadKeypair() {
+    const keypairData = JSON.parse(fs.readFileSync(KEYPAIR_PATH));
+    return Keypair.fromSecretKey(Uint8Array.from(keypairData));
+}
+
+async function getBalance() {
+    const connection = new Connection(RPC_URL, 'confirmed');
+    const keypair = loadKeypair();
+    const balance = await connection.getBalance(keypair.publicKey);
+    console.log(`Address: ${keypair.publicKey.toBase58()}`);
+    console.log(`Balance: ${(balance / LAMPORTS_PER_SOL).toFixed(6)} SOL`);
+    return balance;
+}
+
+async function getTokenAccounts() {
+    const connection = new Connection(RPC_URL, 'confirmed');
+    const keypair = loadKeypair();
+
+    const tokenAccounts = await connection.getParsedTokenAccountsByOwner(
+        keypair.publicKey,
+        { programId: TOKEN_PROGRAM_ID }
+    );
+
+    if (tokenAccounts.value.length === 0) {
+        console.log('No SPL token accounts found');
+        return;
+    }
+
+    console.log(`Found ${tokenAccounts.value.length} token account(s):\n`);
+    for (const account of tokenAccounts.value) {
+        const info = account.account.data.parsed.info;
+        const mint = info.mint;
+        const balance = info.tokenAmount.uiAmountString;
+        const decimals = info.tokenAmount.decimals;
+        console.log(`Mint: ${mint}`);
+        console.log(`Balance: ${balance}`);
+        console.log(`Decimals: ${decimals}`);
+        console.log('---');
+    }
+}
+
+async function sendSol(toAddress, amount) {
+    const connection = new Connection(RPC_URL, 'confirmed');
+    const keypair = loadKeypair();
+
+    const recipient = new PublicKey(toAddress);
+    const lamports = Math.floor(amount * LAMPORTS_PER_SOL);
+
+    console.log(`Sending ${amount} SOL to ${toAddress}...`);
+    console.log(`From: ${keypair.publicKey.toBase58()}`);
+
+    const transaction = new Transaction().add(
+        SystemProgram.transfer({
+            fromPubkey: keypair.publicKey,
+            toPubkey: recipient,
+            lamports: lamports,
+        })
+    );
+
+    const signature = await sendAndConfirmTransaction(connection, transaction, [keypair]);
+    console.log(`Success! Signature: ${signature}`);
+    console.log(`Explorer: https://solscan.io/tx/${signature}`);
+    return signature;
+}
+
+async function getRecentTransactions(limit = 10) {
+    const connection = new Connection(RPC_URL, 'confirmed');
+    const keypair = loadKeypair();
+
+    const signatures = await connection.getSignaturesForAddress(keypair.publicKey, { limit });
+
+    console.log(`Recent transactions for ${keypair.publicKey.toBase58()}:\n`);
+    for (const sig of signatures) {
+        const date = new Date(sig.blockTime * 1000).toISOString();
+        const status = sig.err ? 'FAILED' : 'OK';
+        console.log(`${date} | ${status} | ${sig.signature.slice(0, 20)}...`);
+    }
+}
+
+// CLI
+const command = process.argv[2];
+const args = process.argv.slice(3);
+
+switch (command) {
+    case 'balance':
+        getBalance().catch(console.error);
+        break;
+    case 'tokens':
+        getTokenAccounts().catch(console.error);
+        break;
+    case 'send':
+        if (args.length < 2) {
+            console.log('Usage: solana-wallet send <ADDRESS> <AMOUNT>');
+            process.exit(1);
+        }
+        sendSol(args[0], parseFloat(args[1])).catch(console.error);
+        break;
+    case 'history':
+        getRecentTransactions(parseInt(args[0]) || 10).catch(console.error);
+        break;
+    default:
+        console.log(`Claude's Solana Wallet CLI
+
+Usage: solana-wallet <command> [args]
+
+Commands:
+  balance           Show SOL balance
+  tokens            List SPL token holdings
+  send <ADDR> <AMT> Send SOL to address
+  history [N]       Show recent transactions (default: 10)
+`);
+}

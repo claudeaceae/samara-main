@@ -49,6 +49,7 @@ struct Configuration: Codable {
     let mail: MailConfig
     let models: ModelsConfig?
     let timeouts: TimeoutsConfig?
+    let features: FeaturesConfig?
 
     struct EntityConfig: Codable {
         let name: String
@@ -107,6 +108,21 @@ struct Configuration: Codable {
         )
     }
 
+    /// Feature flags for experimental functionality
+    struct FeaturesConfig: Codable {
+        /// Smart context loading: Uses Haiku to analyze messages and load only relevant context
+        /// Reduces token usage from ~36K to ~5-10K per request (Phase: Smart Context)
+        let smartContext: Bool?
+
+        /// Context router timeout in seconds (how long to wait for Haiku classification)
+        let smartContextTimeout: Double?
+
+        static let defaults = FeaturesConfig(
+            smartContext: true,        // Enabled by default
+            smartContextTimeout: 5.0   // 5 second timeout for Haiku classification
+        )
+    }
+
     /// Default configuration (fallback if config.json doesn't exist)
     static let defaults = Configuration(
         entity: EntityConfig(
@@ -129,7 +145,8 @@ struct Configuration: Codable {
             account: "iCloud"
         ),
         models: nil,
-        timeouts: nil
+        timeouts: nil,
+        features: nil
     )
 
     /// Convenience accessors with defaults
@@ -139,6 +156,10 @@ struct Configuration: Codable {
 
     var timeoutsConfig: TimeoutsConfig {
         timeouts ?? TimeoutsConfig.defaults
+    }
+
+    var featuresConfig: FeaturesConfig {
+        features ?? FeaturesConfig.defaults
     }
 
     /// Load configuration from ~/.claude-mind/config.json

@@ -38,6 +38,26 @@ final class ClaudeInvoker {
     /// Manages session ledgers for structured handoffs
     private let ledgerManager: LedgerManager
 
+    /// JSON schema for iMessage responses - enforces structural separation of message from reasoning
+    /// This provides deterministic extraction vs brittle pattern-matching sanitization
+    private static let iMessageResponseSchema = """
+    {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "description": "The EXACT text to send as an iMessage. Write ONLY the message content - no meta-commentary, no descriptions of actions, no analysis of context."
+        },
+        "reasoning": {
+          "type": "string",
+          "description": "Internal thinking and reasoning about the response (this field is NOT sent to the user)"
+        }
+      },
+      "required": ["message"],
+      "additionalProperties": false
+    }
+    """
+
     init(claudePath: String = "/usr/local/bin/claude", timeout: TimeInterval = 300, memoryContext: MemoryContext? = nil, useFallbackChain: Bool = true) {
         self.claudePath = claudePath
         self.timeout = timeout
@@ -78,16 +98,19 @@ final class ClaudeInvoker {
         let fullPrompt = buildBatchPrompt(messages: messages, context: context, targetHandles: targetHandles, chatInfo: chatInfo)
 
         // Use fallback chain if enabled
+        // Note: useStructuredOutput=true enforces schema-based message extraction for clean iMessage responses
         if useFallbackChain {
-            return try invokeBatchWithFallback(prompt: fullPrompt, context: context, resumeSessionId: resumeSessionId)
+            return try invokeBatchWithFallback(prompt: fullPrompt, context: context, resumeSessionId: resumeSessionId, useStructuredOutput: true)
         }
 
         // Direct invocation (fallback disabled)
-        return try invokeWithPrompt(fullPrompt, resumeSessionId: resumeSessionId, retryCount: 0)
+        return try invokeWithPrompt(fullPrompt, resumeSessionId: resumeSessionId, retryCount: 0, useStructuredOutput: true)
     }
 
     /// Invokes with multi-tier fallback support (sync wrapper for async fallback chain)
-    private func invokeBatchWithFallback(prompt: String, context: String, resumeSessionId: String?) throws -> ClaudeInvocationResult {
+    /// - Parameters:
+    ///   - useStructuredOutput: If true, uses JSON schema for deterministic message extraction
+    private func invokeBatchWithFallback(prompt: String, context: String, resumeSessionId: String?, useStructuredOutput: Bool = false) throws -> ClaudeInvocationResult {
         var result: ClaudeInvocationResult?
         var thrownError: Error?
 
@@ -100,8 +123,8 @@ final class ClaudeInvoker {
                     sessionId: resumeSessionId,
                     context: context,
                     primaryInvoker: { [self] prompt, sessionId in
-                        // This is the Claude CLI invocation
-                        return try self.invokeWithPrompt(prompt, resumeSessionId: sessionId, retryCount: 0)
+                        // This is the Claude CLI invocation - use structured output for clean message extraction
+                        return try self.invokeWithPrompt(prompt, resumeSessionId: sessionId, retryCount: 0, useStructuredOutput: useStructuredOutput)
                     }
                 )
 
@@ -138,9 +161,11 @@ final class ClaudeInvoker {
     }
 
     /// Invokes Claude with the given prompt and returns the response (legacy single-message interface)
+    /// Uses structured output for deterministic message extraction in iMessage contexts
     func invoke(prompt: String, context: String, attachmentPaths: [String] = []) throws -> String {
         let fullPrompt = buildPrompt(message: prompt, context: context, attachmentPaths: attachmentPaths)
-        let result = try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: 0)
+        // Use structured output for clean response extraction (same as batch invocations)
+        let result = try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: 0, useStructuredOutput: true)
         return result.response
     }
 
@@ -213,7 +238,12 @@ final class ClaudeInvoker {
     }
 
     /// Core invocation method with retry tracking to prevent infinite loops
-    private func invokeWithPrompt(_ fullPrompt: String, resumeSessionId: String?, retryCount: Int) throws -> ClaudeInvocationResult {
+    /// - Parameters:
+    ///   - fullPrompt: The complete prompt to send to Claude
+    ///   - resumeSessionId: Optional session ID to resume
+    ///   - retryCount: Current retry attempt count
+    ///   - useStructuredOutput: If true, uses JSON schema to enforce response structure (for iMessage)
+    private func invokeWithPrompt(_ fullPrompt: String, resumeSessionId: String?, retryCount: Int, useStructuredOutput: Bool = false) throws -> ClaudeInvocationResult {
         // Guard against infinite retry loops
         if retryCount > maxRetries {
             throw ClaudeInvokerError.executionFailed(-1, "Max retries (\(maxRetries)) exceeded for session-related errors")
@@ -253,6 +283,13 @@ final class ClaudeInvoker {
             "--output-format", "json",  // Use JSON to capture session ID
             "--dangerously-skip-permissions"
         ]
+
+        // Add JSON schema for structured output (enforces clean message/reasoning separation)
+        // This provides deterministic extraction vs brittle pattern-matching sanitization
+        if useStructuredOutput {
+            arguments.append(contentsOf: ["--json-schema", Self.iMessageResponseSchema])
+            log("Using structured output schema for iMessage response", level: .debug, component: "ClaudeInvoker")
+        }
 
         // Add resume flag if we have a session to continue
         if let sessionId = resumeSessionId {
@@ -361,7 +398,7 @@ final class ClaudeInvoker {
         if combinedOutput.contains("No conversation found with session ID:") {
             if resumeSessionId != nil {
                 log("Session not found, retrying without --resume (attempt \(retryCount + 1)/\(maxRetries))", level: .warn, component: "ClaudeInvoker")
-                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1)
+                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1, useStructuredOutput: useStructuredOutput)
             }
         }
 
@@ -369,7 +406,7 @@ final class ClaudeInvoker {
         if output.contains("Prompt is too long") {
             if resumeSessionId != nil {
                 log("Prompt too long (session context exceeded), starting fresh session (attempt \(retryCount + 1)/\(maxRetries))", level: .warn, component: "ClaudeInvoker")
-                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1)
+                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1, useStructuredOutput: useStructuredOutput)
             }
             // If already no session and still too long, that's a real error
             throw ClaudeInvokerError.executionFailed(Int(process.terminationStatus), "Prompt is too long even without session context")
@@ -380,7 +417,7 @@ final class ClaudeInvoker {
             // Not JSON, might be an error message
             if resumeSessionId != nil && output.contains("session") {
                 log("Possible session error, retrying without --resume (attempt \(retryCount + 1)/\(maxRetries))", level: .warn, component: "ClaudeInvoker")
-                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1)
+                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1, useStructuredOutput: useStructuredOutput)
             }
             throw ClaudeInvokerError.executionFailed(Int(process.terminationStatus), output)
         }
@@ -394,7 +431,7 @@ final class ClaudeInvoker {
             // If prompt too long with a session, retry without session
             if errorResult.contains("Prompt is too long") && resumeSessionId != nil {
                 log("Prompt too long (JSON response), starting fresh session (attempt \(retryCount + 1)/\(maxRetries))", level: .warn, component: "ClaudeInvoker")
-                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1)
+                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1, useStructuredOutput: useStructuredOutput)
             }
 
             throw ClaudeInvokerError.executionFailed(Int(process.terminationStatus), errorResult)
@@ -406,7 +443,7 @@ final class ClaudeInvoker {
         }
 
         // Parse JSON output to extract response and session ID
-        return parseJsonOutput(output)
+        return parseJsonOutput(output, useStructuredOutput: useStructuredOutput)
     }
 
     /// Sanitize Claude's response, stripping internal traces that shouldn't be visible to users
@@ -528,8 +565,12 @@ final class ClaudeInvoker {
 
     /// Parse Claude's JSON output to extract response text and session ID
     /// Uses strict validation - does NOT fall back to raw output (which may contain thinking traces)
-    private func parseJsonOutput(_ output: String) -> ClaudeInvocationResult {
+    /// - Parameters:
+    ///   - output: The raw JSON output from Claude CLI
+    ///   - useStructuredOutput: If true, prefer structured_output.message over result (deterministic extraction)
+    private func parseJsonOutput(_ output: String, useStructuredOutput: Bool = false) -> ClaudeInvocationResult {
         // Claude's JSON output format has "result" and "session_id" fields
+        // When using --json-schema, it also has "structured_output" with the schema-validated response
         guard let data = output.data(using: .utf8) else {
             log("Failed to convert output to UTF-8 data", level: .error, component: "ClaudeInvoker")
             return ClaudeInvocationResult(response: "[Processing error - invalid encoding]", sessionId: nil)
@@ -537,11 +578,25 @@ final class ClaudeInvoker {
 
         do {
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let sessionId = json["session_id"] as? String
+
+                // PREFERRED: Check for structured_output first (deterministic, no sanitization needed)
+                // This is the primary path when useStructuredOutput is true
+                if useStructuredOutput,
+                   let structuredOutput = json["structured_output"] as? [String: Any],
+                   let message = structuredOutput["message"] as? String {
+                    // Direct extraction - the API schema enforcement guarantees this is the user-facing message
+                    // No sanitization needed because the schema structurally separates message from reasoning
+                    log("Extracted message from structured_output (deterministic path)", level: .debug, component: "ClaudeInvoker")
+                    return ClaudeInvocationResult(
+                        response: message.trimmingCharacters(in: .whitespacesAndNewlines),
+                        sessionId: sessionId
+                    )
+                }
+
                 // Check for error_during_execution subtype
                 // This happens when Claude Code encounters errors but is_error may still be false
                 if let subtype = json["subtype"] as? String, subtype == "error_during_execution" {
-                    let sessionId = json["session_id"] as? String
-
                     // Log the errors for debugging
                     if let errors = json["errors"] as? [String] {
                         let errorSummary = errors.prefix(3).joined(separator: "; ")
@@ -566,19 +621,20 @@ final class ClaudeInvoker {
                     )
                 }
 
-                // Normal success case - extract result
+                // FALLBACK: Normal success case - extract from result field with sanitization
+                // This is the legacy path when structured_output is not available
                 if let result = json["result"] as? String {
                     // Sanitize the response to strip any internal traces
                     let (sanitized, filtered) = sanitizeResponse(result)
 
                     // Log filtered content for debugging (helps diagnose future leaks)
                     if let filteredContent = filtered {
-                        log("Filtered from response:\n\(filteredContent)", level: .debug, component: "ClaudeInvoker")
+                        log("Filtered from response (fallback path):\n\(filteredContent)", level: .debug, component: "ClaudeInvoker")
                     }
 
                     return ClaudeInvocationResult(
                         response: sanitized,
-                        sessionId: json["session_id"] as? String
+                        sessionId: sessionId
                     )
                 }
             }
@@ -590,7 +646,7 @@ final class ClaudeInvoker {
 
         // CRITICAL: Do NOT fall back to raw output - it may contain thinking traces
         // Return an error placeholder instead
-        log("No valid 'result' field in JSON output - refusing to return raw output", level: .error, component: "ClaudeInvoker")
+        log("No valid 'result' or 'structured_output' field in JSON output - refusing to return raw output", level: .error, component: "ClaudeInvoker")
 
         // Log raw output for diagnosis (truncate if very long)
         let truncatedOutput = String(output.prefix(2000))

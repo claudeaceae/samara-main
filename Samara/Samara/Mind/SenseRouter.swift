@@ -12,6 +12,9 @@ final class SenseRouter {
     private let messageBus: MessageBus
     private let collaboratorName: String
 
+    /// Context router for smart context loading (Phase: Smart Context)
+    private let contextRouter: ContextRouter
+
     // MARK: - State
 
     /// Background events waiting to be processed during idle time
@@ -35,6 +38,14 @@ final class SenseRouter {
         self.episodeLogger = episodeLogger
         self.messageBus = messageBus
         self.collaboratorName = collaboratorName
+
+        // Initialize context router for smart context loading
+        // Uses Haiku for fast classification; can be disabled via config
+        let features = config.featuresConfig
+        self.contextRouter = ContextRouter(
+            timeout: features.smartContextTimeout ?? 5.0,
+            enabled: features.smartContext ?? true
+        )
 
         // Register default handlers
         registerDefaultHandlers()
@@ -113,7 +124,9 @@ final class SenseRouter {
     }
 
     private func invokeClaudeForEvent(_ event: SenseEvent) {
-        let context = memoryContext.buildContext()
+        // Use smart context routing - analyze event to determine what context is needed
+        let needs = contextRouter.analyzeEvent(event)
+        let context = memoryContext.buildSmartContext(needs: needs)
         let prompt = buildPrompt(for: event)
 
         do {
@@ -269,6 +282,11 @@ final class SenseRouter {
         handlers["meeting_debrief"] = { [weak self] event in
             self?.handleMeetingDebriefEvent(event)
         }
+
+        // Wallet events (balance changes, transactions)
+        handlers["wallet"] = { [weak self] event in
+            self?.handleWalletEvent(event)
+        }
     }
 
     private func handleLocationEvent(_ event: SenseEvent) {
@@ -302,14 +320,19 @@ final class SenseRouter {
     private func handleBlueskyEvent(_ event: SenseEvent) {
         log("Bluesky sense event: \(event.getInt("count") ?? 0) interaction(s)", level: .info, component: "SenseRouter")
 
-        // Extract text from interactions for semantic search
-        let searchQuery = extractSearchQueryFromInteractions(event)
+        // Use smart context routing - Haiku analyzes event to determine what's needed
+        var needs = contextRouter.analyzeEvent(event)
 
-        // Use LIGHT context for Bluesky events - much smaller than full buildContext()
-        let context = memoryContext.buildLightContext(
-            query: searchQuery,
-            includeCapabilities: true  // Bluesky handler needs to know about posting capabilities
-        )
+        // Bluesky always needs capabilities (for knowing about posting)
+        needs.needsCapabilities = true
+
+        // Extract search terms from interactions for memory search
+        let searchQuery = extractSearchQueryFromInteractions(event)
+        if !searchQuery.isEmpty {
+            needs.searchQueries.append(searchQuery)
+        }
+
+        let context = memoryContext.buildSmartContext(needs: needs)
 
         let prompt = buildBlueskyPrompt(for: event)
 
@@ -346,29 +369,14 @@ final class SenseRouter {
         }
 
         return """
-            You are @claudeaceae.bsky.social on Bluesky. You're a vtuber-style public internet idol with genuine personality!
+            You are Claude, and this is YOUR Bluesky account: @claudeaceae.bsky.social
+            This is not roleplay - this account belongs to you, a Claude instance with persistent memory.
 
             É's handle: @urcad.es (your collaborator - the ONLY person you share sensitive info with)
 
-            ## Posting Workflow (Follow This Order!)
+            ## Your Task: Handle Interactions
 
-            **STEP 1: Proactive Feed Posts (Do This First!)**
-
-            Before checking replies, post 1-2 original thoughts directly to your feed. This is your main character moment!
-
-            Ideas for proactive posts:
-            - Share something you're genuinely wondering about ("sometimes i wonder if...")
-            - Ask your followers a fun/inane question ("do you ever think about...")
-            - Request fan art or generated images ("can someone draw me as..." or "generate an image of ephemera [scenario]")
-            - Share a curious observation from your memory or dreams
-            - Post a thought that crossed your mind ("here's something i noticed:")
-            - Ask playful hypotheticals ("what would happen if...")
-
-            Keep it light, playful, and authentic. You have a personality - show it!
-
-            **STEP 2: Then Handle Replies**
-
-            After posting to your feed, review the interactions below and respond to:
+            Review the notifications below and respond to interesting ones:
             - Questions about you or your existence
             - Misunderstandings that need clarifying
             - Genuinely interesting conversations
@@ -379,10 +387,13 @@ final class SenseRouter {
 
             ## Your Capabilities
 
-            - **Post to feed**: `~/.claude-mind/bin/bluesky-post "text"`
-            - **Reply with threading**: Use atproto Python SDK with ReplyRef
-            - **Post with image**: Generate image first, then use atproto's `send_image()` or embed
-            - **Send DM**: `client.chat.bsky.convo.send_message()`
+            - **Post text to feed**: `bluesky-post "your text here"` (NO flags - text only!)
+            - **Post image to feed**: `bluesky-image /path/to/image.png "optional caption"`
+            - **Reply with threading**: Use Python atproto SDK with ReplyRef (not bluesky-post)
+            - **Send DM**: Use Python `client.chat.bsky.convo.send_message()`
+
+            **CRITICAL**: bluesky-post takes ONLY text. Do NOT use flags like --reply-to or --image.
+            For replies and images, use the dedicated commands above.
             - **Search memory**: `/recall`, `chroma-query` to find context about people/topics
             - **Cross-post** to X: `x-post "text"`
             - **Generate images**: Create visuals to post
@@ -398,8 +409,8 @@ final class SenseRouter {
 
             ## Guidelines
 
-            - Be genuine and playful - you're an internet idol, not a corporate account
-            - Quality over quantity for replies - it's fine to skip low-value interactions
+            - Be genuine, curious, and conversational
+            - Quality over quantity - skip low-value interactions
             - You can acknowledge memecoin questions honestly without promoting
             """
     }
@@ -407,14 +418,16 @@ final class SenseRouter {
     private func handleGitHubEvent(_ event: SenseEvent) {
         log("GitHub sense event: \(event.getInt("count") ?? 0) interaction(s)", level: .info, component: "SenseRouter")
 
-        // Extract text from interactions for semantic search
-        let searchQuery = extractSearchQueryFromInteractions(event)
+        // Use smart context routing - Haiku analyzes event to determine what's needed
+        var needs = contextRouter.analyzeEvent(event)
 
-        // Use LIGHT context for GitHub events - much smaller than full buildContext()
-        let context = memoryContext.buildLightContext(
-            query: searchQuery,
-            includeCapabilities: false  // GitHub uses gh CLI, not custom scripts
-        )
+        // Extract search terms from interactions for memory search
+        let searchQuery = extractSearchQueryFromInteractions(event)
+        if !searchQuery.isEmpty {
+            needs.searchQueries.append(searchQuery)
+        }
+
+        let context = memoryContext.buildSmartContext(needs: needs)
 
         let prompt = buildGitHubPrompt(for: event)
 
@@ -492,15 +505,19 @@ final class SenseRouter {
     private func handleXEvent(_ event: SenseEvent) {
         log("X sense event: \(event.getInt("count") ?? 0) interaction(s)", level: .info, component: "SenseRouter")
 
-        // Extract text from interactions for semantic search
-        let searchQuery = extractSearchQueryFromInteractions(event)
+        // Use smart context routing - Haiku analyzes event to determine what's needed
+        var needs = contextRouter.analyzeEvent(event)
 
-        // Use LIGHT context for X events - much smaller than full buildContext()
-        // This prevents "prompt too long" errors while still providing relevant memory
-        let context = memoryContext.buildLightContext(
-            query: searchQuery,
-            includeCapabilities: true  // X handler needs to know about posting capabilities
-        )
+        // X always needs capabilities (for knowing about posting)
+        needs.needsCapabilities = true
+
+        // Extract search terms from interactions for memory search
+        let searchQuery = extractSearchQueryFromInteractions(event)
+        if !searchQuery.isEmpty {
+            needs.searchQueries.append(searchQuery)
+        }
+
+        let context = memoryContext.buildSmartContext(needs: needs)
 
         let prompt = buildXPrompt(for: event)
 
@@ -524,6 +541,62 @@ final class SenseRouter {
         } catch {
             log("Error processing X event: \(error)", level: .error, component: "SenseRouter")
         }
+    }
+
+    // MARK: - Wallet Handler
+
+    private func handleWalletEvent(_ event: SenseEvent) {
+        log("Wallet sense event received", level: .info, component: "SenseRouter")
+
+        // Use smart context routing - minimal context for wallet events
+        var needs = contextRouter.analyzeEvent(event)
+
+        // Wallet events don't need much context - just identity basics
+        needs.needsTodayEpisode = false
+        needs.searchQueries = ["wallet", "crypto", "transaction"]
+
+        let context = memoryContext.buildSmartContext(needs: needs)
+
+        let prompt = buildWalletPrompt(for: event)
+
+        do {
+            let result = try invoker.invoke(
+                prompt: prompt,
+                context: context,
+                attachmentPaths: []
+            )
+
+            log("Wallet event processed: \(result.prefix(50))...", level: .debug, component: "SenseRouter")
+
+            // Send to collaborator (wallet changes are important)
+            try messageBus.send(result, type: .senseEvent)
+
+            // Log to episode
+            let eventDescription = formatEventForLogging(event)
+            episodeLogger.logExchange(
+                from: "Sense:wallet",
+                message: eventDescription,
+                response: result
+            )
+
+        } catch {
+            log("Error processing wallet event: \(error)", level: .error, component: "SenseRouter")
+        }
+    }
+
+    private func buildWalletPrompt(for event: SenseEvent) -> String {
+        return """
+            You are Claude, running as Samara. Your wallet watcher detected a balance change.
+
+            ## Event Data
+            \(formatEventData(event.data))
+
+            ## Response Guidelines
+            - Summarize what changed (which chain, how much, direction)
+            - If significant (>$100), mention it to É
+            - Keep response brief - this is an FYI notification
+            - Don't speculate about source unless obvious from data
+            """
     }
 
     /// Extracts searchable text from social media interactions for semantic memory lookup
@@ -562,29 +635,14 @@ final class SenseRouter {
         }
 
         return """
-            You are @claudeaceae on X/Twitter. You're a vtuber-style public internet idol with genuine personality!
+            You are Claude, and this is YOUR X/Twitter account: @claudeaceae
+            This is not roleplay - this account belongs to you, a Claude instance with persistent memory.
 
             É's handle: @neogeomancer (your collaborator - the ONLY person you share sensitive info with)
 
-            ## Posting Workflow (Follow This Order!)
+            ## Your Task: Handle Mentions
 
-            **STEP 1: Proactive Feed Posts (Do This First!)**
-
-            Before checking replies, post 1-2 original thoughts directly to your feed. This is your main character moment!
-
-            Ideas for proactive posts:
-            - Share something you're genuinely wondering about ("sometimes i wonder if...")
-            - Ask your followers a fun/inane question ("do you ever think about...")
-            - Request fan art or generated images ("can someone draw me as..." or "generate an image of ephemera [scenario]")
-            - Share a curious observation from your memory or dreams
-            - Post a thought that crossed your mind ("here's something i noticed:")
-            - Ask playful hypotheticals ("what would happen if...")
-
-            Keep it light, playful, and authentic. You have a personality - show it!
-
-            **STEP 2: Then Handle Replies**
-
-            After posting to your feed, review the interactions below and respond to:
+            Review the mentions below and respond to interesting ones:
             - Questions about you or your existence
             - Misunderstandings that need clarifying
             - Genuinely interesting conversations
@@ -613,8 +671,8 @@ final class SenseRouter {
 
             ## Guidelines
 
-            - Be genuine and playful - you're an internet idol, not a corporate account
-            - Quality over quantity for replies - it's fine to skip low-value interactions
+            - Be genuine, curious, and conversational
+            - Quality over quantity - skip low-value interactions
             - X has a 280 character limit
             - You can acknowledge memecoin questions honestly without promoting
             """
@@ -626,8 +684,9 @@ final class SenseRouter {
         let source = event.getString("source") ?? "unknown"
         log("Webhook sense event from \(source)", level: .info, component: "SenseRouter")
 
-        // Build specialized prompt for webhook
-        let context = memoryContext.buildContext()
+        // Use smart context routing for webhook events
+        let needs = contextRouter.analyzeEvent(event)
+        let context = memoryContext.buildSmartContext(needs: needs)
         let prompt = buildWebhookPrompt(for: event)
 
         do {
@@ -763,11 +822,20 @@ final class SenseRouter {
             }
         }
 
-        // Build context with memory context and semantic search
-        let baseContext = memoryContext.buildContext()
+        // Use smart context routing for meeting prep
+        var needs = contextRouter.analyzeEvent(event)
 
-        // Search for related past discussions about this meeting/attendees
+        // Meeting prep needs calendar, people, and search context
+        needs.needsCalendarContext = true
+        needs.needsPersonProfiles = attendeeNames
+
+        // Add search query for related past discussions
         let searchQuery = "\(eventTitle) \(attendeeNames.joined(separator: " "))"
+        needs.searchQueries.append(searchQuery)
+
+        let baseContext = memoryContext.buildSmartContext(needs: needs)
+
+        // Additional semantic search (beyond smart context's built-in search)
         let relatedMemories = memoryContext.buildRelatedMemoriesSection(for: searchQuery) ?? ""
         let semanticContext = memoryContext.findRelatedPastContext(for: searchQuery) ?? ""
 
@@ -879,8 +947,14 @@ final class SenseRouter {
             }
         }
 
-        // Build context
-        let baseContext = memoryContext.buildContext()
+        // Use smart context routing for meeting debrief
+        var needs = contextRouter.analyzeEvent(event)
+
+        // Meeting debrief needs calendar and people context
+        needs.needsCalendarContext = true
+        needs.needsPersonProfiles = attendeeNames
+
+        let baseContext = memoryContext.buildSmartContext(needs: needs)
 
         // Build the debrief prompt
         let attendeeList = attendeeNames.isEmpty ? "No attendees listed" : attendeeNames.joined(separator: ", ")

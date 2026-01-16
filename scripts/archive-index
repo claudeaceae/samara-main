@@ -1,0 +1,29 @@
+#!/bin/bash
+# archive-index - CLI tool for managing the transcript archive index
+#
+# Commands:
+#   rebuild [--days N]     - Full rebuild of index (default: 90 days)
+#   sync-recent [--days N] - Incremental sync (default: 7 days)
+#   search <query> [--n N] - Search transcript archive
+#   stats                  - Show index statistics
+#   sample [--session-id ID] - Show sample content for quality check
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+VENV_PATH="$MIND_PATH/.venv"
+
+# Get the real path (follow symlinks)
+REAL_SCRIPT="$(readlink -f "$0" 2>/dev/null || realpath "$0" 2>/dev/null || echo "$0")"
+SCRIPT_DIR="$(cd "$(dirname "$REAL_SCRIPT")" && pwd)"
+
+# Activate virtual environment
+if [ ! -d "$VENV_PATH" ]; then
+    echo "Error: Virtual environment not found at $VENV_PATH" >&2
+    exit 1
+fi
+
+source "$VENV_PATH/bin/activate"
+
+# Run the Python script with all arguments passed through
+exec python3 "$SCRIPT_DIR/../lib/archive_index_cli.py" "$@"

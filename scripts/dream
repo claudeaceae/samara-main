@@ -666,6 +666,16 @@ else
     log "Chroma not installed, skipping sync"
 fi
 
+# Sync transcript archive index (incremental)
+log "Syncing transcript archive index..."
+if [ -f "$MIND_PATH/bin/archive-index" ]; then
+    "$MIND_PATH/bin/archive-index" sync-recent >> "$LOG_FILE" 2>&1 && \
+        log "Transcript archive synced" || \
+        log "Transcript archive sync failed (non-fatal)"
+else
+    log "Transcript archive not installed, skipping sync"
+fi
+
 # Commit memory changes to git
 log "Committing memory changes to git..."
 cd "$MIND_PATH"

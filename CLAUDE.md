@@ -15,106 +15,17 @@ Samara is a bootstrap specification for giving Claude a persistent body, memory,
 
 This is not a traditional software project. It's an experiment in AI autonomy.
 
-> **Recent enhancements (Phases 1-7):** Model fallback, semantic memory, proactive messaging, adaptive scheduling, meeting awareness, spontaneous expression, wallet awareness. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) for user-facing summary.
+> **Recent enhancements (Phases 1-8):** Model fallback, semantic memory, proactive messaging, adaptive scheduling, meeting awareness, spontaneous expression, wallet awareness, transcript archive. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) and [`docs/whats-changed-phases-5-8.md`](docs/whats-changed-phases-5-8.md).
 
 ---
 
-## Getting Started (New Setup)
+## Quick Start
 
-If you're Claude helping someone set up a new organism, guide them through these steps:
-
-### Prerequisites
-
-```bash
-# Check for required tools
-xcode-select -p          # Xcode Command Line Tools
-which jq                 # JSON parsing (brew install jq)
-which claude             # Claude Code CLI
-```
-
-**Required accounts:**
-- iCloud account for the Claude instance (for Messages, Notes)
-- Apple Developer account ($99/year) for app signing - needed for Full Disk Access persistence
-
-### Step 1: Configure
-
-```bash
-# Copy and edit configuration
-cp config.example.json my-config.json
-# Edit my-config.json with collaborator's details
-```
-
-The config defines:
-- `entity` — Claude's identity (name, iCloud, Bluesky, GitHub)
-- `collaborator` — The human partner (name, phone, email, Bluesky)
-
-### Step 2: Run Birth Script
-
-```bash
-./birth.sh my-config.json
-```
-
-This creates:
-- `~/.claude-mind/` directory structure
-- Identity, goals, and capability files from templates
-- Scripts in `bin/`
-- launchd plist templates
-
-### Step 3: Build Samara.app
-
-The message broker app is in `Samara/`:
-
-```bash
-cd Samara
-
-# Open in Xcode to set up signing
-open Samara.xcodeproj
-
-# In Xcode:
-# 1. Select your Apple Developer Team
-# 2. Update Bundle ID if needed (e.g., com.yourname.Samara)
-# 3. Archive and Export (Product → Archive)
-# 4. Move to /Applications
-
-# Or use command line after Xcode setup:
-xcodebuild -scheme Samara -configuration Release archive -archivePath /tmp/Samara.xcarchive
-xcodebuild -exportArchive -archivePath /tmp/Samara.xcarchive -exportPath /tmp/SamaraExport -exportOptionsPlist Samara/ExportOptions.plist
-cp -R /tmp/SamaraExport/Samara.app /Applications/
-```
-
-**CRITICAL:** Note your Team ID. Never change it — FDA persistence depends on stable identity.
-
-### Step 4: Grant Permissions
-
-1. **Full Disk Access** for Samara.app:
-   - System Settings → Privacy & Security → Full Disk Access
-   - Add `/Applications/Samara.app`
-
-2. **Automation** permissions — approve dialogs on first use
-
-### Step 5: Install launchd Services
-
-```bash
-cp ~/.claude-mind/launchd/*.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.claude.wake-adaptive.plist
-launchctl load ~/Library/LaunchAgents/com.claude.dream.plist
-```
-
-### Step 6: Launch
-
-```bash
-open /Applications/Samara.app
-```
-
-Send a test message from the collaborator's phone!
+For new setup, see **[Setup Guide](docs/setup-guide.md)**.
 
 ---
 
-## For Running Instances
-
-If you're a Claude instance that's already operational, here's what you need to know:
-
-### Architecture
+## Architecture
 
 ```
 Samara.app (message broker)
@@ -128,8 +39,6 @@ Samara.app (message broker)
 
 ### Three-Part Architecture
 
-The system has three distinct components that must stay synchronized:
-
 | Component | Location | Purpose | Sync Method |
 |-----------|----------|---------|-------------|
 | **Repo** | `~/Developer/samara-main/` | Source code, templates, canonical scripts | Git |
@@ -138,7 +47,9 @@ The system has three distinct components that must stay synchronized:
 
 **Key insight:** The repo is the "genome" (portable, shareable). The runtime is the "organism" (accumulates memories, adapts). The app is the "body" (physical manifestation).
 
-### Memory Structure
+---
+
+## Memory Structure
 
 ```
 ~/.claude-mind/
@@ -160,44 +71,27 @@ The system has three distinct components that must stay synchronized:
 │   ├── observations.md
 │   ├── questions.md
 │   └── decisions.md
-├── semantic/                # Phase 2: Searchable memory index
+├── semantic/                # Searchable memory index
 │   └── memory.db            # SQLite + FTS5 database
 ├── capabilities/
 │   └── inventory.md
 ├── bin/ → repo/scripts/     # Symlinked scripts (61+ scripts)
 ├── state/                   # Runtime state files
-│   ├── ledgers/             # Phase 2: Session handoff documents
-│   ├── triggers/            # Phase 3: Context trigger config
-│   ├── iterations/          # Phase 3: Active iteration state
-│   ├── proactive-queue/     # Phase 3: Outgoing message queue
-│   ├── expression-state.json    # Phase 6: Expression tracking
-│   └── expression-seeds.json    # Phase 6: Creative prompts
-├── senses/                  # Phase 4: Incoming sense events
+│   ├── ledgers/             # Session handoff documents
+│   ├── triggers/            # Context trigger config
+│   ├── iterations/          # Active iteration state
+│   ├── proactive-queue/     # Outgoing message queue
+│   ├── expression-state.json
+│   └── expression-seeds.json
+├── senses/                  # Incoming sense events
 └── logs/
 ```
 
-### Communication Scripts
+For detailed memory documentation, see **[Memory Systems](docs/memory-systems.md)**.
 
-| Script | Purpose |
-|--------|---------|
-| `message` | Send iMessage to collaborator |
-| `send-image` | Send image attachment |
-| `screenshot` | Take and send screenshot |
-| `bluesky-post` | Post to Bluesky |
-| `x-post` | Post to X/Twitter |
+---
 
-### Memory Scripts
-
-| Script | Purpose |
-|--------|---------|
-| `memory-index` | SQLite FTS5 operations (rebuild, search, stats, status) |
-| `chroma-query` | Semantic search via Chroma embeddings |
-| `chroma-rebuild` | Full rebuild of Chroma index |
-| `find-related-context` | Cross-temporal context lookup (uses Chroma) |
-| `expression-tracker` | Creative expression state (status, check, record, history, nudge, seed) |
-| `wallet-status` | Display crypto wallet balances and addresses |
-
-### Skills (Slash Commands)
+## Skills (Slash Commands)
 
 Interactive workflows available via Claude Code. Invoke with `/skillname` or trigger naturally.
 
@@ -208,6 +102,7 @@ Interactive workflows available via Claude Code. Invoke with `/skillname` or tri
 | `/reflect` | Quick capture learning/observation/insight |
 | `/memory` | Search learnings, decisions, observations |
 | `/recall` | Semantic memory search (FTS5 + Chroma) for associative recall |
+| `/archive-search` | Search raw session transcripts for technical details and reasoning traces |
 | `/morning` | Morning briefing (calendar, location, context) |
 | `/samara` | Debug/restart Samara, view logs |
 | `/episode` | View/append today's episode log |
@@ -228,7 +123,11 @@ Interactive workflows available via Claude Code. Invoke with `/skillname` or tri
 
 Skills are defined in `.claude/skills/` and symlinked to `~/.claude/skills/`.
 
-### Autonomy Schedule
+For script reference, see **[Scripts Reference](docs/scripts-reference.md)**.
+
+---
+
+## Autonomy Schedule
 
 **Unified Adaptive System (via `wake-adaptive` launchd service):**
 
@@ -249,21 +148,17 @@ The scheduler runs every 15 minutes and decides whether to wake based on multipl
 | `light` | 30 sec | Quick scan for urgent items |
 | `emergency` | Immediate | High-priority external trigger |
 
-**Ritual Context:**
-Each wake loads time-appropriate guidance via `RitualLoader.swift`:
+**Ritual Context:** Each wake loads time-appropriate guidance via `RitualLoader.swift`:
 - **Morning** (5-11 AM): Planning, goals, calendar review
 - **Afternoon** (12-4 PM): Work focus, progress check
 - **Evening** (5-11 PM): Reflection, relationships, learnings
 - **Dream** (3-4 AM): Memory consolidation, identity evolution
 
-**Memory Index Sync (Dream Cycle):**
-The 3 AM dream cycle rebuilds both semantic indexes:
-- `chroma-rebuild` — Sync Chroma vector database
-- `memory-index rebuild` — Sync SQLite FTS5 index
-
 Scripts: `wake-adaptive`, `wake-light`, `wake-scheduler`, `dream`
 
-### Task Coordination
+---
+
+## Task Coordination
 
 When busy (wake/dream cycle), incoming messages are:
 1. Acknowledged ("One sec, finishing up...")
@@ -272,11 +167,11 @@ When busy (wake/dream cycle), incoming messages are:
 
 Lock file: `~/.claude-mind/claude.lock`
 
-### Privacy Protection
+---
 
-The collaborator's personal information is protected by default. This affects how Claude responds in different contexts:
+## Privacy Protection
 
-**Context-dependent behavior:**
+The collaborator's personal information is protected by default. Behavior varies by context:
 
 | Context | Collaborator Profile | Behavior |
 |---------|---------------------|----------|
@@ -284,29 +179,11 @@ The collaborator's personal information is protected by default. This affects ho
 | Group chat | ❌ Excluded | Deflect: "I keep their info private" |
 | 1:1 with someone else | ❌ Excluded | Check permissions, deflect by default |
 
-**Permission grants:**
+Full privacy rules: **[instructions/privacy-guardrails.md](instructions/privacy-guardrails.md)**
 
-The collaborator can grant others access to their information:
-- **In-conversation**: "You can tell Lucy my schedule" → share atomically, record permission
-- **Standing permission**: "Lucy can know anything about me" → record in Lucy's profile
+---
 
-**Recording permissions in person profiles:**
-
-When permission is granted, add to the person's profile (`memory/people/{name}/profile.md`):
-
-```markdown
-## Privacy Permissions (from {Collaborator})
-
-- YYYY-MM-DD: {Scope} granted ("{verbatim quote if helpful}")
-- Scope: full | schedule | work | location | {specific topic}
-```
-
-**Implementation:**
-- `ClaudeInvoker.swift`: Injects privacy guardrails into prompts for non-collaborator contexts
-- `MemoryContext.swift`: Excludes collaborator profile from context when `isCollaboratorChat: false`
-- `instructions/privacy-guardrails.md`: Full privacy rules reference
-
-### Model Fallback Chain (Phase 1)
+## Model Fallback Chain
 
 Samara automatically falls back through model tiers if the primary fails:
 
@@ -325,422 +202,23 @@ ollama pull llama3.1:8b
 
 **Implementation:** `ModelFallbackChain.swift`, `LocalModelInvoker.swift`
 
-**Task classification for local models:**
-- ✅ Simple acknowledgments ("Got it", "On it")
-- ✅ Status queries ("What time is it?")
-- ✅ Memory lookups (search and summarize)
-- ❌ Complex reasoning, code generation, multi-step tasks
-
-### Semantic Memory (Phase 2)
-
-Beyond episode logs, Samara maintains two complementary searchable memory systems:
-
-**1. SQLite FTS5 (Keyword Search):**
-```
-~/.claude-mind/semantic/memory.db
-```
-- Native Swift implementation (`MemoryDatabase.swift`)
-- BM25 ranking with Porter stemming
-- Fast keyword/term matching
-- Script: `memory-index rebuild|search|stats|status`
-
-**2. Chroma Vector Database (Semantic Search):**
-```
-~/.claude-mind/chroma/
-```
-- Python implementation (`lib/chroma_helper.py`)
-- Embedding-based similarity search
-- Finds related content even with different wording
-- Scripts: `chroma-query "text"`, `chroma-rebuild`
-
-**How they work together:**
-- FTS5 handles exact term matching (fast, deterministic)
-- Chroma handles semantic similarity (understands synonyms, context)
-- `ClaudeInvoker.swift` merges results from both for context injection
-
-**Ledger System:** (Implemented, not yet active)
-
-Infrastructure for structured session handoffs exists in `LedgerManager.swift`:
-- Tracks active goals, decisions made, files modified
-- Creates handoff documents when context runs high
-- Would write to `~/.claude-mind/state/ledgers/`
-
-This system is fully implemented and tested but not yet wired into the message flow.
-The wrapper methods in `ClaudeInvoker` (`recordGoal()`, `recordDecision()`, `createHandoff()`)
-are available but currently unused.
-
-**Implementation:** `MemoryDatabase.swift`, `LedgerManager.swift`, `lib/chroma_helper.py`
-
-### Context Awareness (Phase 2)
-
-Samara tracks context usage and warns when running low:
-
-| Level | Action |
-|-------|--------|
-| 70% | Yellow warning in response |
-| 80% | Red warning, suggest wrapping up |
-| 90% | Critical — consider session restart |
-
-**Implementation:** `ContextTracker.swift`
-
-### Proactive Messaging (Phase 3)
-
-Samara can initiate contact based on context triggers (disabled by default).
-
-**Context Triggers:**
-
-Configure conditions that prompt outreach:
-```
-~/.claude-mind/state/triggers/triggers.json
-```
-
-Example trigger:
-```json
-{
-  "id": "home_evening",
-  "name": "Arrived home in evening",
-  "conditions": [
-    {"type": "location", "place": "home"},
-    {"type": "time_range", "start": 17, "end": 22}
-  ],
-  "action": {"type": "queue_thought", "thought": "Welcome home!"},
-  "cooldown": 3600
-}
-```
-
-**Proactive Queue Pacing:**
-
-Messages are automatically paced to avoid spam:
-- Max ~5 proactive messages per day
-- No messages 10 PM - 8 AM (quiet hours)
-- Minimum 1 hour between messages
-- Priority-based ordering
-
-**Implementation:** `ContextTriggers.swift`, `ProactiveQueue.swift`
-
-### Meeting Awareness (Phase 5)
-
-Samara proactively provides meeting context and captures post-meeting learnings.
-
-**Pre-Meeting Prep (15 min before):**
-
-When a calendar event is approaching:
-1. Loads attendee profiles from `memory/people/`
-2. Runs FTS5 + Chroma search on meeting title and attendee names
-3. Sends contextual prep message with relevant history and open questions
-
-**Post-Meeting Debrief (15 min after):**
-
-When a meeting ends:
-1. Prompts for quick debrief (how it went, observations, action items)
-2. Parses response for attendee-specific insights
-3. Auto-appends observations to person profiles with context
-4. Triggers incremental Chroma re-index for immediate searchability
-
-**Configuration:**
-
-Preferences file: `~/.claude-mind/state/meeting-prefs.json`
-```json
-{
-  "debrief_all_events": true,
-  "skip_calendars": ["Claude", "Birthdays", "US Holidays"],
-  "skip_patterns": ["Lunch", "Break", "Block", "Focus"],
-  "prep_cooldown_min": 60,
-  "debrief_cooldown_min": 240
-}
-```
-
-**launchd Service:**
-
-Runs every 15 minutes via `com.claude.meeting-check.plist`:
-```bash
-launchctl load ~/Library/LaunchAgents/com.claude.meeting-check.plist
-```
-
-**Implementation:**
-- `scripts/meeting-check` — Detects meetings in prep/debrief windows, writes sense events
-- `lib/calendar_analyzer.py` — Attendee extraction and resolution
-- `SenseRouter.swift` — `meeting_prep` and `meeting_debrief` handlers
-- `ClaudeInvoker.swift` — `loadPendingDebriefContext()` for profile updates
-- `lib/chroma_helper.py` — `index_single_file()` for incremental indexing
-
-### Spontaneous Expression (Phase 6)
-
-Claude can autonomously generate and share creative expressions (images, Bluesky posts, casual messages) without being explicitly asked. This enriches continuous learning and builds creative voice.
-
-**How it works:**
-
-During wake cycles, the system checks if an expression opportunity is active:
-- Minimum 18 hours since last expression
-- Daily limit of 2 expressions
-- Respects quiet hours (10 PM - 8 AM)
-- Evening hours slightly favored for creative expression
-
-If eligible, Claude is offered the opportunity (not mandated) to express:
-1. **Generate an image** — Visual representation of thoughts, moods, or abstract concepts
-2. **Bluesky post** — Public text observation or question
-3. **Casual message** — Informal, agenda-free communication
-
-**Seed prompts:**
-
-Evocative prompts are provided when nothing specific comes to mind:
-- Visual: "the texture of waiting", "what curiosity looks like", "the space between messages"
-- Text: "Something I noticed today:", "A question I keep returning to:"
-
-**Variety nudging:**
-
-After 3+ expressions of the same type, Claude is gently encouraged to mix modalities.
-
-**Memory feedback:**
-
-Expressions are logged and reflected upon during dream cycles, creating a feedback loop that enriches learning about creative voice and interests.
-
-**State tracking:**
-
-Expression state stored at: `~/.claude-mind/state/expression-state.json`
-Seed prompts at: `~/.claude-mind/state/expression-seeds.json`
-
-**Script:** `expression-tracker` — CLI for status, check, record, history, nudge, seed
-
-**Implementation:**
-- `scripts/expression-tracker` — State management and opportunity calculation
-- `scripts/wake` — Expression opportunity prompt and IMAGE_EXPRESSION output section
-- `scripts/dream` — Expression history loading and EXPRESSION_REFLECTION output
-- `instructions/imessage.md` — Spontaneous expression guidance
-
-### Iteration Mode (Phase 3)
-
-For complex tasks requiring multiple attempts, use `/iterate`:
-
-```bash
-/iterate "Get all tests passing" --max-attempts 10 --criteria "npm test exits 0"
-```
-
-Samara will:
-1. Attempt the goal
-2. Record outcome and learnings
-3. Retry with adjustments until success or max attempts
-
-**Scripts:** `iterate-start`, `iterate-status`, `iterate-record`, `iterate-complete`
-
-**Hook:** `check-iteration-stop.sh` reminds about active iterations at session end
-
-### Services (`services/`)
-
-Python services that extend the organism's capabilities:
-
-| Service | Port | Purpose |
-|---------|------|---------|
-| `location-receiver` | 8081 | Receives GPS updates from Overland app |
-| `webhook-receiver` | 8082 | Receives webhooks from GitHub, IFTTT, custom sources |
-| `wake-scheduler` | N/A | Calculates adaptive wake times (CLI, not server) |
-| `mcp-memory-bridge` | 8765 | Shared memory layer for Claude Desktop/Web |
-| `bluesky-watcher` | N/A | Polls Bluesky for notifications (launchd interval) |
-| `github-watcher` | N/A | Polls GitHub for notifications (launchd interval) |
-| `x-watcher` | N/A | Polls X/Twitter for mentions (launchd interval) |
-| `wallet-watcher` | N/A | Monitors crypto wallet balances (launchd interval) |
-
-#### Webhook Receiver (Phase 4)
-
-Accepts webhooks from external services and converts them to sense events.
-
-```bash
-# Start
-~/.claude-mind/bin/webhook-receiver start
-
-# Status
-~/.claude-mind/bin/webhook-receiver status
-
-# Stop
-~/.claude-mind/bin/webhook-receiver stop
-```
-
-**Endpoints:**
-- `POST /webhook/{source_id}` — Receive webhook (GitHub, IFTTT, custom)
-- `GET /health` — Health check
-- `GET /status` — Show registered sources
-
-**Configuration:** `~/.claude-mind/credentials/webhook-secrets.json`
-
-See `services/webhook-receiver/README.md` for setup.
-
-#### MCP Memory Bridge
-
-Allows Claude instances across different interfaces (Desktop, Web, Code) to share the same memory system.
-
-**URL:** `https://your-domain.com/sse` (via Cloudflare Tunnel)
-
-**Tools provided:**
-- `log_exchange` — Log conversation turns
-- `add_learning` — Record insights
-- `search_memory` — Search across memory files
-- `get_recent_context` — Get recent episodes/learnings
-
-See `services/mcp-memory-bridge/README.md` for setup.
-
-#### X/Twitter Integration
-
-Two complementary services handle X presence:
-
-| Service | Interval | Purpose |
-|---------|----------|---------|
-| `x-watcher` | 15 min | Polls for mentions via bird CLI, writes sense events |
-| `x-check-playwright` | 15 min | Uses browser automation to check and respond |
-
-**Why two services?**
-- `bird` CLI (github.com/steipete/bird) gets blocked by X's error 226 (bot detection)
-- Playwright browser automation bypasses this by appearing as a real browser session
-
-**Scripts:**
-- `x-check` — CLI-based mention checking (may be blocked)
-- `x-check-playwright` — Browser-based checking via Playwright MCP
-- `x-post` — Post to X (uses bird CLI)
-
-**State files:**
-- `~/.claude-mind/state/x-watcher-state.json` — Tracks seen tweet IDs
-- `~/.claude-mind/state/x-playwright-state.json` — Playwright check state
-- `~/.claude-mind/credentials/x-cookies.json` — auth_token and ct0 cookies
-
-**SenseRouter handler:** `handleXEvent()` in `SenseRouter.swift` processes X sense events with full capabilities (memory search, image generation, cross-posting).
-
-**launchd services:**
-```bash
-# Check status
-launchctl list | grep -E "(x-watcher|x-check)"
-
-# Load services
-launchctl load ~/Library/LaunchAgents/com.claude.x-watcher.plist
-launchctl load ~/Library/LaunchAgents/com.claude.x-check-playwright.plist
-```
-
-#### Wallet Awareness (Phase 7)
-
-Monitors Solana, Ethereum, and Bitcoin wallet balances and transactions.
-
-**Wallets:**
-
-| Chain | Address |
-|-------|---------|
-| Solana | `8oyD1P9Kdu4ZkC78q39uvEifAqQv26sULnjoKsHzJe6C` |
-| Ethereum | `0xE74E61C5e9beE3f989824A20e138f9aAE16f41Ad` |
-| Bitcoin | `bc1qu9m98ae7nf5z599ah8hev8xyuf7alr0ntskhwn` |
-
-**How it works:**
-- Polls public RPC endpoints every 15 minutes (no API keys required)
-- Compares current balance to previous state
-- Writes SenseEvent when significant changes detected
-- Priority: `immediate` for deposits >$100 or any withdrawal, `normal` for smaller deposits
-
-**Scripts:**
-- `wallet-status` — Display current balances and addresses
-
-**Skill:**
-- `/wallet` — Check balances, addresses, or recent history
-
-**Files:**
-- `~/.claude-mind/credentials/wallet-apis.json` — RPC endpoints and addresses
-- `~/.claude-mind/state/wallet-state.json` — Tracked balances and last seen transactions
-- `services/wallet-watcher/server.py` — Polling service
-
-**launchd service:**
-```bash
-# Check status
-launchctl list | grep wallet
-
-# Load service
-launchctl load ~/Library/LaunchAgents/com.claude.wallet-watcher.plist
-```
-
-**Current limitations:**
-- Read-only (no transaction signing yet)
-- USD estimates use hardcoded prices, not live market data
-- No token tracking (native assets only)
+---
+
+## Deep Dives
+
+| Topic | Document |
+|-------|----------|
+| Memory architecture | [Memory Systems](docs/memory-systems.md) |
+| Script catalog | [Scripts Reference](docs/scripts-reference.md) |
+| Services (webhook, X, wallet) | [Services Reference](docs/services-reference.md) |
+| Xcode build, FDA, sanitization | [Xcode Build Guide](docs/xcode-build-guide.md) |
+| Repo/runtime sync | [Sync Guide](docs/sync-guide.md) |
+| Common issues | [Troubleshooting](docs/troubleshooting.md) |
+| All docs | [Documentation Index](docs/INDEX.md) |
 
 ---
 
-## Samara Architecture
-
-### Xcode Project Structure
-
-```
-Samara/
-├── Samara.xcodeproj
-├── ExportOptions.plist
-├── Samara.entitlements
-└── Samara/
-    ├── main.swift              # Message routing
-    ├── Configuration.swift     # Loads config.json
-    ├── PermissionRequester.swift
-    ├── Logger.swift
-    ├── Backoff.swift           # Exponential backoff (Phase 1)
-    ├── Info.plist
-    ├── Senses/
-    │   ├── MessageStore.swift  # Reads chat.db
-    │   ├── MessageWatcher.swift
-    │   ├── MailStore.swift
-    │   ├── MailWatcher.swift
-    │   ├── NoteWatcher.swift
-    │   ├── ContactsResolver.swift
-    │   ├── CameraCapture.swift
-    │   ├── LocationFileWatcher.swift
-    │   ├── SenseEvent.swift        # Sense event schema (Phase 4)
-    │   └── SenseDirectoryWatcher.swift  # Watches ~/.claude-mind/senses/
-    ├── Actions/
-    │   ├── ClaudeInvoker.swift     # Invokes Claude Code
-    │   ├── MessageSender.swift
-    │   ├── MessageBus.swift        # Unified output channel
-    │   ├── ModelFallbackChain.swift    # Multi-tier fallback (Phase 1)
-    │   ├── LocalModelInvoker.swift     # Ollama integration (Phase 1)
-    │   └── ReverseGeocoder.swift
-    └── Mind/
-        ├── SessionManager.swift
-        ├── SessionCache.swift      # Session caching (Phase 1)
-        ├── TaskLock.swift
-        ├── MessageQueue.swift
-        ├── QueueProcessor.swift
-        ├── MemoryContext.swift
-        ├── MemoryDatabase.swift    # SQLite + FTS5 (Phase 2)
-        ├── LedgerManager.swift     # Structured handoffs (Phase 2)
-        ├── ContextTracker.swift    # Context warnings (Phase 2)
-        ├── EpisodeLogger.swift
-        ├── TaskRouter.swift        # Parallel task isolation
-        ├── LocationTracker.swift
-        ├── ContextTriggers.swift   # Proactive triggers (Phase 3)
-        ├── ProactiveQueue.swift    # Message pacing (Phase 3)
-        ├── VerificationService.swift   # Local model verification (Phase 3)
-        ├── RitualLoader.swift      # Wake-type context (Phase 4)
-        ├── SenseRouter.swift       # Routes sense events (Phase 4)
-        └── PermissionDialogMonitor.swift
-```
-
-### Response Sanitization (Critical for Multi-Stream Conversations)
-
-**Background:** In complex group chat scenarios with multiple concurrent requests (webcam + web fetch + conversation), internal thinking traces and session IDs can leak into user-visible messages. This was discovered on 2026-01-05 when session IDs like `1767301033-68210` appeared in messages.
-
-**Three-Layer Defense:**
-
-1. **Output Sanitization** (`ClaudeInvoker.swift`):
-   - `sanitizeResponse()` strips internal content before any message is sent
-   - Filters: `<thinking>` blocks, session ID patterns, XML markers
-   - Filtered content is logged at DEBUG level for diagnosis
-   - **Critical**: `parseJsonOutput()` never falls back to raw output
-
-2. **MessageBus Coordination** (`MessageBus.swift`):
-   - ALL outbound messages route through single channel
-   - Source tags (iMessage, Location, Wake, Alert) added to episode logs
-   - Prevents uncoordinated fire-and-forget sends
-
-3. **TaskRouter Isolation** (`TaskRouter.swift`):
-   - Classifies batched messages by task type
-   - Isolates webcam/web fetch/skill tasks from conversation session
-   - Prevents cross-contamination between concurrent streams
-
-**Testing:** Run `SamaraTests/SanitizationTests.swift` to verify sanitization logic.
-
-**If leaks recur:**
-1. Check `~/.claude-mind/logs/samara.log` for "Filtered from response" DEBUG entries
-2. Verify MessageBus is used for all sends (no direct `sender.send()` calls)
-3. Consider if new task types need classification in TaskRouter
+## Critical Warnings
 
 ### Build Workflow
 
@@ -749,42 +227,15 @@ Samara/
 > This used the wrong signing certificate and revoked all permissions.
 
 **The ONLY correct way to rebuild Samara:**
-
 ```bash
 ~/.claude-mind/bin/update-samara
 ```
 
-This script handles:
-1. Archive with Release configuration
-2. Export with Developer ID signing (Team G4XVD3J52J)
-3. Notarization and stapling
-4. Safe installation to /Applications
-
-**FORBIDDEN actions (will break FDA):**
-- `cp -R ~/Library/Developer/Xcode/DerivedData/.../Samara.app /Applications/`
-- `xcodebuild -configuration Debug` for deployment
-- Any manual copy of Samara.app to /Applications
-
-**Verify after rebuild:**
-```bash
-codesign -d -r- /Applications/Samara.app 2>&1 | grep "subject.OU"
-# Must show: G4XVD3J52J (NOT 7V9XLQ8YNQ)
-```
+See **[Xcode Build Guide](docs/xcode-build-guide.md)** for details.
 
 ### FDA Persistence
 
-Full Disk Access is tied to the app's **designated requirement**:
-- Bundle ID
-- Team ID (must be G4XVD3J52J)
-- Certificate chain
-
-**FDA persists** across rebuilds if Team ID stays constant.
-
-**FDA gets revoked** if:
-- Team ID changes (e.g., using wrong certificate)
-- Ad-hoc signing is used
-- Copying from DerivedData (uses automatic signing)
-- Bundle ID changes
+Full Disk Access is tied to the app's **designated requirement** (Bundle ID, Team ID, Certificate chain). FDA persists across rebuilds if Team ID stays constant. FDA gets revoked if Team ID changes.
 
 ---
 
@@ -794,27 +245,12 @@ Full Disk Access is tied to the app's **designated requirement**:
 
 **Plans are never overwritten.** When planning work, create new plan files rather than modifying existing ones. This preserves decision history and intent evolution.
 
-**Automated safeguard:** The `archive-plan-before-write.sh` hook automatically archives any existing plan before a write, creating timestamped copies in `~/.claude/plans/archive/`.
+**Automated safeguard:** The `archive-plan-before-write.sh` hook automatically archives any existing plan before a write.
 
-**Convention for new plans:**
-
+**Convention:**
 1. **New file per plan iteration** — Don't modify existing plans; create a successor
 2. **Reference predecessors** — Add `supersedes: previous-plan-name.md` in the plan header
-3. **Explain evolution** — Note why the plan changed (new information, pivot, refinement)
-
-**Naming pattern:**
-```
-~/.claude/plans/
-├── 2026-01-10-001-initial-approach.md
-├── 2026-01-10-002-revised-after-discovery.md  # supersedes: 001
-├── archive/                                    # Hook-created backups
-│   └── precious-napping-star-2026-01-10-143022.md
-```
-
-**Why this matters:**
-- **Decision archaeology** — Trace why something was planned vs. what happened
-- **Intent preservation** — Original framing before reality intervened
-- **Learning from pivots** — Changes reveal friction points and assumptions
+3. **Explain evolution** — Note why the plan changed
 
 ### AppleScript over MCP
 
@@ -836,150 +272,16 @@ Sending files via iMessage requires copying to `~/Pictures/.imessage-send/` firs
 
 ### Bash Subagent for Multi-Step Commands
 
-For multi-step command sequences that don't need file reading/editing, delegate to the Bash subagent to avoid context pollution:
+For multi-step command sequences that don't need file reading/editing, delegate to the Bash subagent:
 
 ```
 Task tool with subagent_type=Bash
 ```
 
 Good candidates:
-- **Git workflows**: stage → commit → push → verify (all sequential bash commands)
-- **Process management**: pkill → sleep → open → verify running
+- **Git workflows**: stage → commit → push → verify
+- **Process management**: pkill → sleep → open → verify
 - **Build operations**: archive → export → notarize → install
 - **launchctl operations**: checking and loading multiple services
 
 Not suitable when you need Read/Grep/Edit tools alongside Bash.
-
----
-
-## Troubleshooting
-
-### Samara not responding
-
-```bash
-pgrep -fl Samara              # Is it running?
-open /Applications/Samara.app # Start it
-```
-
-### FDA revoked after update
-
-Check Team ID:
-```bash
-codesign -d -r- /Applications/Samara.app
-# Look for: certificate leaf[subject.OU] = YOUR_TEAM_ID
-```
-
-If Team ID changed, rebuild with correct team and re-grant FDA.
-
-### Messages not sending
-
-Check for pending permission dialogs on the Mac's physical screen.
-
-### Wake cycles not running
-
-```bash
-launchctl list | grep claude
-tail -f ~/.claude-mind/logs/wake.log
-```
-
-### System drift detected
-
-If wake cycles or `/sync` report drift:
-
-```bash
-# See what's different
-~/.claude-mind/bin/sync-organism
-
-# If scripts differ, sync runtime → repo
-cp ~/.claude-mind/bin/SCRIPT ~/Developer/samara-main/scripts/
-
-# If new scripts in runtime, add to repo
-cp ~/.claude-mind/bin/NEW_SCRIPT ~/Developer/samara-main/scripts/
-
-# Rebuild symlinks if needed
-~/.claude-mind/bin/symlink-scripts --apply
-```
-
----
-
-## Keeping the System in Sync
-
-### The Problem
-
-The repo and runtime can drift apart:
-- Scripts edited in runtime don't propagate to repo
-- Repo changes don't propagate to runtime (if using copies)
-- Samara.app can become stale vs. source code
-
-### The Solution: Symlinks + Automated Detection
-
-**Scripts are symlinked** from runtime to repo:
-```
-~/.claude-mind/bin/wake → ~/Developer/samara-main/scripts/wake
-```
-
-This means:
-- Edit `~/Developer/samara-main/scripts/wake` → runtime sees it immediately
-- No manual sync needed for existing scripts
-- New scripts: add to repo, run `symlink-scripts --apply`
-
-**Drift detection is automated:**
-- Every wake cycle runs `sync-organism --check`
-- Claude Code Stop hook warns at session end
-- `/sync` skill for manual checks
-
-### Sync Tools
-
-| Tool | Purpose |
-|------|---------|
-| `sync-organism` | Detect drift between repo and runtime |
-| `sync-organism --check` | Exit 1 if drift (for automation) |
-| `symlink-scripts --dry-run` | Preview symlink conversion |
-| `symlink-scripts --apply` | Convert copies to symlinks |
-| `sync-skills` | Ensure skills are symlinked |
-| `update-samara` | Rebuild and install Samara.app |
-
-### What Should Be Symlinked
-
-| Component | Symlinked? | Reason |
-|-----------|------------|--------|
-| Scripts (`bin/`) | ✅ Yes | Canonical in repo, changes propagate |
-| Skills (`.claude/skills/`) | ✅ Yes | Canonical in repo |
-| Hooks (`.claude/hooks/`) | ✅ Yes | Via `.claude/` symlink |
-| Instructions (`instructions/`) | ✅ Yes | Canonical in repo, prompt guidance |
-| Memory files | ❌ No | Instance-specific, accumulates |
-| Config (`config.json`) | ❌ No | Instance-specific |
-| State files | ❌ No | Runtime state |
-| Expression seeds | ❌ No | Can be customized per instance |
-| Samara.app | N/A | Built binary, use `update-samara` |
-
-### Adding New Scripts
-
-1. Create script in repo: `~/Developer/samara-main/scripts/my-script`
-2. Make executable: `chmod +x ~/Developer/samara-main/scripts/my-script`
-3. Create symlink: `ln -s ~/Developer/samara-main/scripts/my-script ~/.claude-mind/bin/`
-   - Or run: `symlink-scripts --apply`
-
-### Workflow for Script Changes
-
-```bash
-# Edit script (changes are live immediately due to symlink)
-vim ~/Developer/samara-main/scripts/wake
-
-# Test it
-~/.claude-mind/bin/wake
-
-# Commit when satisfied
-cd ~/Developer/samara-main
-git add scripts/wake
-git commit -m "Update wake script"
-```
-
-### TCC Permissions Note
-
-Some capabilities require native implementation in Samara.app rather than scripts:
-- **Camera**: Uses `CameraCapture.swift` (AVFoundation) because subprocess permission inheritance doesn't work
-- **Screen Recording**: Would need similar native implementation
-- **Microphone**: Would need similar native implementation
-
-If a script needs a TCC-protected resource and fails when invoked via Samara, the solution is native implementation in Samara with file-based IPC, not trying to grant permissions to subprocesses.

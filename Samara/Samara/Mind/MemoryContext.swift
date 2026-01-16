@@ -48,10 +48,11 @@ final class MemoryContext {
     // MARK: - Size Limits
 
     /// Maximum lines for large append-only files (learnings, observations, decisions)
-    private let maxLinesForLargeFiles = 200
+    /// Reduced from 200 to 75 to stay within prompt limits (2026-01-15)
+    private let maxLinesForLargeFiles = 75
 
     /// Maximum lines for episode files
-    private let maxLinesForEpisode = 300
+    private let maxLinesForEpisode = 150
 
     /// Builds a context string from key memory files
     ///
@@ -92,9 +93,11 @@ final class MemoryContext {
             sections.append("### Goals\n\(goals)")
         }
 
-        // Capabilities - full (reference doc)
+        // Capabilities - abbreviated (file can be 800KB+, only load summary)
+        // Full capabilities can be referenced on-demand via /capability skill
         if let capabilities = readFile("capabilities/inventory.md") {
-            sections.append("### Capabilities\n\(capabilities)")
+            let abbreviated = abbreviate(capabilities, maxLines: 100)
+            sections.append("### Capabilities (summary)\n\(abbreviated)")
         }
 
         // Learnings - truncated to recent (append-only, grows large)
@@ -180,6 +183,256 @@ final class MemoryContext {
         }
 
         return sections.joined(separator: "\n\n")
+    }
+
+    // MARK: - Smart Context Building (RAG-style)
+
+    /// Context cache for avoiding redundant file reads
+    private static var contextCache: ContextCache?
+
+    /// Get or create the shared context cache
+    private var cache: ContextCache {
+        if MemoryContext.contextCache == nil {
+            MemoryContext.contextCache = ContextCache(defaultTTL: 300, maxEntries: 50)
+        }
+        return MemoryContext.contextCache!
+    }
+
+    /// Builds CORE context - minimal base that's always loaded (~3K tokens)
+    /// Establishes identity and voice without loading full memory files
+    ///
+    /// - Returns: Core context string with identity summary, goals, and pointers
+    func buildCoreContext() -> String {
+        var sections: [String] = []
+
+        // Current datetime for temporal awareness
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, MMMM d, yyyy 'at' h:mm a"
+        let currentTime = formatter.string(from: Date())
+        sections.append("## Current Time\n\(currentTime)")
+
+        // Identity summary (first 50 lines for essence)
+        if let identity = readFile("identity.md") {
+            let summary = abbreviate(identity, maxLines: 50)
+            sections.append("## Identity\n\(summary)")
+        }
+
+        // Active goals only (abbreviated)
+        if let goals = readFile("goals.md") {
+            let abbreviated = abbreviate(goals, maxLines: 30)
+            sections.append("## Goals\n\(abbreviated)")
+        }
+
+        // Collaborator context (brief)
+        let collaboratorName = config.collaborator.name
+        sections.append("## Collaborator\nYou are working with \(collaboratorName), your human collaborator.")
+
+        // Pointers to available resources (not loaded)
+        sections.append("""
+            ## Available Resources (load on demand)
+
+            These resources are available but not loaded. Reference them when needed:
+
+            - **Capabilities:** Full inventory at ~/.claude-mind/capabilities/inventory.md
+              Use /capability skill to check if something is possible
+
+            - **Memory Search:** Use /recall for semantic memory lookup
+              FTS5 and Chroma indexes available for past conversations
+
+            - **Person Profiles:** Located at ~/.claude-mind/memory/people/{name}/
+              Load specific profiles when discussing individuals
+
+            - **Past Decisions:** Architectural decisions at ~/.claude-mind/memory/decisions.md
+              Search when asked "why did we..." or about past choices
+
+            - **Learnings & Observations:** Recent insights at ~/.claude-mind/memory/
+              Search when reflecting on patterns or growth
+            """)
+
+        return sections.joined(separator: "\n\n")
+    }
+
+    /// Builds SMART context based on analyzed needs (~5-10K tokens)
+    /// Uses ContextRouter results to load only relevant modules
+    ///
+    /// - Parameters:
+    ///   - needs: ContextNeeds from ContextRouter analysis
+    ///   - isCollaboratorChat: Privacy flag for collaborator profile loading
+    /// - Returns: Targeted context string
+    func buildSmartContext(needs: ContextRouter.ContextNeeds, isCollaboratorChat: Bool = true) -> String {
+        var sections: [String] = []
+
+        // Always start with core context
+        sections.append(buildCoreContext())
+
+        // Load required modules based on needs
+        for module in needs.requiredModules {
+            if let moduleContent = loadModule(module, isCollaboratorChat: isCollaboratorChat) {
+                sections.append(moduleContent)
+            }
+        }
+
+        // Add FTS5 search results for queries
+        if !needs.searchQueries.isEmpty {
+            let combinedQuery = needs.searchQueries.joined(separator: " ")
+            if let searchResults = buildRelatedMemoriesSection(for: combinedQuery) {
+                sections.append("## Related Memories\n\(searchResults)")
+            }
+
+            // Only add Chroma if FTS5 returned sparse results AND we have budget
+            // This is the "lazy Chroma" optimization
+            let ftsCount = findRelatedMemories(query: combinedQuery).count
+            if ftsCount < 3 && needs.estimatedTokens < 8000 {
+                if let chromaResults = findRelatedPastContext(for: combinedQuery) {
+                    sections.append(chromaResults)
+                }
+            }
+        }
+
+        let result = sections.joined(separator: "\n\n")
+
+        // Log token estimate
+        let estimatedTokens = Int(Double(result.count) * 0.30)
+        log("Smart context built: ~\(estimatedTokens) tokens, \(needs.requiredModules.count) modules",
+            level: .debug, component: "MemoryContext")
+
+        return result
+    }
+
+    /// Load a specific context module
+    ///
+    /// - Parameters:
+    ///   - module: The context module to load
+    ///   - isCollaboratorChat: Privacy flag for person profiles
+    /// - Returns: Formatted module content, or nil if not available
+    func loadModule(_ module: ContextRouter.ContextModule, isCollaboratorChat: Bool = true) -> String? {
+        switch module {
+        case .capabilities:
+            return loadCapabilitiesModule()
+
+        case .decisions:
+            return loadDecisionsModule()
+
+        case .learnings:
+            return loadLearningsModule()
+
+        case .observations:
+            return loadObservationsModule()
+
+        case .person(let name):
+            return loadPersonModule(name: name, isCollaboratorChat: isCollaboratorChat)
+
+        case .location:
+            return loadLocationModule()
+
+        case .calendar:
+            return loadCalendarModule()
+
+        case .todayEpisode:
+            return loadTodayEpisodeModule()
+        }
+    }
+
+    // MARK: - Module Loaders
+
+    private func loadCapabilitiesModule() -> String? {
+        guard let capabilities = readFile("capabilities/inventory.md") else { return nil }
+        let abbreviated = abbreviate(capabilities, maxLines: 100)
+        return "## Capabilities\n\(abbreviated)"
+    }
+
+    private func loadDecisionsModule() -> String? {
+        guard let decisions = readFile("memory/decisions.md") else { return nil }
+        let truncated = lastLines(decisions, maxLines: maxLinesForLargeFiles)
+        return "## Architectural Decisions\n\(truncated)"
+    }
+
+    private func loadLearningsModule() -> String? {
+        guard let learnings = readFile("memory/learnings.md") else { return nil }
+        let truncated = lastLines(learnings, maxLines: maxLinesForLargeFiles)
+        return "## Learnings\n\(truncated)"
+    }
+
+    private func loadObservationsModule() -> String? {
+        guard let observations = readFile("memory/observations.md") else { return nil }
+        let truncated = lastLines(observations, maxLines: maxLinesForLargeFiles)
+        return "## Self-Observations\n\(truncated)"
+    }
+
+    private func loadPersonModule(name: String, isCollaboratorChat: Bool) -> String? {
+        let nameLower = name.lowercased()
+
+        // Check if this is the collaborator - apply privacy rules
+        let collaboratorLower = config.collaborator.name.lowercased()
+        if nameLower == collaboratorLower || nameLower == "e" || nameLower == "é" {
+            guard isCollaboratorChat else {
+                return nil  // Don't load collaborator profile in non-collaborator chats
+            }
+        }
+
+        // Try people/ structure first, then legacy
+        let peoplePath = "memory/people/\(nameLower)/profile.md"
+        let legacyPath = "memory/about-\(nameLower).md"
+
+        if let profile = readFile(peoplePath) ?? readFile(legacyPath) {
+            return "## About \(name)\n\(profile)"
+        }
+
+        return nil
+    }
+
+    private func loadLocationModule() -> String? {
+        guard let locationSummary = buildLocationSummary() else { return nil }
+        return "## Location Awareness\n\(locationSummary)"
+    }
+
+    private func loadCalendarModule() -> String? {
+        // Use AppleScript to get today's calendar events
+        let script = """
+            tell application "Calendar"
+                set today to current date
+                set tomorrow to today + (1 * days)
+                set eventList to ""
+
+                repeat with cal in calendars
+                    set calEvents to (every event of cal whose start date ≥ today and start date < tomorrow)
+                    repeat with ev in calEvents
+                        set eventList to eventList & "- " & (summary of ev) & " at " & time string of (start date of ev) & "\\n"
+                    end repeat
+                end repeat
+
+                return eventList
+            end tell
+            """
+
+        let process = Process()
+        let outputPipe = Pipe()
+
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", script]
+        process.standardOutput = outputPipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8), !output.isEmpty {
+                return "## Today's Calendar\n\(output)"
+            }
+        } catch {
+            log("Failed to load calendar: \(error)", level: .warn, component: "MemoryContext")
+        }
+
+        return nil
+    }
+
+    private func loadTodayEpisodeModule() -> String? {
+        let today = todayEpisodePath()
+        guard let episode = readFile(today) else { return nil }
+        let truncated = lastLines(episode, maxLines: maxLinesForEpisode)
+        return "## Today's Activity\n\(truncated)"
     }
 
     /// Loads profiles for specified handles (phone/email) to check permissions

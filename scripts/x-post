@@ -2,10 +2,14 @@
 # x-post - Post to X/Twitter
 # Usage: x-post "text to post"
 # Or: echo "text" | x-post
+#
+# Tries bird CLI first, falls back to Playwright browser automation
+# if bird fails with rate limit (344) or anti-automation (226) errors.
 
 set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CREDS_FILE="$MIND_PATH/credentials/x-cookies.json"
 LOG_FILE="$MIND_PATH/logs/x.log"
 
@@ -39,6 +43,30 @@ if [ -z "$TEXT" ]; then
     exit 1
 fi
 
+# Validate input - reject flag-like arguments and internal commands
+if [[ "$TEXT" == --* ]]; then
+    echo "Error: Text looks like a command flag (starts with --)"
+    echo "x-post does not support flags. For replies, use: bird reply TWEET_ID \"text\""
+    echo "For images, use: bird tweet \"text\" --media /path/to/image"
+    exit 1
+fi
+
+# Reject common internal/debug messages
+INTERNAL_PATTERNS=(
+    "^update.*timestamp"
+    "^checking.*status"
+    "^processing.*event"
+    "^sending.*to"
+    "^waiting for"
+)
+for pattern in "${INTERNAL_PATTERNS[@]}"; do
+    if echo "$TEXT" | grep -iqE "$pattern"; then
+        echo "Error: Text looks like an internal message, not a post"
+        echo "Rejected: $TEXT"
+        exit 1
+    fi
+done
+
 # Load credentials
 AUTH_TOKEN=$(jq -r '.auth_token' "$CREDS_FILE")
 CT0=$(jq -r '.ct0' "$CREDS_FILE")
@@ -63,11 +91,39 @@ if [ ${#TEXT} -gt 280 ]; then
 fi
 
 # Post using bird CLI
-RESULT=$(bird tweet "$TEXT" 2>&1) || {
-    log "Error posting to X: $RESULT"
-    echo "Error posting: $RESULT"
-    exit 1
-}
+log "Trying bird tweet..."
+RESULT=$(bird tweet "$TEXT" 2>&1)
+EXIT_CODE=$?
 
-log "Posted to X: ${TEXT:0:50}..."
-echo "$RESULT"
+if [ $EXIT_CODE -eq 0 ]; then
+    log "Posted to X: ${TEXT:0:50}..."
+    echo "$RESULT"
+    exit 0
+fi
+
+# Bird failed - check if we should fall back to Playwright
+if echo "$RESULT" | grep -qiE "226|automated|344|daily limit|rate"; then
+    log "Bird failed with API error, trying Playwright fallback..."
+    log "Bird error was: $RESULT"
+
+    # Try Playwright fallback
+    PW_RESULT=$("$SCRIPT_DIR/x-post-playwright" "$TEXT" 2>&1)
+    PW_EXIT=$?
+
+    if [ $PW_EXIT -eq 0 ]; then
+        log "Playwright fallback succeeded"
+        echo "$PW_RESULT"
+        exit 0
+    else
+        log "Playwright fallback also failed: $PW_RESULT"
+        echo "Both bird and Playwright failed"
+        echo "Bird: $RESULT"
+        echo "Playwright: $PW_RESULT"
+        exit 1
+    fi
+fi
+
+# Non-fallback error from bird
+log "Error posting to X: $RESULT"
+echo "Error posting: $RESULT"
+exit 1

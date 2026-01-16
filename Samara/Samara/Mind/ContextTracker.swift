@@ -63,7 +63,7 @@ final class ContextTracker {
 
         /// Generate ASCII progress bar
         private func progressBar(percentage: Double, width: Int) -> String {
-            let filled = Int(percentage * Double(width))
+            let filled = min(width, max(0, Int(percentage * Double(width))))
             let empty = width - filled
             return "[" + String(repeating: "█", count: filled) + String(repeating: "░", count: empty) + "]"
         }

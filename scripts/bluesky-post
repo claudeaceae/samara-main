@@ -30,6 +30,31 @@ if [ -z "$TEXT" ]; then
     exit 1
 fi
 
+# Validate input - reject flag-like arguments and internal commands
+# This catches cases where Claude outputs commands instead of content
+if [[ "$TEXT" == --* ]]; then
+    echo "Error: Text looks like a command flag (starts with --)"
+    echo "bluesky-post does not support flags. For replies, use the atproto Python SDK."
+    echo "For images, use bluesky-image script instead."
+    exit 1
+fi
+
+# Reject common internal/debug messages that shouldn't be posted
+INTERNAL_PATTERNS=(
+    "^update.*timestamp"
+    "^checking.*status"
+    "^processing.*event"
+    "^sending.*to"
+    "^waiting for"
+)
+for pattern in "${INTERNAL_PATTERNS[@]}"; do
+    if echo "$TEXT" | grep -iqE "$pattern"; then
+        echo "Error: Text looks like an internal message, not a post"
+        echo "Rejected: $TEXT"
+        exit 1
+    fi
+done
+
 # Post using Python atproto SDK (via uvx)
 uvx --with atproto python << PYEOF
 import json

@@ -1,0 +1,237 @@
+#!/bin/bash
+# x-reply-playwright - Reply to an X/Twitter post via browser automation
+# Usage: x-reply-playwright TWEET_ID "reply text"
+#
+# Uses Claude Code with Playwright MCP tools to reply like a human.
+# This is the fallback when bird CLI fails with rate limits or anti-automation.
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_FILE="$MIND_PATH/logs/x-playwright.log"
+STATE_FILE="$MIND_PATH/state/x-playwright-state.json"
+CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
+
+# Rate limits (shared with x-post-playwright)
+MAX_DAILY_POSTS=5
+MIN_SECONDS_BETWEEN=30
+
+# Ensure directories exist
+mkdir -p "$(dirname "$LOG_FILE")"
+mkdir -p "$(dirname "$STATE_FILE")"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [reply] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Initialize state file if missing
+init_state() {
+    if [ ! -f "$STATE_FILE" ]; then
+        echo '{"last_playwright_post": null, "daily_count": 0, "daily_reset_date": null}' > "$STATE_FILE"
+    fi
+}
+
+# Check rate limits - returns 0 if allowed, 1 if blocked
+check_rate_limit() {
+    python3 << PYEOF
+import json
+import sys
+from datetime import datetime, timezone
+
+state_file = "$STATE_FILE"
+max_daily = $MAX_DAILY_POSTS
+min_seconds = $MIN_SECONDS_BETWEEN
+
+try:
+    with open(state_file) as f:
+        state = json.load(f)
+except:
+    sys.exit(0)
+
+now = datetime.now(timezone.utc)
+today = now.strftime("%Y-%m-%d")
+
+if state.get("daily_reset_date") != today:
+    state["daily_count"] = 0
+    state["daily_reset_date"] = today
+    with open(state_file, 'w') as f:
+        json.dump(state, f, indent=2)
+
+if state.get("daily_count", 0) >= max_daily:
+    print(f"Daily limit reached ({max_daily} posts)", file=sys.stderr)
+    sys.exit(1)
+
+last_post = state.get("last_playwright_post")
+if last_post:
+    try:
+        last_dt = datetime.fromisoformat(last_post.replace('Z', '+00:00'))
+        seconds_since = (now - last_dt).total_seconds()
+        if seconds_since < min_seconds:
+            print(f"Too soon ({int(seconds_since)}s < {min_seconds}s minimum)", file=sys.stderr)
+            sys.exit(1)
+    except:
+        pass
+
+sys.exit(0)
+PYEOF
+}
+
+# Update state after successful post
+update_state() {
+    python3 << PYEOF
+import json
+from datetime import datetime, timezone
+
+state_file = "$STATE_FILE"
+
+try:
+    with open(state_file) as f:
+        state = json.load(f)
+except:
+    state = {}
+
+now = datetime.now(timezone.utc)
+today = now.strftime("%Y-%m-%d")
+
+if state.get("daily_reset_date") != today:
+    state["daily_count"] = 0
+    state["daily_reset_date"] = today
+
+state["last_playwright_post"] = now.isoformat().replace('+00:00', 'Z')
+state["daily_count"] = state.get("daily_count", 0) + 1
+
+with open(state_file, 'w') as f:
+    json.dump(state, f, indent=2)
+PYEOF
+}
+
+# Arguments
+TWEET_ID="$1"
+TEXT="$2"
+
+if [ -z "$TWEET_ID" ] || [ -z "$TEXT" ]; then
+    echo "Usage: x-reply-playwright TWEET_ID \"reply text\""
+    echo ""
+    echo "Example: x-reply-playwright 1234567890 \"Thanks for sharing!\""
+    exit 1
+fi
+
+# Validate tweet ID looks reasonable (should be numeric)
+if ! [[ "$TWEET_ID" =~ ^[0-9]+$ ]]; then
+    echo "Error: TWEET_ID should be numeric, got: $TWEET_ID"
+    exit 1
+fi
+
+# Truncate to 280 chars if needed
+if [ ${#TEXT} -gt 280 ]; then
+    TEXT="${TEXT:0:277}..."
+    log "Warning: Text truncated to 280 characters"
+fi
+
+log "Starting Playwright reply to $TWEET_ID: ${TEXT:0:50}..."
+
+# Initialize and check rate limits
+init_state
+if ! check_rate_limit; then
+    REASON=$(check_rate_limit 2>&1)
+    log "Rate limited: $REASON"
+    echo "Rate limited: $REASON"
+    exit 1
+fi
+
+# Load X cookies for authentication
+CREDS_FILE="$MIND_PATH/credentials/x-cookies.json"
+if [ -f "$CREDS_FILE" ]; then
+    AUTH_TOKEN=$(jq -r '.auth_token' "$CREDS_FILE" 2>/dev/null || echo "")
+    CT0=$(jq -r '.ct0' "$CREDS_FILE" 2>/dev/null || echo "")
+    if [ -n "$AUTH_TOKEN" ] && [ "$AUTH_TOKEN" != "null" ] && [ -n "$CT0" ] && [ "$CT0" != "null" ]; then
+        COOKIE_INJECTION="
+CRITICAL FIRST STEP - Inject authentication cookies:
+Before doing anything else, you MUST set cookies using browser_run_code to authenticate:
+
+Use browser_run_code with this exact code:
+\`\`\`javascript
+async (page) => {
+  await page.context().addCookies([
+    { name: 'auth_token', value: '$AUTH_TOKEN', domain: '.x.com', path: '/' },
+    { name: 'ct0', value: '$CT0', domain: '.x.com', path: '/' }
+  ]);
+  return 'Cookies set';
+}
+\`\`\`
+
+After setting cookies, navigate to the tweet URL.
+"
+    else
+        COOKIE_INJECTION=""
+        log "Warning: X credentials not found or invalid, proceeding without cookie injection"
+    fi
+else
+    COOKIE_INJECTION=""
+    log "Warning: No credentials file found at $CREDS_FILE"
+fi
+
+# Build tweet URL - use /i/status/ format which works without knowing the username
+TWEET_URL="https://x.com/i/status/$TWEET_ID"
+
+# Build the prompt for Claude with Playwright
+PROMPT="Reply to this X/Twitter post using browser automation:
+
+Tweet URL: $TWEET_URL
+Reply text: $TEXT
+
+$COOKIE_INJECTION
+Steps:
+1. First, set the authentication cookies using browser_run_code as shown above (if cookie injection instructions were provided)
+2. Navigate to $TWEET_URL using browser_navigate
+3. Wait 2-3 seconds for the tweet to load using browser_wait_for with time parameter
+4. Take a browser_snapshot to see the tweet and verify it loaded
+5. Find and click the Reply button (usually a speech bubble icon or says \"Reply\")
+6. Wait for the reply compose area to appear (1-2 seconds)
+7. Take another snapshot to see the reply compose area
+8. Type the reply text SLOWLY using browser_type with slowly: true
+9. Wait 1-2 seconds after typing
+10. Find and click the Reply/Post button to submit (usually blue)
+11. Wait 2-3 seconds for the reply to submit
+12. Take a final snapshot to verify success
+
+Important:
+- CRITICAL: Set cookies FIRST before navigating to the tweet
+- Use slowly: true when typing to appear more human
+- Add natural delays between actions
+- If you see a login page after setting cookies, the cookies may be expired - report FAILURE
+- If the reply appears in the thread or you see success, report SUCCESS
+- If there's an error message, report FAILURE with the error
+- The reply button might be an icon (speech bubble) - look for interactive elements near the tweet
+
+Output format - respond with ONLY one of these two lines:
+SUCCESS: Replied successfully
+FAILURE: [reason]"
+
+log "Invoking Claude with Playwright..."
+
+RESULT=$("$CLAUDE" -p "$PROMPT" \
+    --dangerously-skip-permissions \
+    --max-turns 15 \
+    --output-format text 2>&1) || {
+    log "Claude/Playwright invocation failed: $RESULT"
+    echo "Playwright automation failed"
+    exit 1
+}
+
+log "Result: $RESULT"
+
+# Check if successful
+if echo "$RESULT" | tail -5 | grep -qi "^SUCCESS"; then
+    log "Playwright reply successful to $TWEET_ID"
+    update_state
+    echo "SUCCESS: Replied via Playwright"
+    exit 0
+else
+    FAILURE_REASON=$(echo "$RESULT" | grep -i "^FAILURE" | head -1 || echo "Unknown error")
+    log "Playwright reply failed: $FAILURE_REASON"
+    echo "$FAILURE_REASON"
+    exit 1
+fi

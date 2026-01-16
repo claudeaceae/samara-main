@@ -1,0 +1,111 @@
+#!/bin/bash
+# bluesky-image - Post an image to Bluesky with optional caption
+# Usage: bluesky-image /path/to/image.png "optional caption"
+# Or: bluesky-image /path/to/image.png (posts with no text)
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CREDS_FILE="$MIND_PATH/credentials/bluesky.json"
+LOG_FILE="$MIND_PATH/logs/bluesky.log"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Check credentials exist
+if [ ! -f "$CREDS_FILE" ]; then
+    echo "Error: Credentials not found at $CREDS_FILE"
+    echo "Create a JSON file with: {\"handle\": \"your.handle\", \"app_password\": \"xxxx-xxxx-xxxx-xxxx\"}"
+    exit 1
+fi
+
+# Parse arguments
+IMAGE_PATH="${1:-}"
+CAPTION="${2:-}"
+
+if [ -z "$IMAGE_PATH" ]; then
+    echo "Error: No image path provided"
+    echo "Usage: bluesky-image /path/to/image.png \"optional caption\""
+    exit 1
+fi
+
+if [ ! -f "$IMAGE_PATH" ]; then
+    echo "Error: Image file not found: $IMAGE_PATH"
+    exit 1
+fi
+
+# Determine MIME type
+case "${IMAGE_PATH##*.}" in
+    png|PNG) MIME_TYPE="image/png" ;;
+    jpg|jpeg|JPG|JPEG) MIME_TYPE="image/jpeg" ;;
+    gif|GIF) MIME_TYPE="image/gif" ;;
+    webp|WEBP) MIME_TYPE="image/webp" ;;
+    *)
+        echo "Error: Unsupported image format. Use PNG, JPEG, GIF, or WebP."
+        exit 1
+        ;;
+esac
+
+# Truncate caption to 300 chars if needed
+if [ -n "$CAPTION" ] && [ ${#CAPTION} -gt 300 ]; then
+    CAPTION="${CAPTION:0:297}..."
+    log "Warning: Caption truncated to 300 characters"
+fi
+
+# Post using Python atproto SDK (via uvx)
+uvx --with atproto python << PYEOF
+import json
+import sys
+from atproto import Client
+
+creds_file = "$CREDS_FILE"
+image_path = "$IMAGE_PATH"
+mime_type = "$MIME_TYPE"
+caption = """$CAPTION"""
+
+try:
+    with open(creds_file) as f:
+        creds = json.load(f)
+
+    client = Client()
+    client.login(creds['handle'], creds['app_password'])
+
+    # Read image data
+    with open(image_path, 'rb') as f:
+        image_data = f.read()
+
+    # Upload image as blob
+    upload = client.upload_blob(image_data)
+
+    # Create image embed
+    from atproto import models
+    embed = models.AppBskyEmbedImages.Main(
+        images=[
+            models.AppBskyEmbedImages.Image(
+                image=upload.blob,
+                alt=caption[:1000] if caption else "Image posted by @claudeaceae.bsky.social"
+            )
+        ]
+    )
+
+    # Post with image
+    post = client.send_post(
+        text=caption if caption else "",
+        embed=embed
+    )
+    print(f"Posted successfully: {post.uri}")
+
+except FileNotFoundError as e:
+    print(f"Error: File not found: {e}")
+    sys.exit(1)
+except json.JSONDecodeError:
+    print(f"Error: Invalid JSON in credentials file")
+    sys.exit(1)
+except Exception as e:
+    print(f"Error posting: {e}")
+    sys.exit(1)
+PYEOF
+
+log "Posted image to Bluesky: $IMAGE_PATH (caption: ${CAPTION:0:30}...)"

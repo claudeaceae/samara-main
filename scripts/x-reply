@@ -1,0 +1,113 @@
+#!/bin/bash
+# x-reply - Reply to an X/Twitter post with automatic fallback
+# Usage: x-reply TWEET_ID "reply text"
+#
+# Tries bird CLI first, falls back to Playwright on rate limit or anti-automation errors.
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_FILE="$MIND_PATH/logs/x.log"
+CREDS_FILE="$MIND_PATH/credentials/x-cookies.json"
+
+# Ensure log directory exists
+mkdir -p "$(dirname "$LOG_FILE")"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [reply] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Arguments
+TWEET_ID="$1"
+TEXT="$2"
+
+if [ -z "$TWEET_ID" ] || [ -z "$TEXT" ]; then
+    echo "Usage: x-reply TWEET_ID \"reply text\""
+    echo ""
+    echo "Example: x-reply 1234567890 \"Thanks for sharing!\""
+    echo ""
+    echo "Tries bird CLI first, falls back to Playwright browser automation"
+    echo "if bird fails with rate limit or anti-automation errors."
+    exit 1
+fi
+
+# Validate tweet ID
+if ! [[ "$TWEET_ID" =~ ^[0-9]+$ ]]; then
+    echo "Error: TWEET_ID should be numeric, got: $TWEET_ID"
+    exit 1
+fi
+
+# Truncate to 280 chars if needed
+if [ ${#TEXT} -gt 280 ]; then
+    TEXT="${TEXT:0:277}..."
+    log "Warning: Text truncated to 280 characters"
+fi
+
+log "Replying to $TWEET_ID: ${TEXT:0:50}..."
+
+# Check credentials exist for bird
+if [ ! -f "$CREDS_FILE" ]; then
+    log "Credentials not found, skipping bird, trying Playwright directly"
+    "$SCRIPT_DIR/x-reply-playwright" "$TWEET_ID" "$TEXT"
+    exit $?
+fi
+
+# Load credentials for bird
+AUTH_TOKEN=$(jq -r '.auth_token' "$CREDS_FILE" 2>/dev/null)
+CT0=$(jq -r '.ct0' "$CREDS_FILE" 2>/dev/null)
+
+if [ -z "$AUTH_TOKEN" ] || [ "$AUTH_TOKEN" = "null" ] || [ -z "$CT0" ] || [ "$CT0" = "null" ]; then
+    log "Invalid credentials, skipping bird, trying Playwright directly"
+    "$SCRIPT_DIR/x-reply-playwright" "$TWEET_ID" "$TEXT"
+    exit $?
+fi
+
+# Export for bird CLI
+export AUTH_TOKEN CT0
+
+# Try bird first
+log "Trying bird reply..."
+RESULT=$(bird reply "$TWEET_ID" "$TEXT" 2>&1)
+EXIT_CODE=$?
+
+if [ $EXIT_CODE -eq 0 ]; then
+    # Check for success indicators
+    if echo "$RESULT" | grep -qi "successfully\|posted\|replied"; then
+        log "Bird reply succeeded"
+        echo "$RESULT"
+        exit 0
+    fi
+    # Bird exited 0 but unclear success - assume success
+    log "Bird reply completed (exit 0)"
+    echo "$RESULT"
+    exit 0
+fi
+
+# Bird failed - check if we should fall back to Playwright
+if echo "$RESULT" | grep -qiE "226|automated|344|daily limit|rate"; then
+    log "Bird failed with API error, trying Playwright fallback..."
+    log "Bird error was: $RESULT"
+
+    # Try Playwright fallback
+    PW_RESULT=$("$SCRIPT_DIR/x-reply-playwright" "$TWEET_ID" "$TEXT" 2>&1)
+    PW_EXIT=$?
+
+    if [ $PW_EXIT -eq 0 ]; then
+        log "Playwright fallback succeeded"
+        echo "$PW_RESULT"
+        exit 0
+    else
+        log "Playwright fallback also failed: $PW_RESULT"
+        echo "Both bird and Playwright failed"
+        echo "Bird: $RESULT"
+        echo "Playwright: $PW_RESULT"
+        exit 1
+    fi
+fi
+
+# Non-fallback error from bird
+log "Bird reply failed: $RESULT"
+echo "Error: $RESULT"
+exit 1

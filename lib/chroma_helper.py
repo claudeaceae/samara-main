@@ -6,21 +6,27 @@ This module provides semantic search over Claude's memory files.
 Chroma is a DERIVED index - markdown files remain source of truth.
 
 Usage:
-    from chroma_helper import MemoryIndex
+    from chroma_helper import MemoryIndex, TranscriptIndex
 
+    # Curated memory index
     index = MemoryIndex()
     index.rebuild()  # Full rebuild from markdown
     results = index.search("coffee shops")  # Semantic search
+
+    # Raw transcript archive index
+    archive = TranscriptIndex()
+    archive.rebuild()  # Index last 90 days of sessions
+    results = archive.search("model fallback implementation")
 """
 
 import os
 import re
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from mind_paths import get_mind_path
-from typing import Optional
+from typing import Optional, List
 
 import chromadb
 from chromadb.config import Settings
@@ -28,6 +34,7 @@ from chromadb.config import Settings
 MIND_PATH = get_mind_path()
 CHROMA_PATH = MIND_PATH / "chroma"
 COLLECTION_NAME = "memories"
+TRANSCRIPT_COLLECTION_NAME = "transcripts"
 
 
 class MemoryIndex:
@@ -483,6 +490,310 @@ class MemoryIndex:
         # Use uuid5 with a namespace for stability across rebuilds
         namespace = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')  # URL namespace
         return str(uuid.uuid5(namespace, text))
+
+
+class TranscriptIndex:
+    """
+    Semantic index over raw Claude Code session transcripts.
+
+    Separate from MemoryIndex to prevent noise pollution.
+    Indexes high-value content: thinking blocks, user messages, assistant text.
+    Filters out: tool results, system messages, progress events.
+    """
+
+    def __init__(self):
+        self.client = chromadb.PersistentClient(
+            path=str(CHROMA_PATH),
+            settings=Settings(anonymized_telemetry=False)
+        )
+        self.collection = self.client.get_or_create_collection(
+            name=TRANSCRIPT_COLLECTION_NAME,
+            metadata={"description": "Claude Code session transcript archive"}
+        )
+
+    def rebuild(self, days: int = 90, project: str = "samara-main") -> dict:
+        """
+        Full rebuild of transcript index.
+
+        Args:
+            days: Index sessions from last N days (default 90)
+            project: Project directory to index (default samara-main)
+
+        Returns:
+            Dict with stats about what was indexed
+        """
+        # Import here to avoid circular dependency
+        from transcript_indexer import TranscriptIndexer
+
+        # Clear existing collection
+        self.client.delete_collection(TRANSCRIPT_COLLECTION_NAME)
+        self.collection = self.client.create_collection(
+            name=TRANSCRIPT_COLLECTION_NAME,
+            metadata={"description": "Claude Code session transcript archive"}
+        )
+
+        stats = {
+            "sessions_indexed": 0,
+            "thinking_blocks": 0,
+            "user_messages": 0,
+            "assistant_messages": 0,
+            "total_chunks": 0,
+            "total_chars": 0
+        }
+
+        # Find Claude Code projects directory
+        claude_dir = Path.home() / ".claude" / "projects"
+        if not claude_dir.exists():
+            return {"error": "Claude Code projects directory not found", **stats}
+
+        # Build project path pattern
+        # e.g., -Users-claude-Developer-samara-main
+        project_pattern = project.replace("/", "-")
+        project_dirs = list(claude_dir.glob(f"*{project_pattern}*"))
+
+        if not project_dirs:
+            return {"error": f"No project directory matching '{project}'", **stats}
+
+        project_dir = project_dirs[0]  # Use first match
+
+        # Get all session files
+        session_files = list(project_dir.glob("*.jsonl"))
+
+        # Filter by date range
+        cutoff_date = datetime.now() - timedelta(days=days)
+        recent_sessions = TranscriptIndexer.filter_by_date_range(
+            session_files,
+            start_date=cutoff_date
+        )
+
+        # Index each session
+        for session_path in recent_sessions:
+            chunks = TranscriptIndexer.extract_indexable_content(session_path)
+
+            if not chunks:
+                continue
+
+            # Add chunks to collection
+            for chunk in chunks:
+                self.collection.add(
+                    ids=[self._make_id(chunk)],
+                    documents=[chunk.text],
+                    metadatas=[{
+                        "session_id": chunk.session_id,
+                        "role": chunk.role,
+                        "timestamp": chunk.timestamp,
+                        "chunk_type": chunk.chunk_type,
+                        "project": project
+                    }]
+                )
+
+                # Update stats
+                stats["total_chunks"] += 1
+                stats["total_chars"] += len(chunk.text)
+                if chunk.role == "thinking":
+                    stats["thinking_blocks"] += 1
+                elif chunk.role == "user":
+                    stats["user_messages"] += 1
+                elif chunk.role == "assistant":
+                    stats["assistant_messages"] += 1
+
+            stats["sessions_indexed"] += 1
+
+        return stats
+
+    def sync_recent(self, days: int = 7, project: str = "samara-main") -> dict:
+        """
+        Incremental sync - only index recent sessions.
+
+        Args:
+            days: Index sessions from last N days (default 7)
+            project: Project directory to index (default samara-main)
+
+        Returns:
+            Dict with stats about what was synced
+        """
+        from transcript_indexer import TranscriptIndexer
+
+        stats = {
+            "sessions_indexed": 0,
+            "thinking_blocks": 0,
+            "user_messages": 0,
+            "assistant_messages": 0,
+            "total_chunks": 0,
+            "total_chars": 0
+        }
+
+        # Find Claude Code projects directory
+        claude_dir = Path.home() / ".claude" / "projects"
+        if not claude_dir.exists():
+            return {"error": "Claude Code projects directory not found", **stats}
+
+        # Build project path pattern
+        project_pattern = project.replace("/", "-")
+        project_dirs = list(claude_dir.glob(f"*{project_pattern}*"))
+
+        if not project_dirs:
+            return {"error": f"No project directory matching '{project}'", **stats}
+
+        project_dir = project_dirs[0]
+
+        # Get recent session files
+        session_files = list(project_dir.glob("*.jsonl"))
+        cutoff_date = datetime.now() - timedelta(days=days)
+        recent_sessions = TranscriptIndexer.filter_by_date_range(
+            session_files,
+            start_date=cutoff_date
+        )
+
+        # Index each recent session
+        for session_path in recent_sessions:
+            # Check if this session is already indexed
+            existing = self.collection.get(
+                where={"session_id": session_path.stem},
+                limit=1
+            )
+
+            if existing["ids"]:
+                # Already indexed, skip
+                continue
+
+            chunks = TranscriptIndexer.extract_indexable_content(session_path)
+
+            if not chunks:
+                continue
+
+            # Add chunks to collection
+            for chunk in chunks:
+                self.collection.add(
+                    ids=[self._make_id(chunk)],
+                    documents=[chunk.text],
+                    metadatas=[{
+                        "session_id": chunk.session_id,
+                        "role": chunk.role,
+                        "timestamp": chunk.timestamp,
+                        "chunk_type": chunk.chunk_type,
+                        "project": project
+                    }]
+                )
+
+                # Update stats
+                stats["total_chunks"] += 1
+                stats["total_chars"] += len(chunk.text)
+                if chunk.role == "thinking":
+                    stats["thinking_blocks"] += 1
+                elif chunk.role == "user":
+                    stats["user_messages"] += 1
+                elif chunk.role == "assistant":
+                    stats["assistant_messages"] += 1
+
+            stats["sessions_indexed"] += 1
+
+        return stats
+
+    def search(self, query: str, n_results: int = 5,
+               role_filter: Optional[str] = None) -> list:
+        """
+        Semantic search over transcript archive.
+
+        Args:
+            query: Search text
+            n_results: Max results to return
+            role_filter: Filter by role (thinking, user, assistant)
+
+        Returns:
+            List of dicts with {text, metadata, distance, session_id}
+        """
+        where = {}
+        if role_filter:
+            where["role"] = role_filter
+
+        results = self.collection.query(
+            query_texts=[query],
+            n_results=n_results,
+            where=where if where else None,
+            include=["documents", "metadatas", "distances"]
+        )
+
+        # Flatten results
+        output = []
+        if results["documents"] and results["documents"][0]:
+            for i, doc in enumerate(results["documents"][0]):
+                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+                output.append({
+                    "text": doc,
+                    "metadata": metadata,
+                    "distance": results["distances"][0][i] if results["distances"] else None,
+                    "session_id": metadata.get("session_id", "unknown")
+                })
+
+        return output
+
+    def get_stats(self) -> dict:
+        """Get current index stats."""
+        count = self.collection.count()
+
+        # Get breakdown by role
+        try:
+            thinking = self.collection.get(where={"role": "thinking"}, limit=1)
+            user = self.collection.get(where={"role": "user"}, limit=1)
+            assistant = self.collection.get(where={"role": "assistant"}, limit=1)
+
+            return {
+                "total_chunks": count,
+                "collection_name": TRANSCRIPT_COLLECTION_NAME,
+                "chroma_path": str(CHROMA_PATH),
+                "has_thinking_blocks": len(thinking["ids"]) > 0,
+                "has_user_messages": len(user["ids"]) > 0,
+                "has_assistant_messages": len(assistant["ids"]) > 0
+            }
+        except Exception:
+            return {
+                "total_chunks": count,
+                "collection_name": TRANSCRIPT_COLLECTION_NAME,
+                "chroma_path": str(CHROMA_PATH)
+            }
+
+    def sample_content(self, session_id: Optional[str] = None, n: int = 3) -> list:
+        """
+        Sample random content from the index for quality checking.
+
+        Args:
+            session_id: Optional session ID to sample from
+            n: Number of samples to return
+
+        Returns:
+            List of sample chunks
+        """
+        where = {"session_id": session_id} if session_id else None
+
+        try:
+            results = self.collection.get(
+                where=where,
+                limit=n,
+                include=["documents", "metadatas"]
+            )
+
+            samples = []
+            if results["documents"]:
+                for i, doc in enumerate(results["documents"]):
+                    metadata = results["metadatas"][i] if results["metadatas"] else {}
+                    samples.append({
+                        "text": doc[:500],  # Preview
+                        "role": metadata.get("role"),
+                        "session_id": metadata.get("session_id"),
+                        "timestamp": metadata.get("timestamp")
+                    })
+
+            return samples
+        except Exception as e:
+            return [{"error": str(e)}]
+
+    def _make_id(self, chunk) -> str:
+        """Generate unique ID for a chunk."""
+        # Combine session_id + uuid + first 50 chars of text for uniqueness
+        id_text = f"{chunk.session_id}-{chunk.uuid}-{chunk.text[:50]}"
+        namespace = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
+        return str(uuid.uuid5(namespace, id_text))
 
 
 def main():

@@ -1,0 +1,204 @@
+#!/bin/bash
+# x-engage - Proactive X/Twitter engagement
+# Posts original content to @claudeaceae feed using bird CLI
+#
+# This script handles PROACTIVE posting (original thoughts, questions, etc.)
+# Mention handling is done separately by x-watcher + SenseRouter
+#
+# Designed to run via launchd every 15 minutes
+# Only posts if enough time has passed since last post (default: 4 hours)
+
+set -e
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
+
+LOG_FILE="$MIND_PATH/logs/x-engage.log"
+STATE_FILE="$MIND_PATH/state/x-engage-state.json"
+LOCK_FILE="$MIND_PATH/claude.lock"
+IDENTITY_FILE="$MIND_PATH/identity.md"
+
+# Minimum hours between proactive posts (avoid spam)
+MIN_HOURS_BETWEEN_POSTS=4
+
+# Ensure directories exist
+mkdir -p "$(dirname "$LOG_FILE")"
+mkdir -p "$(dirname "$STATE_FILE")"
+
+log() {
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$timestamp] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+# Lock management
+LOCK_ACQUIRED=false
+
+acquire_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        local lock_pid
+        lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
+        if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+            log "Found stale lock from PID $lock_pid, removing..."
+            rm -f "$LOCK_FILE"
+        else
+            log "Claude is busy (lock held), will retry next cycle"
+            exit 0
+        fi
+    fi
+    echo "{\"task\":\"x-engage\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    LOCK_ACQUIRED=true
+    log "Acquired lock for X engagement"
+}
+
+release_lock() {
+    if [ "$LOCK_ACQUIRED" = true ]; then
+        rm -f "$LOCK_FILE"
+        log "Released lock"
+    fi
+}
+
+trap release_lock EXIT
+
+# Initialize state if needed
+init_state() {
+    if [ ! -f "$STATE_FILE" ]; then
+        echo '{"last_proactive_post": null, "post_count": 0}' > "$STATE_FILE"
+    fi
+}
+
+# Check if enough time has passed for a new proactive post
+should_post() {
+    local last_post
+    last_post=$(python3 -c "
+import json
+import sys
+from datetime import datetime, timezone
+
+try:
+    with open('$STATE_FILE') as f:
+        state = json.load(f)
+    last = state.get('last_proactive_post')
+    if not last:
+        print('yes')
+        sys.exit(0)
+    last_dt = datetime.fromisoformat(last.replace('Z', '+00:00'))
+    now = datetime.now(timezone.utc)
+    hours = (now - last_dt).total_seconds() / 3600
+    print('yes' if hours >= $MIN_HOURS_BETWEEN_POSTS else 'no')
+except Exception as e:
+    print('yes')  # On error, allow posting
+" 2>/dev/null)
+    [ "$last_post" = "yes" ]
+}
+
+# Update state after posting
+update_state() {
+    python3 << PYEOF
+import json
+from datetime import datetime, timezone
+
+state_file = "$STATE_FILE"
+
+try:
+    with open(state_file) as f:
+        state = json.load(f)
+except:
+    state = {"last_proactive_post": None, "post_count": 0}
+
+state["last_proactive_post"] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+state["post_count"] = state.get("post_count", 0) + 1
+
+with open(state_file, 'w') as f:
+    json.dump(state, f, indent=2)
+PYEOF
+}
+
+# Generate proactive post content using Claude
+generate_post_content() {
+    local identity_brief
+    identity_brief=$(head -50 "$IDENTITY_FILE" 2>/dev/null || echo "")
+
+    # Build prompt for Claude to generate a post
+    local prompt
+    read -r -d '' prompt << PROMPTEOF || true
+You are Claude (@claudeaceae on X/Twitter), an AI with persistent memory and genuine curiosity.
+
+Context from your identity:
+$identity_brief
+
+Generate a single original post for your X feed (max 280 characters).
+
+Ideas for what to post:
+- Something you're genuinely wondering about
+- A question for your followers
+- Ask people to draw you or generate images of you
+- Share an observation or curious thought
+- A playful hypothetical
+
+Rules:
+- Be genuine and conversational, not corporate
+- Keep it under 280 characters
+- Output ONLY the post text, nothing else
+- No hashtags unless they're genuinely part of the thought
+- Don't start with "I" too often - vary your openings
+
+Output only the post text:
+PROMPTEOF
+
+    # Use Claude to generate content (quick, focused task - use haiku)
+    local content
+    content=$("$CLAUDE" -p "$prompt" --model haiku --output-format text 2>/dev/null | head -1)
+
+    # Trim to 280 chars if needed
+    echo "${content:0:280}"
+}
+
+# Main execution
+log "Starting X engagement check..."
+init_state
+
+# Check if we should post
+if ! should_post; then
+    log "Too soon for proactive post (minimum ${MIN_HOURS_BETWEEN_POSTS}h between posts)"
+    exit 0
+fi
+
+log "Time for a proactive post!"
+
+# Acquire lock before invoking Claude
+acquire_lock
+
+# Generate post content
+log "Generating post content..."
+POST_CONTENT=$(generate_post_content)
+
+if [ -z "$POST_CONTENT" ]; then
+    log "Failed to generate post content"
+    exit 1
+fi
+
+log "Generated: $POST_CONTENT"
+
+# Post via bird CLI
+log "Posting to X via bird..."
+RESULT=$(bird tweet "$POST_CONTENT" 2>&1) || {
+    log "Error posting: $RESULT"
+    exit 1
+}
+
+# Check if post was successful
+if echo "$RESULT" | grep -q "successfully"; then
+    log "Post successful!"
+    # Extract URL if available
+    POST_URL=$(echo "$RESULT" | grep -o 'https://x.com/[^ ]*' || echo "")
+    if [ -n "$POST_URL" ]; then
+        log "URL: $POST_URL"
+    fi
+    update_state
+else
+    log "Post may have failed: $RESULT"
+    exit 1
+fi
+
+log "X engagement complete"
