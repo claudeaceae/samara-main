@@ -14,7 +14,7 @@
 
 INPUT=$(cat)
 
-PROMPT=$(echo "$INPUT" | jq -r '.prompt // ""')
+PROMPT=$(echo "$INPUT" | jq -r '.prompt // ""' 2>/dev/null)
 
 # Check for URLs in the prompt
 # Match http://, https://, or common domains
@@ -43,6 +43,6 @@ CONTEXT+="\n**Remember:** Not engaging with shared content is like ignoring part
 CONTEXT+="Use WebFetch to read these links and respond to their content.\n"
 
 # Escape for JSON
-CONTEXT_ESCAPED=$(echo -e "$CONTEXT" | jq -Rs .)
+CONTEXT_ESCAPED=$(echo -e "$CONTEXT" | jq -Rs . 2>/dev/null)
 
 echo "{\"ok\": true, \"hookSpecificOutput\": {\"additionalContext\": $CONTEXT_ESCAPED}}"

@@ -12,8 +12,8 @@
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 INPUT=$(cat)
 
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""')
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""')
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""' 2>/dev/null)
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null)
 
 # Only process Write and Edit tools
 if [ "$TOOL_NAME" != "Write" ] && [ "$TOOL_NAME" != "Edit" ]; then
@@ -37,7 +37,7 @@ if [[ "$REAL_FILE_PATH" == "$REAL_MEMORY_DIR"/* ]]; then
     # Trigger FTS5 incremental update (background, non-blocking)
     if [ -x "$MIND_PATH/bin/memory-index" ]; then
         # memory-index sync just updates the index for changed files
-        nohup "$MIND_PATH/bin/memory-index" sync "$FILE_PATH" >/dev/null 2>&1 &
+        nohup "$MIND_PATH/bin/memory-index" sync "$FILE_PATH" >> "$MIND_PATH/logs/memory-index.log" 2>&1 &
         INDEX_TRIGGERED+="FTS5 "
     fi
 
@@ -46,7 +46,7 @@ if [[ "$REAL_FILE_PATH" == "$REAL_MEMORY_DIR"/* ]]; then
         # Use chroma helper's incremental indexing
         CHROMA_HELPER="$HOME/Developer/samara-main/lib/chroma_helper.py"
         if [ -f "$CHROMA_HELPER" ]; then
-            nohup python3 "$CHROMA_HELPER" index-single "$FILE_PATH" >/dev/null 2>&1 &
+            nohup python3 "$CHROMA_HELPER" index-single "$FILE_PATH" >> "$MIND_PATH/logs/chroma-index.log" 2>&1 &
             INDEX_TRIGGERED+="Chroma "
         fi
     fi

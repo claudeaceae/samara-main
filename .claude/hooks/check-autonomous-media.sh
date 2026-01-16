@@ -16,8 +16,8 @@
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 INPUT=$(cat)
 
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""')
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""' 2>/dev/null)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null)
 
 # Only check Bash and Skill tools
 if [ "$TOOL_NAME" != "Bash" ] && [ "$TOOL_NAME" != "Skill" ]; then
@@ -43,7 +43,7 @@ fi
 
 # Skill invocation check
 if [ "$TOOL_NAME" = "Skill" ]; then
-    SKILL_NAME=$(echo "$INPUT" | jq -r '.tool_input.skill // ""')
+    SKILL_NAME=$(echo "$INPUT" | jq -r '.tool_input.skill // ""' 2>/dev/null)
     if [ "$SKILL_NAME" = "look" ]; then
         IS_MEDIA_CAPTURE=true
         CAPTURE_TYPE="webcam"

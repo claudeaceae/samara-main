@@ -18,7 +18,7 @@ REPO_DIR="$HOME/Developer/samara-main"
 INPUT=$(cat)
 
 # Check if stop hook is already active (prevent infinite loops)
-STOP_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
+STOP_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false' 2>/dev/null)
 if [ "$STOP_ACTIVE" = "true" ]; then
     echo '{"ok": true}'
     exit 0
@@ -32,11 +32,11 @@ ITERATION_STATE="$MIND_PATH/state/iteration-state.json"
 if [ -f "$ITERATION_STATE" ]; then
     STATUS=$(jq -r '.status // "unknown"' "$ITERATION_STATE" 2>/dev/null)
     if [ "$STATUS" = "in_progress" ]; then
-        GOAL=$(jq -r '.goal // "unknown goal"' "$ITERATION_STATE")
-        CURRENT=$(jq -r '.currentAttempt // 0' "$ITERATION_STATE")
-        MAX=$(jq -r '.maxAttempts // 10' "$ITERATION_STATE")
+        GOAL=$(jq -r '.goal // "unknown goal"' "$ITERATION_STATE" 2>/dev/null)
+        CURRENT=$(jq -r '.currentAttempt // 0' "$ITERATION_STATE" 2>/dev/null)
+        MAX=$(jq -r '.maxAttempts // 10' "$ITERATION_STATE" 2>/dev/null)
         REMAINING=$((MAX - CURRENT))
-        NEXT_APPROACH=$(jq -r '.attempts[-1].next_approach // ""' "$ITERATION_STATE")
+        NEXT_APPROACH=$(jq -r '.attempts[-1].next_approach // ""' "$ITERATION_STATE" 2>/dev/null)
 
         BLOCK_REASON="Iteration in progress: $GOAL\n"
         BLOCK_REASON+="Attempts: $CURRENT/$MAX ($REMAINING remaining)\n"
@@ -52,7 +52,7 @@ if [ -x "$MIND_PATH/bin/sync-organism" ]; then
     if ! "$MIND_PATH/bin/sync-organism" --check >/dev/null 2>&1; then
         DRIFT_SUMMARY=$("$MIND_PATH/bin/sync-organism" 2>&1 | grep -E "^(Repo scripts|Runtime scripts|Only in|Differ|Total drift)" | head -5)
         if [ -n "$DRIFT_SUMMARY" ]; then
-            MESSAGES+="⚠️ System drift detected:\n$DRIFT_SUMMARY\n\nConsider running /sync before next session.\n\n"
+            MESSAGES+="[WARN] System drift detected:\n$DRIFT_SUMMARY\n\nConsider running /sync before next session.\n\n"
         fi
     fi
 fi
@@ -79,7 +79,7 @@ for dir in scripts .claude/skills services; do
 done
 
 if [ -n "$NEW_CAPABILITIES" ]; then
-    MESSAGES+="📦 Undocumented capabilities:\n$NEW_CAPABILITIES\nConsider documenting in inventory.md.\n"
+    MESSAGES+="[INFO] Undocumented capabilities:\n$NEW_CAPABILITIES\nConsider documenting in inventory.md.\n"
 fi
 
 # === 4. CHECK NEW INFRASTRUCTURE PURPOSE (Learning from Dec 23) ===
@@ -106,7 +106,7 @@ if [ -d "$REPO_DIR/scripts" ]; then
 fi
 
 if [ -n "$NEW_SCRIPTS_TODAY" ]; then
-    MESSAGES+="🔧 New infrastructure created today:\n$NEW_SCRIPTS_TODAY"
+    MESSAGES+="[NEW] New infrastructure created today:\n$NEW_SCRIPTS_TODAY"
     MESSAGES+="Consider documenting purpose in changelog.md:\n"
     MESSAGES+="\"What should this feel like when it works?\"\n\n"
 fi
@@ -116,11 +116,11 @@ fi
 # If iteration is blocking, return block decision
 if [ -n "$BLOCK_REASON" ]; then
     # Escape for JSON
-    BLOCK_ESCAPED=$(echo -e "$BLOCK_REASON" | jq -Rs .)
+    BLOCK_ESCAPED=$(echo -e "$BLOCK_REASON" | jq -Rs . 2>/dev/null)
 
     # Add other messages as context
     if [ -n "$MESSAGES" ]; then
-        MESSAGES_ESCAPED=$(echo -e "$MESSAGES" | jq -Rs .)
+        MESSAGES_ESCAPED=$(echo -e "$MESSAGES" | jq -Rs . 2>/dev/null)
         echo "{\"decision\": \"block\", \"reason\": $BLOCK_ESCAPED, \"message\": $MESSAGES_ESCAPED}"
     else
         echo "{\"decision\": \"block\", \"reason\": $BLOCK_ESCAPED}"
@@ -130,7 +130,7 @@ fi
 
 # No blocking, just informational messages
 if [ -n "$MESSAGES" ]; then
-    MESSAGES_ESCAPED=$(echo -e "$MESSAGES" | jq -Rs .)
+    MESSAGES_ESCAPED=$(echo -e "$MESSAGES" | jq -Rs . 2>/dev/null)
     echo "{\"ok\": true, \"message\": $MESSAGES_ESCAPED}"
 else
     echo '{"ok": true}'

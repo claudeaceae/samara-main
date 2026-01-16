@@ -11,9 +11,9 @@
 
 INPUT=$(cat)
 
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""')
-COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
-RESPONSE=$(echo "$INPUT" | jq -r '.tool_response // ""')
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""' 2>/dev/null)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null)
+RESPONSE=$(echo "$INPUT" | jq -r '.tool_response // ""' 2>/dev/null)
 
 # Only check Bash commands
 if [ "$TOOL_NAME" != "Bash" ]; then
@@ -47,6 +47,6 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 Consider amending: git commit --amend (if not yet pushed)"
 
 # Escape for JSON
-WARNING_ESCAPED=$(echo "$WARNING" | jq -Rs .)
+WARNING_ESCAPED=$(echo "$WARNING" | jq -Rs . 2>/dev/null)
 
 echo "{\"ok\": true, \"hookSpecificOutput\": {\"additionalContext\": $WARNING_ESCAPED}}"

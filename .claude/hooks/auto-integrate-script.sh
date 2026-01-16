@@ -15,8 +15,8 @@ MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 REPO_PATH="$HOME/Developer/samara-main"
 INPUT=$(cat)
 
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""')
-FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""')
+TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""' 2>/dev/null)
+FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null)
 
 # Only process Write tool
 if [ "$TOOL_NAME" != "Write" ]; then
@@ -52,13 +52,13 @@ fi
 # 2. Run basic syntax check (if shellcheck available)
 if command -v shellcheck &>/dev/null; then
     if ! shellcheck -S error "$FILE_PATH" >/dev/null 2>&1; then
-        MESSAGES+="⚠️ shellcheck found issues. "
+        MESSAGES+="[WARN] shellcheck found issues. "
     fi
 else
     # Fallback: basic bash syntax check
     if head -1 "$FILE_PATH" | grep -q "^#!/.*bash"; then
         if ! bash -n "$FILE_PATH" 2>/dev/null; then
-            MESSAGES+="⚠️ Bash syntax error detected. "
+            MESSAGES+="[WARN] Bash syntax error detected. "
         fi
     fi
 fi

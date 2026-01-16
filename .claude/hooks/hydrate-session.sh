@@ -15,7 +15,7 @@
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 INPUT=$(cat)
 
-SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"')
+SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null || echo "startup")
 
 # Build context sections
 CONTEXT=""
@@ -175,7 +175,7 @@ esac
 # Output JSON with additionalContext
 if [ -n "$CONTEXT" ]; then
     # Escape for JSON
-    CONTEXT_ESCAPED=$(echo -e "$CONTEXT" | jq -Rs .)
+    CONTEXT_ESCAPED=$(echo -e "$CONTEXT" | jq -Rs . 2>/dev/null)
     echo "{\"hookSpecificOutput\": {\"additionalContext\": $CONTEXT_ESCAPED}}"
 else
     echo '{"ok": true}'
