@@ -42,7 +42,5 @@ done <<< "$URLS"
 CONTEXT+="\n**Remember:** Not engaging with shared content is like ignoring part of the conversation. "
 CONTEXT+="Use WebFetch to read these links and respond to their content.\n"
 
-# Escape for JSON
-CONTEXT_ESCAPED=$(echo -e "$CONTEXT" | jq -Rs . 2>/dev/null)
-
-echo "{\"ok\": true, \"hookSpecificOutput\": {\"additionalContext\": $CONTEXT_ESCAPED}}"
+# Build entire JSON with jq to avoid shell escaping issues
+echo -e "$CONTEXT" | jq -Rs '{ok: true, hookSpecificOutput: {additionalContext: .}}' 2>/dev/null || echo '{"ok": true}'

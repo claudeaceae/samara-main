@@ -46,7 +46,5 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 
 Consider amending: git commit --amend (if not yet pushed)"
 
-# Escape for JSON
-WARNING_ESCAPED=$(echo "$WARNING" | jq -Rs . 2>/dev/null)
-
-echo "{\"ok\": true, \"hookSpecificOutput\": {\"additionalContext\": $WARNING_ESCAPED}}"
+# Build entire JSON with jq to avoid shell escaping issues
+echo "$WARNING" | jq -Rs '{ok: true, hookSpecificOutput: {additionalContext: .}}' 2>/dev/null || echo '{"ok": true}'

@@ -55,7 +55,8 @@ fi
 # Provide feedback if indexing was triggered
 if [ -n "$INDEX_TRIGGERED" ]; then
     BASENAME=$(basename "$FILE_PATH")
-    echo "{\"ok\": true, \"hookSpecificOutput\": {\"additionalContext\": \"Memory index updated: $BASENAME ($INDEX_TRIGGERED)\"}}"
+    # Build entire JSON with jq to avoid shell escaping issues
+    jq -n --arg msg "Memory index updated: $BASENAME ($INDEX_TRIGGERED)" '{ok: true, hookSpecificOutput: {additionalContext: $msg}}' 2>/dev/null || echo '{"ok": true}'
 else
     echo '{"ok": true}'
 fi

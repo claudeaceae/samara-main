@@ -77,7 +77,8 @@ fi
 
 # Output result
 if [ -n "$MESSAGES" ]; then
-    echo "{\"ok\": true, \"hookSpecificOutput\": {\"additionalContext\": \"Script auto-integrated: $MESSAGES\"}}"
+    # Build entire JSON with jq to avoid shell escaping issues
+    jq -n --arg msg "Script auto-integrated: $MESSAGES" '{ok: true, hookSpecificOutput: {additionalContext: $msg}}' 2>/dev/null || echo '{"ok": true}'
 else
     echo '{"ok": true}'
 fi

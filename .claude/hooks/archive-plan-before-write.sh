@@ -58,8 +58,9 @@ if [ $? -eq 0 ]; then
     echo "---" >> "$ARCHIVE_PATH"
     echo "*Archived at $(date '+%Y-%m-%d %H:%M:%S') before overwrite*" >> "$ARCHIVE_PATH"
 
-    echo "{\"decision\": \"allow\", \"message\": \"Archived previous version to $ARCHIVE_PATH\"}"
+    # Build JSON with jq to handle special characters in paths
+    jq -n --arg path "$ARCHIVE_PATH" '{decision: "allow", message: ("Archived previous version to " + $path)}' 2>/dev/null || echo '{"decision": "allow"}'
 else
     # Archive failed, but don't block - just warn
-    echo "{\"decision\": \"allow\", \"message\": \"Warning: Failed to archive $FILE_PATH before overwrite\"}"
+    jq -n --arg path "$FILE_PATH" '{decision: "allow", message: ("Warning: Failed to archive " + $path + " before overwrite")}' 2>/dev/null || echo '{"decision": "allow"}'
 fi

@@ -174,9 +174,8 @@ esac
 
 # Output JSON with additionalContext
 if [ -n "$CONTEXT" ]; then
-    # Escape for JSON
-    CONTEXT_ESCAPED=$(echo -e "$CONTEXT" | jq -Rs . 2>/dev/null)
-    echo "{\"hookSpecificOutput\": {\"additionalContext\": $CONTEXT_ESCAPED}}"
+    # Build entire JSON with jq to avoid shell escaping issues
+    echo -e "$CONTEXT" | jq -Rs '{hookSpecificOutput: {additionalContext: .}}' 2>/dev/null || echo '{"ok": true}'
 else
     echo '{"ok": true}'
 fi

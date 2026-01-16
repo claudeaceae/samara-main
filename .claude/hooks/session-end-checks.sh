@@ -115,23 +115,19 @@ fi
 
 # If iteration is blocking, return block decision
 if [ -n "$BLOCK_REASON" ]; then
-    # Escape for JSON
-    BLOCK_ESCAPED=$(echo -e "$BLOCK_REASON" | jq -Rs . 2>/dev/null)
-
-    # Add other messages as context
+    # Build entire JSON with jq to avoid shell escaping issues
     if [ -n "$MESSAGES" ]; then
-        MESSAGES_ESCAPED=$(echo -e "$MESSAGES" | jq -Rs . 2>/dev/null)
-        echo "{\"decision\": \"block\", \"reason\": $BLOCK_ESCAPED, \"message\": $MESSAGES_ESCAPED}"
+        jq -n --arg reason "$(echo -e "$BLOCK_REASON")" --arg msg "$(echo -e "$MESSAGES")" \
+            '{decision: "block", reason: $reason, message: $msg}' 2>/dev/null || echo '{"decision": "block", "reason": "Check failed"}'
     else
-        echo "{\"decision\": \"block\", \"reason\": $BLOCK_ESCAPED}"
+        echo -e "$BLOCK_REASON" | jq -Rs '{decision: "block", reason: .}' 2>/dev/null || echo '{"decision": "block", "reason": "Check failed"}'
     fi
     exit 0
 fi
 
 # No blocking, just informational messages
 if [ -n "$MESSAGES" ]; then
-    MESSAGES_ESCAPED=$(echo -e "$MESSAGES" | jq -Rs . 2>/dev/null)
-    echo "{\"ok\": true, \"message\": $MESSAGES_ESCAPED}"
+    echo -e "$MESSAGES" | jq -Rs '{ok: true, message: .}' 2>/dev/null || echo '{"ok": true}'
 else
     echo '{"ok": true}'
 fi
