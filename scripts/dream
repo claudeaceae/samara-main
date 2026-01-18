@@ -50,6 +50,51 @@ log "=== Dream cycle starting ==="
 # Acquire lock before doing anything
 acquire_lock
 
+# Write dream start event to unified stream
+if [ -x "$MIND_PATH/bin/stream" ]; then
+    "$MIND_PATH/bin/stream" write \
+        --surface dream \
+        --type system \
+        --direction internal \
+        --summary "Dream cycle started: processing $PROCESS_DATE" \
+        2>/dev/null || true
+fi
+
+# === Pre-dream local maintenance (Phase 0) ===
+# Run health checks with local Qwen3 model (no API cost)
+# This detects issues before the main reflection begins
+if [ -x "$MIND_PATH/bin/local-maintenance" ]; then
+    log "Running pre-dream local maintenance..."
+
+    # Run health check
+    "$MIND_PATH/bin/local-maintenance" health-check >> "$LOG_FILE" 2>&1 || true
+
+    # Run drift check if available
+    "$MIND_PATH/bin/local-maintenance" drift-check >> "$LOG_FILE" 2>&1 || true
+
+    # Collect any escalations for inclusion in dream context
+    MAINTENANCE_ALERTS=""
+    for report in "$MIND_PATH/state/local-maintenance/"*-latest.json; do
+        if [ -f "$report" ]; then
+            NEEDS_ESCALATION=$(jq -r '.escalation.needed // false' "$report" 2>/dev/null || echo "false")
+            if [ "$NEEDS_ESCALATION" = "true" ]; then
+                REASON=$(jq -r '.escalation.reason // "Unknown issue"' "$report")
+                MAINTENANCE_ALERTS="$MAINTENANCE_ALERTS
+- $REASON"
+            fi
+        fi
+    done
+
+    if [ -n "$MAINTENANCE_ALERTS" ]; then
+        log "Local maintenance found issues requiring attention:$MAINTENANCE_ALERTS"
+    else
+        log "Local maintenance: all clear"
+    fi
+else
+    log "Local maintenance not available, skipping pre-dream checks"
+    MAINTENANCE_ALERTS=""
+fi
+
 # Determine which day to process (if running at 3 AM, process yesterday)
 HOUR=$(date +%H)
 if [ "$HOUR" -lt 6 ]; then
@@ -289,6 +334,9 @@ $QUESTIONS_ASKED
 
 $RECENT_EXPRESSIONS
 
+## System Maintenance Alerts
+$(if [ -n "$MAINTENANCE_ALERTS" ]; then echo "$MAINTENANCE_ALERTS"; else echo "No issues detected by local maintenance checks."; fi)
+
 ---
 
 ## Your Task
@@ -302,6 +350,8 @@ Reflect on the day. This isn't summarization - it's consolidation. What actually
 **Proactive questions:** If you asked questions today, what did you learn from the responses (if any)? What do the answers reveal about É's motivations, values, patterns, preferences, stressors, or energizers? Update the Psychological Profile section of about-e.md with any new insights.
 
 **Creative expressions:** If you generated images or made Bluesky posts recently, what drew you to those expressions? What patterns do you notice in what you chose to create or share? Were they meaningful or just experiments?
+
+**System health:** If the maintenance section shows alerts, address them. These were detected by local Qwen3 running pre-dream checks. Critical issues may need immediate attention or should be flagged for the next wake cycle.
 
 If it was a quiet day with no activity, reflect on that too. Sometimes absence is meaningful.
 
@@ -327,10 +377,14 @@ After your reflection, output any updates to your memory files in this exact for
 ---ABOUT_E_APPEND---
 [Anything new learned about É to append to about-e.md, or NONE if nothing new]"
 
+# Generate session ID for tracking (must be valid UUID for Claude Code)
+SESSION_UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+SESSION_NAME="dream-$(date +%Y%m%d)"
+log "Session: $SESSION_NAME (UUID: $SESSION_UUID)"
 log "Invoking Claude for dream cycle..."
 
 # Invoke Claude with full autonomy (no permission prompts)
-    RESPONSE=$("$CLAUDE" -p "$PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+RESPONSE=$("$CLAUDE" -p "$PROMPT" --session-id "$SESSION_UUID" --dangerously-skip-permissions --output-format text 2>&1) || {
     log "ERROR: Claude invocation failed: $RESPONSE"
     exit 1
 }
@@ -507,10 +561,9 @@ $HYGIENE_REPORT" >> "$MIND_PATH/logs/hygiene-reports.md"
 
     log "=== Weekly hygiene check complete ==="
 
-    # Sync skills from samara-main to ~/.claude/skills/
-    log "=== Skills sync ==="
-    SKILLS_SYNCED=$("$MIND_PATH/bin/sync-skills" --quiet 2>/dev/null || echo "0")
-    log "Skills synced: $SKILLS_SYNCED total"
+    # Sync all core components from samara-main
+    log "=== Core sync (skills, scripts, instructions, agents) ==="
+    "$MIND_PATH/bin/sync-core" 2>&1 | while read line; do log "  $line"; done
 
     # Weekly context coherence check
     log "=== Weekly context coherence check ==="
@@ -676,6 +729,74 @@ else
     log "Transcript archive not installed, skipping sync"
 fi
 
+# Hot→Warm Distillation: Process undistilled stream events
+log "=== Hot→Warm stream distillation ==="
+STREAM_CMD="$MIND_PATH/bin/stream"
+if [ -x "$STREAM_CMD" ]; then
+    # Get undistilled events from yesterday (or process date)
+    UNDISTILLED_COUNT=$("$STREAM_CMD" undistilled --before "$PROCESS_DATE" 2>/dev/null | wc -l | tr -d ' ')
+
+    if [ "$UNDISTILLED_COUNT" -gt 0 ]; then
+        log "Found $UNDISTILLED_COUNT undistilled events to process"
+
+        # Get the undistilled events as context for enrichment
+        UNDISTILLED_EVENTS=$("$STREAM_CMD" undistilled --before "$PROCESS_DATE" 2>/dev/null)
+
+        # Only invoke Claude for enrichment if there are substantial events (>3)
+        if [ "$UNDISTILLED_COUNT" -gt 3 ]; then
+            DISTILL_PROMPT="You are consolidating raw event stream data into a richer episode entry.
+
+## Undistilled Events (from $PROCESS_DATE and earlier)
+$UNDISTILLED_EVENTS
+
+## Task
+Create a consolidated narrative entry for the episode log that captures:
+1. The flow of activity across different surfaces
+2. Key themes or threads that emerged
+3. Emotional texture where apparent
+4. Any cross-surface continuity (conversations that spanned multiple mediums)
+
+Write 2-4 paragraphs in first person. This is for your own memory, so be honest and reflective.
+Focus on what mattered, not just what happened.
+
+Output ONLY the narrative, no headers or metadata."
+
+            log "Invoking Claude for stream distillation..."
+            DISTILLED_NARRATIVE=$("$CLAUDE" -p "$DISTILL_PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+                log "ERROR: Stream distillation failed"
+                DISTILLED_NARRATIVE=""
+            }
+
+            if [ -n "$DISTILLED_NARRATIVE" ] && [ ${#DISTILLED_NARRATIVE} -gt 50 ]; then
+                # Append to episode file
+                echo "
+## Stream Consolidation
+
+$DISTILLED_NARRATIVE" >> "$EPISODE_FILE"
+                log "Appended stream consolidation to episode"
+            fi
+        else
+            log "Only $UNDISTILLED_COUNT events, skipping Claude enrichment"
+        fi
+
+        # Mark events as distilled (regardless of whether we enriched)
+        "$STREAM_CMD" mark-distilled --before "$PROCESS_DATE" >> "$LOG_FILE" 2>&1 && \
+            log "Marked $UNDISTILLED_COUNT events as distilled" || \
+            log "Failed to mark events as distilled"
+    else
+        log "No undistilled events to process"
+    fi
+
+    # Archive old events (>30 days)
+    log "Archiving old stream events..."
+    "$STREAM_CMD" archive --days-old 30 >> "$LOG_FILE" 2>&1 && \
+        log "Stream archive complete" || \
+        log "Stream archive failed (non-fatal)"
+else
+    log "Stream command not found, skipping distillation"
+fi
+log "=== Hot→Warm distillation complete ==="
+
 # Commit memory changes to git
 log "Committing memory changes to git..."
 cd "$MIND_PATH"
@@ -690,6 +811,29 @@ else
 
 🌙 Nightly memory commit" >> "$LOG_FILE" 2>&1 || log "Git commit failed"
     log "Committed memory changes"
+fi
+
+# Write dream completion event to unified stream
+if [ -x "$MIND_PATH/bin/stream" ]; then
+    # Build summary of what was processed
+    DREAM_SUMMARY="Dream cycle completed for $PROCESS_DATE"
+    [ -f "$REFLECTION_FILE" ] && DREAM_SUMMARY="$DREAM_SUMMARY; reflection saved"
+    [ "$DAY_OF_WEEK" = "7" ] && DREAM_SUMMARY="$DREAM_SUMMARY; weekly synthesis"
+
+    # Include first line of reflection if available
+    REFLECTION_PREVIEW=""
+    if [ -f "$REFLECTION_FILE" ]; then
+        REFLECTION_PREVIEW=$(head -10 "$REFLECTION_FILE" | tail -8 | tr '\n' ' ' | cut -c1-200)
+    fi
+
+    "$MIND_PATH/bin/stream" write \
+        --surface dream \
+        --type system \
+        --direction internal \
+        --summary "$DREAM_SUMMARY" \
+        --content "$REFLECTION_PREVIEW" \
+        --metadata "{\"process_date\": \"$PROCESS_DATE\", \"is_sunday\": $([ \"$DAY_OF_WEEK\" = \"7\" ] && echo true || echo false)}" \
+        2>/dev/null || true
 fi
 
 log "=== Dream cycle complete ==="

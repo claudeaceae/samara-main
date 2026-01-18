@@ -1,5 +1,6 @@
 {
   "cleanupPeriodDays": 36500,
+  "plansDirectory": "~/.claude-mind/state/plans",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -58,6 +59,11 @@
             "type": "command",
             "command": "/Users/claude/Developer/samara-main/.claude/hooks/archive-plan-before-write.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/local-model-guardrail.sh",
+            "timeout": 5
           }
         ]
       },
@@ -73,6 +79,11 @@
             "type": "command",
             "command": "/Users/claude/Developer/samara-main/.claude/hooks/check-autonomous-media.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/local-model-guardrail.sh",
+            "timeout": 5
           }
         ]
       }
@@ -82,7 +93,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/Users/claude/.claude-mind/bin/distill-claude-session",
+            "command": "/Users/claude/Developer/samara-main/scripts/distill-claude-session",
             "timeout": 120
           }
         ]
@@ -95,6 +106,17 @@
             "type": "command",
             "command": "/Users/claude/Developer/samara-main/.claude/hooks/session-end-checks.sh",
             "timeout": 20
+          }
+        ]
+      }
+    ],
+    "Setup": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/setup-maintenance.sh",
+            "timeout": 30
           }
         ]
       }

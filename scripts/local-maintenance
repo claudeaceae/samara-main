@@ -1,0 +1,293 @@
+#!/bin/bash
+# local-maintenance - Run maintenance tasks with local Qwen3 model
+#
+# Uses Ollama's Anthropic API compatibility to run full Claude Code agentic loops
+# with a local model. Tasks are constrained to read-only operations through
+# guardrail hooks.
+#
+# Usage:
+#   local-maintenance health-check   # Run health checks with local model
+#
+# Future tasks (not yet implemented):
+#   local-maintenance drift-check    # Check for system drift
+#   local-maintenance log-triage     # Triage recent logs for issues
+
+set -euo pipefail
+
+TASK="${1:-}"
+MIND_PATH="${HOME}/.claude-mind"
+LOG_FILE="${MIND_PATH}/logs/local-maintenance.log"
+OUTPUT_DIR="${MIND_PATH}/state/local-maintenance"
+AGENT_DIR="${HOME}/.claude/agents"
+
+# Ensure directories exist
+mkdir -p "$OUTPUT_DIR" "$(dirname "$LOG_FILE")"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
+}
+
+# Validate task is in allowlist
+ALLOWED_TASKS="health-check drift-check"
+if [[ -z "$TASK" ]]; then
+    echo "Usage: local-maintenance <task>"
+    echo "Available tasks: $ALLOWED_TASKS"
+    exit 1
+fi
+
+if [[ ! " $ALLOWED_TASKS " =~ " $TASK " ]]; then
+    echo "ERROR: Unknown or disallowed task: $TASK"
+    echo "Available tasks: $ALLOWED_TASKS"
+    exit 1
+fi
+
+# Check if Ollama is available
+if ! curl -s --connect-timeout 2 http://localhost:11434/api/tags > /dev/null 2>&1; then
+    log "ERROR: Ollama not available at localhost:11434"
+    echo '{"task":"'"$TASK"'","status":"failed","error":"Ollama not available"}' > "$OUTPUT_DIR/${TASK}-latest.json"
+    exit 1
+fi
+
+# Check if qwen3:8b model is available
+MODELS=$(ollama list 2>/dev/null || echo "")
+if ! echo "$MODELS" | grep -q "qwen3"; then
+    log "ERROR: qwen3 model not installed in Ollama"
+    echo '{"task":"'"$TASK"'","status":"failed","error":"qwen3 model not installed"}' > "$OUTPUT_DIR/${TASK}-latest.json"
+    exit 1
+fi
+
+# Map task to agent file
+AGENT_FILE="${AGENT_DIR}/local-${TASK}.md"
+if [[ ! -f "$AGENT_FILE" ]]; then
+    log "ERROR: Agent file not found: $AGENT_FILE"
+    exit 1
+fi
+
+log "Starting local maintenance: $TASK"
+START_TIME=$(date +%s)
+
+# For health-check: run checks ourselves, then have model analyze
+OUTPUT_FILE="${OUTPUT_DIR}/${TASK}-latest.json"
+
+if [[ "$TASK" == "health-check" ]]; then
+    # Collect health data ourselves (reliable, actual data)
+    log "Collecting health check data..."
+
+    SAMARA_STATUS=$(pgrep -x Samara > /dev/null && echo "running" || echo "stopped")
+    FDA_ERRORS=$(tail -50 ~/.claude-mind/logs/samara.log 2>/dev/null | grep -c "authorization denied\|Operation not permitted" || echo "0")
+    LAUNCHD_JOBS=$(launchctl list 2>/dev/null | grep -c "com.claude" || echo "0")
+    DISK_USAGE=$(df -h ~ | tail -1 | awk '{print $5}' | tr -d '%')
+    LOCK_STATUS=$([ -f ~/.claude-mind/claude.lock ] && echo "exists" || echo "none")
+    TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+    # Build the analysis prompt
+    ANALYSIS_PROMPT="You are a health monitoring agent. Analyze these system health check results and output ONLY valid JSON.
+
+## Health Check Results
+- Samara.app status: $SAMARA_STATUS
+- FDA denial errors in logs: $FDA_ERRORS
+- Launchd jobs count: $LAUNCHD_JOBS
+- Disk usage: ${DISK_USAGE}%
+- Lock file status: $LOCK_STATUS
+- Timestamp: $TIMESTAMP
+
+## Classification Rules
+CRITICAL (set escalation.needed=true):
+- Samara.app stopped
+- FDA errors > 0
+- Launchd jobs < 3
+
+WARN (severity=warn, no escalation):
+- Disk usage > 85%
+- Lock file exists
+
+## Required Output Format
+Output ONLY this JSON (no other text, no markdown):
+
+{
+  \"task\": \"health-check\",
+  \"timestamp\": \"$TIMESTAMP\",
+  \"status\": \"completed\",
+  \"findings\": [
+    {\"severity\": \"info|warn|critical\", \"category\": \"health\", \"description\": \"...\", \"evidence\": \"...\"}
+  ],
+  \"escalation\": {\"needed\": true|false, \"reason\": \"...\" or null, \"context\": \"...\" or null}
+}
+
+Analyze the results and output the JSON:"
+
+    # Run local model for analysis only (no tool use needed)
+    ANTHROPIC_AUTH_TOKEN=ollama \
+    ANTHROPIC_BASE_URL=http://localhost:11434 \
+    claude --model qwen3:8b \
+        -p "$ANALYSIS_PROMPT" \
+        --max-turns 1 \
+        --dangerously-skip-permissions \
+        --output-format text 2>&1 \
+        | tee -a "$LOG_FILE" > "${OUTPUT_DIR}/${TASK}-raw.txt" || true
+
+elif [[ "$TASK" == "drift-check" ]]; then
+    # Collect drift data ourselves, then have model analyze
+    log "Checking for system drift..."
+
+    TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+    # Run sync-organism --check to detect drift
+    DRIFT_OUTPUT=$("$MIND_PATH/bin/sync-organism" --check 2>&1 || echo "SYNC_CHECK_FAILED")
+
+    # Check symlink integrity
+    BROKEN_SYMLINKS=""
+    for link in "$MIND_PATH/bin/"*; do
+        if [ -L "$link" ] && [ ! -e "$link" ]; then
+            BROKEN_SYMLINKS="$BROKEN_SYMLINKS $(basename "$link")"
+        fi
+    done
+    if [ -z "$BROKEN_SYMLINKS" ]; then
+        BROKEN_SYMLINKS="none"
+    fi
+
+    # Check if key directories are symlinked correctly
+    CLAUDE_AGENTS_OK=$([ -L "$HOME/.claude/agents" ] && [ -e "$HOME/.claude/agents" ] && echo "ok" || echo "broken or missing")
+
+    # Count files that differ between repo and runtime scripts
+    REPO_SCRIPTS="$HOME/Developer/samara-main/scripts"
+    RUNTIME_SCRIPTS="$MIND_PATH/bin"
+    DRIFT_COUNT=0
+    if [ -d "$REPO_SCRIPTS" ]; then
+        for script in "$REPO_SCRIPTS"/*; do
+            if [ -f "$script" ]; then
+                base=$(basename "$script")
+                runtime_script="$RUNTIME_SCRIPTS/$base"
+                if [ -f "$runtime_script" ] || [ -L "$runtime_script" ]; then
+                    # If it's a symlink, check if it points to the right place
+                    if [ -L "$runtime_script" ]; then
+                        target=$(readlink "$runtime_script")
+                        if [[ "$target" != *"$base" ]]; then
+                            DRIFT_COUNT=$((DRIFT_COUNT + 1))
+                        fi
+                    fi
+                fi
+            fi
+        done
+    fi
+
+    # Build the analysis prompt
+    ANALYSIS_PROMPT="You are a drift detection agent. Analyze these system sync check results and output ONLY valid JSON.
+
+## Drift Check Results
+- sync-organism --check output: $DRIFT_OUTPUT
+- Broken symlinks in bin/: $BROKEN_SYMLINKS
+- ~/.claude/agents symlink: $CLAUDE_AGENTS_OK
+- Scripts with potential drift: $DRIFT_COUNT
+- Timestamp: $TIMESTAMP
+
+## Classification Rules
+CRITICAL (set escalation.needed=true):
+- sync-organism reports major drift (more than 5 files)
+- Key symlinks broken (agents, .claude)
+- sync-organism check failed entirely
+
+WARN (severity=warn, no escalation):
+- Minor drift (1-5 files)
+- Broken symlinks in bin/ (not critical)
+
+INFO (severity=info):
+- No drift detected
+- All symlinks intact
+
+## Required Output Format
+Output ONLY this JSON (no other text, no markdown):
+
+{
+  \"task\": \"drift-check\",
+  \"timestamp\": \"$TIMESTAMP\",
+  \"status\": \"completed\",
+  \"findings\": [
+    {\"severity\": \"info|warn|critical\", \"category\": \"drift\", \"description\": \"...\", \"evidence\": \"...\"}
+  ],
+  \"escalation\": {\"needed\": true|false, \"reason\": \"...\" or null, \"context\": \"...\" or null}
+}
+
+Analyze the results and output the JSON:"
+
+    # Run local model for analysis only
+    ANTHROPIC_AUTH_TOKEN=ollama \
+    ANTHROPIC_BASE_URL=http://localhost:11434 \
+    claude --model qwen3:8b \
+        -p "$ANALYSIS_PROMPT" \
+        --max-turns 1 \
+        --dangerously-skip-permissions \
+        --output-format text 2>&1 \
+        | tee -a "$LOG_FILE" > "${OUTPUT_DIR}/${TASK}-raw.txt" || true
+
+else
+    # For other tasks, use the agent file approach
+    AGENT_INSTRUCTIONS=$(sed -n '/^---$/,/^---$/d; p' "$AGENT_FILE")
+
+    ANTHROPIC_AUTH_TOKEN=ollama \
+    ANTHROPIC_BASE_URL=http://localhost:11434 \
+    claude --model qwen3:8b \
+        -p "$AGENT_INSTRUCTIONS\n\nExecute the task and output JSON." \
+        --max-turns 10 \
+        --dangerously-skip-permissions \
+        --output-format text 2>&1 \
+        | tee -a "$LOG_FILE" > "${OUTPUT_DIR}/${TASK}-raw.txt" || true
+fi
+
+# Extract JSON from the output using Python (handles nested JSON reliably)
+RAW_FILE="${OUTPUT_DIR}/${TASK}-raw.txt"
+python3 -c "
+import json
+import sys
+with open('$RAW_FILE') as f:
+    content = f.read()
+    depth = 0
+    start = content.find('{')
+    if start >= 0:
+        for i, c in enumerate(content[start:], start):
+            if c == '{': depth += 1
+            elif c == '}': depth -= 1
+            if depth == 0:
+                obj = json.loads(content[start:i+1])
+                print(json.dumps(obj))
+                break
+" > "$OUTPUT_FILE" 2>/dev/null || true
+
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+
+# Validate output (basic check)
+if [[ -s "$OUTPUT_FILE" ]]; then
+    if jq -e '.task' "$OUTPUT_FILE" > /dev/null 2>&1; then
+        log "Completed $TASK in ${DURATION}s"
+
+        # Check for escalation
+        ESCALATE=$(jq -r '.escalation.needed // false' "$OUTPUT_FILE" 2>/dev/null || echo "false")
+        if [[ "$ESCALATE" == "true" ]]; then
+            REASON=$(jq -r '.escalation.reason // "Unknown"' "$OUTPUT_FILE")
+            log "ESCALATION NEEDED: $REASON"
+
+            # Add to proactive queue if available
+            if [[ -x "${MIND_PATH}/bin/proactive-queue" ]]; then
+                "${MIND_PATH}/bin/proactive-queue" add \
+                    "Local maintenance found: $REASON" \
+                    "high" 2>/dev/null || true
+            fi
+        fi
+    else
+        log "WARNING: Output file exists but doesn't contain valid task JSON"
+    fi
+else
+    log "WARNING: No output captured from local model"
+    echo '{"task":"'"$TASK"'","status":"failed","error":"No output from model","duration_seconds":'"$DURATION"'}' > "$OUTPUT_FILE"
+fi
+
+# Append to audit log
+AUDIT_LOG="${MIND_PATH}/logs/local-maintenance-audit.jsonl"
+FINDINGS_COUNT=$(jq -r '.findings | length // 0' "$OUTPUT_FILE" 2>/dev/null || echo "0")
+ESCALATED=$(jq -r '.escalation.needed // false' "$OUTPUT_FILE" 2>/dev/null || echo "false")
+STATUS=$(jq -r '.status // "unknown"' "$OUTPUT_FILE" 2>/dev/null || echo "unknown")
+
+echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"task\":\"$TASK\",\"model\":\"qwen3:8b\",\"duration_seconds\":$DURATION,\"status\":\"$STATUS\",\"findings_count\":$FINDINGS_COUNT,\"escalated\":$ESCALATED}" >> "$AUDIT_LOG"
+
+log "Audit log updated: $AUDIT_LOG"
