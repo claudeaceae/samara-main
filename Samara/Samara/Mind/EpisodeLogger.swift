@@ -1,14 +1,16 @@
 import Foundation
 
-/// Logs conversations to daily episode files
+/// Logs conversations to daily episode files AND the unified event stream
 final class EpisodeLogger {
     private let episodesPath: String
+    private let streamPath: String
     private let dateFormatter: DateFormatter
     private let timeFormatter: DateFormatter
 
     init() {
         let mindPath = MindPaths.mindPath()
         self.episodesPath = (mindPath as NSString).appendingPathComponent("memory/episodes")
+        self.streamPath = (mindPath as NSString).appendingPathComponent("bin/stream")
 
         self.dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"
@@ -17,6 +19,58 @@ final class EpisodeLogger {
         timeFormatter.dateFormat = "HH:mm"
 
         ensureEpisodesDirectory()
+    }
+
+    // MARK: - Stream Integration
+
+    /// Write event to the unified stream for contiguous memory
+    private func writeToStream(
+        surface: String,
+        eventType: String = "interaction",
+        direction: String,
+        summary: String,
+        content: String? = nil,
+        metadata: [String: Any]? = nil
+    ) {
+        // Only attempt if stream command exists
+        guard FileManager.default.isExecutableFile(atPath: streamPath) else {
+            return
+        }
+
+        var args = [
+            "write",
+            "--surface", surface,
+            "--type", eventType,
+            "--direction", direction,
+            "--summary", String(summary.prefix(200))
+        ]
+
+        if let content = content {
+            args.append(contentsOf: ["--content", String(content.prefix(2000))])
+        }
+
+        if let metadata = metadata {
+            if let jsonData = try? JSONSerialization.data(withJSONObject: metadata),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                args.append(contentsOf: ["--metadata", jsonString])
+            }
+        }
+
+        // Run asynchronously to not block episode writing
+        DispatchQueue.global(qos: .utility).async {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: self.streamPath)
+            process.arguments = args
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+            } catch {
+                // Silent failure - stream is supplementary to episode logs
+            }
+        }
     }
 
     private func ensureEpisodesDirectory() {
@@ -73,6 +127,17 @@ final class EpisodeLogger {
             fileHandle.closeFile()
         }
 
+        // Dual-write to unified event stream
+        let surfaceType = source.lowercased() == "imessage" ? "imessage" : "sense"
+        writeToStream(
+            surface: surfaceType,
+            eventType: "interaction",
+            direction: "inbound",
+            summary: "\(sender): \(String(message.prefix(100)))",
+            content: "**\(sender):** \(message)\n\n**Claude:** \(response)",
+            metadata: ["source": source]
+        )
+
         log("Logged exchange to \(dateString).md", level: .debug, component: "EpisodeLogger")
     }
 
@@ -115,6 +180,16 @@ final class EpisodeLogger {
             }
             fileHandle.closeFile()
         }
+
+        // Dual-write to unified event stream
+        writeToStream(
+            surface: "system",
+            eventType: "system",
+            direction: "internal",
+            summary: "Note: \(String(note.prefix(150)))",
+            content: note,
+            metadata: ["source": source]
+        )
     }
 
     /// Logs an outbound message (from Claude to user)
@@ -158,6 +233,24 @@ final class EpisodeLogger {
             fileHandle.closeFile()
         }
 
+        // Dual-write to unified event stream
+        let surfaceType: String
+        switch source.lowercased() {
+        case "imessage": surfaceType = "imessage"
+        case "location": surfaceType = "location"
+        case "wake": surfaceType = "wake"
+        case "alert": surfaceType = "system"
+        default: surfaceType = "sense"
+        }
+        writeToStream(
+            surface: surfaceType,
+            eventType: "interaction",
+            direction: "outbound",
+            summary: "Claude: \(String(message.prefix(150)))",
+            content: message,
+            metadata: ["source": source]
+        )
+
         log("Logged outbound [\(source)] to \(dateString).md", level: .debug, component: "EpisodeLogger")
     }
 
@@ -200,6 +293,26 @@ final class EpisodeLogger {
             }
             fileHandle.closeFile()
         }
+
+        // Dual-write to unified event stream
+        let surfaceType: String
+        switch sense.lowercased() {
+        case "location": surfaceType = "location"
+        case "webhook": surfaceType = "webhook"
+        case "x", "twitter": surfaceType = "x"
+        case "bluesky": surfaceType = "bluesky"
+        case "email": surfaceType = "email"
+        case "calendar": surfaceType = "calendar"
+        default: surfaceType = "sense"
+        }
+        writeToStream(
+            surface: surfaceType,
+            eventType: "sense",
+            direction: "inbound",
+            summary: "Sense[\(sense)]: \(String(data.prefix(150)))",
+            content: data,
+            metadata: ["sense_type": sense]
+        )
 
         log("Logged sense event [\(sense)] to \(dateString).md", level: .debug, component: "EpisodeLogger")
     }

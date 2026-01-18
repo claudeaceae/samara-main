@@ -65,6 +65,12 @@ final class MemoryContext {
     func buildContext(isCollaboratorChat: Bool = true) -> String {
         var sections: [String] = []
 
+        // HOT DIGEST FIRST - cross-surface recent context
+        // This ensures iMessage sessions know about CLI work and vice versa
+        if let hotDigest = buildHotDigest() {
+            sections.append(hotDigest)
+        }
+
         // Identity - full, essential context
         if let identity = readFile("identity.md") {
             sections.append("### Identity\n\(identity)")
@@ -480,6 +486,69 @@ final class MemoryContext {
         }
 
         return context
+    }
+
+    // MARK: - Hot Digest (Cross-Surface Context)
+
+    /// Builds hot digest from unified event stream for cross-surface context
+    /// Returns ~2-4K tokens of recent activity across ALL surfaces (iMessage, CLI, wake, etc.)
+    /// This enables continuity: iMessage sessions know about CLI work, and vice versa
+    ///
+    /// - Parameter hours: Number of hours to look back (default 12)
+    /// - Returns: Formatted markdown digest, or nil if unavailable
+    func buildHotDigest(hours: Int = 12) -> String? {
+        let scriptPath = (mindPath as NSString).appendingPathComponent("bin/build-hot-digest")
+
+        guard FileManager.default.isExecutableFile(atPath: scriptPath) else {
+            log("Hot digest script not found at \(scriptPath)", level: .debug, component: "MemoryContext")
+            return nil
+        }
+
+        let process = Process()
+        let outputPipe = Pipe()
+        let outputHandle = outputPipe.fileHandleForReading
+        defer { try? outputHandle.close() }
+
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [scriptPath, "--hours", String(hours), "--no-ollama"]
+        process.standardOutput = outputPipe
+        process.standardError = FileHandle.nullDevice
+
+        // Set environment for the script
+        var env = ProcessInfo.processInfo.environment
+        env["HOME"] = FileManager.default.homeDirectoryForCurrentUser.path
+        env["PATH"] = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin"
+        process.environment = env
+
+        do {
+            try process.run()
+
+            // 5-second timeout to avoid blocking message responses
+            let timeout: TimeInterval = 5
+            let deadline = Date().addingTimeInterval(timeout)
+            while process.isRunning && Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+
+            if process.isRunning {
+                log("Hot digest timeout after \(Int(timeout))s - killing process", level: .warn, component: "MemoryContext")
+                process.terminate()
+                return nil
+            }
+
+            let data = outputHandle.readDataToEndOfFile()
+            guard let output = String(data: data, encoding: .utf8),
+                  !output.isEmpty,
+                  !output.contains("No recent events") else {
+                return nil
+            }
+
+            log("Hot digest loaded (\(output.count) chars)", level: .debug, component: "MemoryContext")
+            return output
+        } catch {
+            log("Hot digest failed: \(error)", level: .warn, component: "MemoryContext")
+            return nil
+        }
     }
 
     /// Calls the find-related-context script to get semantically similar past conversations

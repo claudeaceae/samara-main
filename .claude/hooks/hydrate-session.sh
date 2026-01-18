@@ -13,12 +13,27 @@
 # Note: NOT using set -e because some checks may fail expectedly
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+
+# Diagnostic logging (to trace hook execution)
+LOG_FILE="$MIND_PATH/logs/hydrate-session.log"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] Hook started" >> "$LOG_FILE" 2>/dev/null
+
 INPUT=$(cat)
 
 SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null || echo "startup")
 
 # Build context sections
 CONTEXT=""
+
+# 0. Hot digest from unified event stream (contiguous memory foundation)
+HOT_DIGEST_CMD="$MIND_PATH/bin/build-hot-digest"
+if [ -x "$HOT_DIGEST_CMD" ]; then
+    HOT_DIGEST=$("$HOT_DIGEST_CMD" --hours 12 --no-ollama 2>/dev/null || echo "")
+    if [ -n "$HOT_DIGEST" ] && [ "$HOT_DIGEST" != "No recent events found." ]; then
+        CONTEXT+="$HOT_DIGEST\n\n"
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Injected hot digest" >> "$LOG_FILE" 2>/dev/null
+    fi
+fi
 
 # 1. Check for recent handoff
 HANDOFF_DIR="$MIND_PATH/state/ledgers"
@@ -29,6 +44,40 @@ if [ -d "$HANDOFF_DIR" ]; then
         if [ "$HANDOFF_AGE_HOURS" -lt 24 ]; then
             HANDOFF_CONTENT=$(head -50 "$LATEST_HANDOFF")
             CONTEXT+="## Recent Handoff (${HANDOFF_AGE_HOURS}h ago)\n\n$HANDOFF_CONTENT\n\n"
+        fi
+    fi
+fi
+
+# 1b. Check for recent CLI session handoffs (for cross-surface continuity)
+CLI_HANDOFF_DIR="$MIND_PATH/state/handoffs"
+if [ -d "$CLI_HANDOFF_DIR" ]; then
+    # Find handoffs from last 12 hours (720 minutes)
+    RECENT_CLI_HANDOFFS=$(find "$CLI_HANDOFF_DIR" -name "*.md" -mmin -720 2>/dev/null | sort -r | head -3)
+    if [ -n "$RECENT_CLI_HANDOFFS" ]; then
+        CLI_CONTEXT=""
+        for HANDOFF_FILE in $RECENT_CLI_HANDOFFS; do
+            HANDOFF_TIME=$(stat -f %Sm -t '%H:%M' "$HANDOFF_FILE" 2>/dev/null || echo "??:??")
+            HANDOFF_AGE_MIN=$(( ($(date +%s) - $(stat -f %m "$HANDOFF_FILE" 2>/dev/null || echo 0)) / 60 ))
+
+            # Extract Open Threads section (lines between ## Open Threads and next ##)
+            OPEN_THREADS=$(sed -n '/^## Open Threads/,/^## /{/^## Open Threads/d;/^## /d;p;}' "$HANDOFF_FILE" 2>/dev/null | head -8)
+
+            # Extract Continuation Hooks section
+            CONTINUATION=$(sed -n '/^## Continuation Hooks/,/^## \|^---/{/^## Continuation Hooks/d;/^## /d;/^---/d;p;}' "$HANDOFF_FILE" 2>/dev/null | head -5)
+
+            # Only include if there's something useful
+            if [ -n "$OPEN_THREADS" ] && [ "$OPEN_THREADS" != "None identified." ]; then
+                CLI_CONTEXT+="### CLI Session (${HANDOFF_AGE_MIN}m ago)\n"
+                CLI_CONTEXT+="**Open threads:**\n$OPEN_THREADS\n"
+                if [ -n "$CONTINUATION" ] && [ "$CONTINUATION" != "None identified." ]; then
+                    CLI_CONTEXT+="**Continue with:**\n$CONTINUATION\n"
+                fi
+                CLI_CONTEXT+="\n"
+            fi
+        done
+
+        if [ -n "$CLI_CONTEXT" ]; then
+            CONTEXT+="## Recent Direct Sessions\n*Background context from CLI sessions. This is memory, not the current conversation.*\n\n$CLI_CONTEXT"
         fi
     fi
 fi
@@ -176,6 +225,8 @@ esac
 if [ -n "$CONTEXT" ]; then
     # Build entire JSON with jq to avoid shell escaping issues
     echo -e "$CONTEXT" | jq -Rs '{hookSpecificOutput: {additionalContext: .}}' 2>/dev/null || echo '{"ok": true}'
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Hook completed with context (source=$SOURCE)" >> "$LOG_FILE" 2>/dev/null
 else
     echo '{"ok": true}'
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Hook completed (no context, source=$SOURCE)" >> "$LOG_FILE" 2>/dev/null
 fi
