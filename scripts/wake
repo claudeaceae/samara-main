@@ -60,6 +60,15 @@ log "=== Wake cycle starting ($TIME) ==="
 # Acquire lock before doing anything
 acquire_lock
 
+# Write wake start event to unified stream
+"$MIND_PATH/bin/stream" write \
+    --surface wake \
+    --type system \
+    --direction internal \
+    --summary "Wake cycle started: $SUGGESTED_MODE mode" \
+    --metadata "{\"hour\": $HOUR, \"suggested_mode\": \"$SUGGESTED_MODE\"}" \
+    >> "$LOG_FILE" 2>&1 || true
+
 # Determine suggested mode based on time
 if [ "$HOUR" -lt 12 ]; then
     SUGGESTED_MODE="Either - morning review, plan the day"
@@ -87,6 +96,10 @@ if [ "$HOUR" -lt 12 ]; then
     CAP_CHECK=$("$MIND_PATH/bin/capability-check" 2>&1 || true)
     log "Capability check: $CAP_CHECK"
 fi
+
+# Sync core components from repo (skills, scripts, instructions, agents)
+log "Syncing core components..."
+"$MIND_PATH/bin/sync-core" --quiet 2>/dev/null || true
 
 # Check for system drift (every wake cycle)
 log "Checking system drift..."
@@ -162,17 +175,26 @@ if [ "$EXPRESSION_ELIGIBLE" = "true" ]; then
 fi
 log "Expression opportunity: $EXPRESSION_ELIGIBLE (confidence: $EXPRESSION_CONFIDENCE%)"
 
-# Read context files - full content, no truncation (2025-12-22 decision)
-# Token budget is ~36K for all core memory (~18% of 200K context)
-# Coherence > marginal token savings
+# Read context files - Progressive Disclosure architecture (2026-01-19)
+# Only load essential core context upfront. Large memory files are accessed via skills.
+# This prevents ARG_MAX failures and reduces startup time.
+# See: platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices
+
+# ALWAYS LOAD (essential core)
 IDENTITY=$(cat "$MIND_PATH/identity.md" 2>/dev/null || echo "No identity file.")
-DECISIONS=$(cat "$MIND_PATH/memory/decisions.md" 2>/dev/null || echo "No decisions file.")
 GOALS=$(cat "$MIND_PATH/goals.md" 2>/dev/null || echo "No goals file.")
-CAPABILITIES=$(cat "$MIND_PATH/capabilities/inventory.md" 2>/dev/null || echo "No capabilities file.")
-LEARNINGS=$(cat "$MIND_PATH/memory/learnings.md" 2>/dev/null || echo "No learnings yet.")
-OBSERVATIONS=$(cat "$MIND_PATH/memory/observations.md" 2>/dev/null || echo "No observations yet.")
 QUESTIONS=$(cat "$MIND_PATH/memory/questions.md" 2>/dev/null || echo "No questions yet.")
-ABOUT_COLLABORATOR=$(cat "$MIND_PATH/memory/about-${COLLABORATOR_NAME_LOWER}.md" 2>/dev/null || echo "No info about $COLLABORATOR_NAME yet.")
+
+# LAZY LOAD via skills (access on-demand when needed)
+# - /decision - Past architectural decisions and rationale
+# - /capability - Full capability inventory
+# - /learning - Historical learnings and insights
+# - /observation - Accumulated observations and patterns
+# - /person {name} - Detailed person profiles
+
+# Size guard: Check core context size (2026-01-19)
+CONTEXT_SIZE=$(printf "%s%s%s" "$IDENTITY" "$GOALS" "$QUESTIONS" | wc -c | tr -d ' ')
+log "Core context size: ${CONTEXT_SIZE} bytes (lazy-loaded content available via skills)"
 
 # Get calendar context
 log "Getting calendar context..."
@@ -258,29 +280,30 @@ $GOALS
 
 $ACTIVE_PROJECT_CONTEXT
 
-## Architectural Decisions
-$DECISIONS
-
-## Capabilities
-$CAPABILITIES
-
 ## Today's Activity So Far
 $RECENT_EPISODE
 
 ## Recent Reflections
 $RECENT_REFLECTIONS
 
-## Your Accumulated Learnings
-$LEARNINGS
-
-## Your Observations About Yourself
-$OBSERVATIONS
-
 ## Open Questions
 $QUESTIONS
 
-## What You Know About $COLLABORATOR_NAME
-\$ABOUT_COLLABORATOR
+## Memory Access (Progressive Disclosure)
+
+Your detailed memory is available on-demand via skills. Use these when you need specific context:
+
+| Skill | Access | Triggers |
+|-------|--------|----------|
+| \`/decision\` | Past architectural decisions | \"why did we\", rationale, trade-offs |
+| \`/capability\` | Full capabilities inventory | \"can I\", \"how do I\", permissions |
+| \`/learning\` | Historical learnings | \"what did I learn\", past experience |
+| \`/observation\` | Accumulated observations | \"what have I noticed\", patterns |
+| \`/person $COLLABORATOR_NAME\` | Detailed profile | ${COLLABORATOR_NAME}-specific context |
+| \`/recall\` | Semantic memory search | fuzzy search across all memory |
+
+**Usage:** Invoke skills naturally when you need the context, rather than having it all loaded upfront.
+This keeps your active context focused and allows memory to scale indefinitely.
 
 ## Calendar Context
 $CALENDAR_CONTEXT
@@ -529,9 +552,15 @@ NONE if nothing to queue."
 
 log "Invoking Claude for autonomous session..."
 
+# Generate session ID for tracking (must be valid UUID for Claude Code)
+SESSION_UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+SESSION_NAME="wake-$(date +%Y%m%d-%H%M)"
+log "Session: $SESSION_NAME (UUID: $SESSION_UUID)"
+
 # Invoke Claude with full autonomy (no permission prompts)
 # MCP servers configured globally in ~/.claude.json
 RESPONSE=$("$CLAUDE" -p "$PROMPT" \
+    --session-id "$SESSION_UUID" \
     --dangerously-skip-permissions \
     --output-format text 2>&1) || {
     log "ERROR: Claude invocation failed: $RESPONSE"
@@ -877,4 +906,15 @@ if [ -n "$PROACTIVE_ADD" ] && [ "$PROACTIVE_ADD" != "NONE" ]; then
 fi
 
 log "Activity summary: $ACTIVITY"
+
+# Write wake completion event to unified stream
+"$MIND_PATH/bin/stream" write \
+    --surface wake \
+    --type system \
+    --direction internal \
+    --summary "Wake cycle complete: $MODE mode - $ACTIVITY" \
+    --content "$EPISODE_ENTRY" \
+    --metadata "{\"mode\": \"$MODE\", \"sent_message\": $([ -n \"$MESSAGE_TO_E\" ] && [ \"$MESSAGE_TO_E\" != \"NONE\" ] && echo true || echo false), \"bluesky_post\": $([ -n \"$BLUESKY_POST\" ] && [ \"$BLUESKY_POST\" != \"NONE\" ] && echo true || echo false)}" \
+    >> "$LOG_FILE" 2>&1 || true
+
 log "=== Wake cycle complete ==="

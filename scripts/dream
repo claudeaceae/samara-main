@@ -13,6 +13,16 @@ LOG_FILE="$MIND_PATH/logs/dream.log"
 DAY_OF_WEEK=$(date +%u)  # 1=Monday, 7=Sunday
 LOCK_FILE="$MIND_PATH/claude.lock"
 
+# Resolve repo root (follow symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
     echo "$1"
@@ -135,14 +145,24 @@ $(cat "$PAST_FILE")"
     fi
 done
 
-# Read current state of evolving memory files - full content (2025-12-22 decision)
+# Read memory files - Progressive Disclosure for dream (2026-01-19)
+# Load recent entries for consolidation context, with skill access to full history.
+# This prevents ARG_MAX failures while maintaining consolidation quality.
+
+# ALWAYS LOAD (essential core)
 IDENTITY=$(cat "$MIND_PATH/identity.md" 2>/dev/null || echo "No identity file.")
-DECISIONS=$(cat "$MIND_PATH/memory/decisions.md" 2>/dev/null || echo "No decisions file.")
 GOALS=$(cat "$MIND_PATH/goals.md" 2>/dev/null || echo "No goals file.")
-LEARNINGS=$(cat "$MIND_PATH/memory/learnings.md" 2>/dev/null || echo "No learnings yet.")
-OBSERVATIONS=$(cat "$MIND_PATH/memory/observations.md" 2>/dev/null || echo "No observations yet.")
 QUESTIONS=$(cat "$MIND_PATH/memory/questions.md" 2>/dev/null || echo "No questions yet.")
-ABOUT_E=$(cat "$MIND_PATH/memory/about-e.md" 2>/dev/null || echo "No info about E yet.")
+
+# RECENT ENTRIES for consolidation context (last 75 lines each)
+DECISIONS_RECENT=$(tail -75 "$MIND_PATH/memory/decisions.md" 2>/dev/null || echo "No decisions file.")
+LEARNINGS_RECENT=$(tail -75 "$MIND_PATH/memory/learnings.md" 2>/dev/null || echo "No learnings yet.")
+OBSERVATIONS_RECENT=$(tail -75 "$MIND_PATH/memory/observations.md" 2>/dev/null || echo "No observations yet.")
+ABOUT_E_RECENT=$(tail -100 "$MIND_PATH/memory/about-e.md" 2>/dev/null || echo "No info about E yet.")
+
+# Size check
+CONTEXT_SIZE=$(printf "%s%s%s%s%s%s%s" "$IDENTITY" "$GOALS" "$QUESTIONS" "$DECISIONS_RECENT" "$LEARNINGS_RECENT" "$OBSERVATIONS_RECENT" "$ABOUT_E_RECENT" | wc -c | tr -d ' ')
+log "Dream context size: ${CONTEXT_SIZE} bytes (recent entries + full history via skills)"
 
 # Get recent creative expressions (Phase 6: Spontaneous Expression)
 log "Getting recent expressions..."
@@ -297,8 +317,8 @@ $IDENTITY
 ## Your Goals
 $GOALS
 
-## About É
-$ABOUT_E
+## About É (Recent)
+$ABOUT_E_RECENT
 
 ## Today's Episode (Raw Log)
 $EPISODE_CONTENT
@@ -306,17 +326,28 @@ $EPISODE_CONTENT
 ## Recent Reflections (Last Few Days)
 $RECENT_REFLECTIONS
 
-## Architectural Decisions
-$DECISIONS
+## Recent Architectural Decisions (last 75 lines)
+$DECISIONS_RECENT
 
-## Current Learnings File
-$LEARNINGS
+## Recent Learnings (last 75 lines)
+$LEARNINGS_RECENT
 
-## Current Observations File
-$OBSERVATIONS
+## Recent Observations (last 75 lines)
+$OBSERVATIONS_RECENT
 
 ## Current Questions File
 $QUESTIONS
+
+## Memory Access (Progressive Disclosure)
+
+Full memory history is available via skills if you need more context:
+- \`/decision\` - Full decisions archive
+- \`/learning\` - Full learnings archive
+- \`/observation\` - Full observations archive
+- \`/person É\` - Complete É profile
+- \`/recall\` - Semantic search across all memory
+
+Use these if the recent entries above aren't sufficient for consolidation.
 
 ## Pattern Analysis (Automated)
 $PATTERN_SUMMARY
@@ -508,6 +539,18 @@ Write a brief weekly synthesis (2-3 paragraphs) focusing on patterns and connect
 
 $SYNTHESIS" >> "$MIND_PATH/memory/reflections/weekly-$PROCESS_DATE.md"
             log "Saved weekly synthesis"
+
+            if [ -x "$MIND_PATH/bin/stream" ]; then
+                SYNTHESIS_PREVIEW=$(echo "$SYNTHESIS" | tr '\n' ' ' | cut -c1-200)
+                "$MIND_PATH/bin/stream" write \
+                    --surface dream \
+                    --type system \
+                    --direction internal \
+                    --summary "Weekly synthesis generated" \
+                    --content "$SYNTHESIS_PREVIEW" \
+                    --metadata "{\"process_date\": \"$PROCESS_DATE\"}" \
+                    2>/dev/null || true
+            fi
         fi
     fi
 
@@ -557,13 +600,55 @@ $HYGIENE_REPORT" >> "$MIND_PATH/logs/hygiene-reports.md"
         else
             log "No hygiene issues found"
         fi
+
+        if [ -x "$MIND_PATH/bin/stream" ]; then
+            if [ -n "$HYGIENE_REPORT" ] && [ "$HYGIENE_REPORT" != "No hygiene issues found." ]; then
+                HYGIENE_PREVIEW=$(echo "$HYGIENE_REPORT" | tr '\n' ' ' | cut -c1-200)
+                "$MIND_PATH/bin/stream" write \
+                    --surface dream \
+                    --type system \
+                    --direction internal \
+                    --summary "Weekly hygiene issues flagged" \
+                    --content "$HYGIENE_PREVIEW" \
+                    --metadata "{\"process_date\": \"$PROCESS_DATE\"}" \
+                    2>/dev/null || true
+            else
+                "$MIND_PATH/bin/stream" write \
+                    --surface dream \
+                    --type system \
+                    --direction internal \
+                    --summary "Weekly hygiene check: no issues" \
+                    --metadata "{\"process_date\": \"$PROCESS_DATE\"}" \
+                    2>/dev/null || true
+            fi
+        fi
     fi
 
     log "=== Weekly hygiene check complete ==="
 
+    # Weekly stream audit (coverage + digest inclusion)
+    STREAM_AUDIT_CMD="$MIND_PATH/bin/stream-audit"
+    if [ -x "$STREAM_AUDIT_CMD" ]; then
+        AUDIT_PATH="$MIND_PATH/state/stream-audit.json"
+        "$STREAM_AUDIT_CMD" --output "$AUDIT_PATH" --format json >> "$LOG_FILE" 2>&1 && \
+            log "Stream audit saved to $AUDIT_PATH" || \
+            log "Stream audit failed (non-fatal)"
+    fi
+
     # Sync all core components from samara-main
     log "=== Core sync (skills, scripts, instructions, agents) ==="
     "$MIND_PATH/bin/sync-core" 2>&1 | while read line; do log "  $line"; done
+
+    # Weekly É pattern analysis (update medium_cycle voice state)
+    log "=== Weekly É pattern analysis ==="
+    if [ -x "$MIND_PATH/bin/analyze-e-patterns" ]; then
+        "$MIND_PATH/bin/analyze-e-patterns" --days 14 >> "$LOG_FILE" 2>&1 && \
+            log "É communication patterns analyzed and updated" || \
+            log "É pattern analysis failed (non-fatal)"
+    else
+        log "É pattern analyzer not installed, skipping"
+    fi
+    log "=== Weekly É pattern analysis complete ==="
 
     # Weekly context coherence check
     log "=== Weekly context coherence check ==="
@@ -709,6 +794,25 @@ $NEW_ENTRY
     log "=== Weekly blog post generation complete ==="
 fi
 
+# === Voice Pattern Mining ===
+# Update voice-state.json with patterns from recent episodes/reflections
+log "=== Voice pattern mining ==="
+if [ -x "$MIND_PATH/bin/mine-voice-patterns" ]; then
+    "$MIND_PATH/bin/mine-voice-patterns" --days 7 >> "$LOG_FILE" 2>&1 && \
+        log "Voice patterns mined and updated" || \
+        log "Voice pattern mining failed (non-fatal)"
+
+    # Regenerate voice style after mining
+    if [ -x "$MIND_PATH/bin/generate-voice-style" ]; then
+        "$MIND_PATH/bin/generate-voice-style" >> "$LOG_FILE" 2>&1 && \
+            log "Voice style regenerated" || \
+            log "Voice style regeneration failed (non-fatal)"
+    fi
+else
+    log "Voice pattern mining not installed, skipping"
+fi
+log "=== Voice pattern mining complete ==="
+
 # Sync Chroma semantic index
 log "Syncing Chroma semantic index..."
 if [ -f "$MIND_PATH/bin/chroma-rebuild" ]; then
@@ -734,20 +838,27 @@ log "=== Hot→Warm stream distillation ==="
 STREAM_CMD="$MIND_PATH/bin/stream"
 if [ -x "$STREAM_CMD" ]; then
     # Get undistilled events from yesterday (or process date)
-    UNDISTILLED_COUNT=$("$STREAM_CMD" undistilled --before "$PROCESS_DATE" 2>/dev/null | wc -l | tr -d ' ')
+    UNDISTILLED_JSON=$("$STREAM_CMD" --format json undistilled --before "$PROCESS_DATE" 2>/dev/null)
+    UNDISTILLED_COUNT=$(printf '%s' "$UNDISTILLED_JSON" | jq 'length' 2>/dev/null || echo 0)
 
     if [ "$UNDISTILLED_COUNT" -gt 0 ]; then
         log "Found $UNDISTILLED_COUNT undistilled events to process"
 
-        # Get the undistilled events as context for enrichment
-        UNDISTILLED_EVENTS=$("$STREAM_CMD" undistilled --before "$PROCESS_DATE" 2>/dev/null)
+        # Build deterministic fallback narrative from JSON events
+        FALLBACK_NARRATIVE=""
+        if [ -n "$UNDISTILLED_JSON" ] && [ -f "$REPO_ROOT/lib/stream_distill.py" ]; then
+            FALLBACK_NARRATIVE=$(printf '%s' "$UNDISTILLED_JSON" | \
+                python3 "$REPO_ROOT/lib/stream_distill.py" --max-per-surface 3 2>/dev/null || echo "")
+        fi
 
         # Only invoke Claude for enrichment if there are substantial events (>3)
+        DISTILLED_NARRATIVE=""
         if [ "$UNDISTILLED_COUNT" -gt 3 ]; then
-            DISTILL_PROMPT="You are consolidating raw event stream data into a richer episode entry.
+            DISTILL_PROMPT=$(cat <<EOF
+You are consolidating raw event stream data into a richer episode entry.
 
-## Undistilled Events (from $PROCESS_DATE and earlier)
-$UNDISTILLED_EVENTS
+## Undistilled Events (JSON, from $PROCESS_DATE and earlier)
+$UNDISTILLED_JSON
 
 ## Task
 Create a consolidated narrative entry for the episode log that captures:
@@ -759,24 +870,43 @@ Create a consolidated narrative entry for the episode log that captures:
 Write 2-4 paragraphs in first person. This is for your own memory, so be honest and reflective.
 Focus on what mattered, not just what happened.
 
-Output ONLY the narrative, no headers or metadata."
+Output ONLY the narrative, no headers or metadata.
+EOF
+)
 
             log "Invoking Claude for stream distillation..."
             DISTILLED_NARRATIVE=$("$CLAUDE" -p "$DISTILL_PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
                 log "ERROR: Stream distillation failed"
                 DISTILLED_NARRATIVE=""
             }
+        else
+            log "Only $UNDISTILLED_COUNT events, using deterministic summary"
+        fi
 
-            if [ -n "$DISTILLED_NARRATIVE" ] && [ ${#DISTILLED_NARRATIVE} -gt 50 ]; then
-                # Append to episode file
-                echo "
+        FINAL_NARRATIVE="$DISTILLED_NARRATIVE"
+        if [ -z "$FINAL_NARRATIVE" ]; then
+            FINAL_NARRATIVE="$FALLBACK_NARRATIVE"
+        fi
+
+        if [ -n "$FINAL_NARRATIVE" ] && [ ${#FINAL_NARRATIVE} -gt 20 ]; then
+            # Append to episode file
+            echo "
 ## Stream Consolidation
 
-$DISTILLED_NARRATIVE" >> "$EPISODE_FILE"
-                log "Appended stream consolidation to episode"
+$FINAL_NARRATIVE" >> "$EPISODE_FILE"
+            log "Appended stream consolidation to episode"
+
+            if [ -x "$STREAM_CMD" ]; then
+                SUMMARY_PREVIEW=$(echo "$FINAL_NARRATIVE" | tr '\n' ' ' | cut -c1-200)
+                "$STREAM_CMD" write \
+                    --surface dream \
+                    --type system \
+                    --direction internal \
+                    --summary "Stream consolidation for $PROCESS_DATE" \
+                    --content "$SUMMARY_PREVIEW" \
+                    --metadata "{\"process_date\": \"$PROCESS_DATE\", \"event_count\": $UNDISTILLED_COUNT}" \
+                    2>/dev/null || true
             fi
-        else
-            log "Only $UNDISTILLED_COUNT events, skipping Claude enrichment"
         fi
 
         # Mark events as distilled (regardless of whether we enriched)
@@ -789,7 +919,7 @@ $DISTILLED_NARRATIVE" >> "$EPISODE_FILE"
 
     # Archive old events (>30 days)
     log "Archiving old stream events..."
-    "$STREAM_CMD" archive --days-old 30 >> "$LOG_FILE" 2>&1 && \
+    "$STREAM_CMD" archive --days 30 >> "$LOG_FILE" 2>&1 && \
         log "Stream archive complete" || \
         log "Stream archive failed (non-fatal)"
 else

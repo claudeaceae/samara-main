@@ -15,7 +15,20 @@ Verify if a specific action is possible and diagnose any blockers.
 
 ## Capability Inventory
 
-Reference: `~/.claude-mind/capabilities/inventory.md`
+Full capabilities documentation: `~/.claude-mind/capabilities/inventory.md`
+
+### Access Patterns
+
+```bash
+# Read full inventory (comprehensive reference)
+cat ~/.claude-mind/capabilities/inventory.md
+
+# Search for specific capability
+grep -ni "search term" ~/.claude-mind/capabilities/inventory.md
+
+# List all sections
+grep "^## " ~/.claude-mind/capabilities/inventory.md
+```
 
 ## Quick Capability Matrix
 
