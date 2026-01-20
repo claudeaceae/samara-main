@@ -10,9 +10,11 @@ Output is ~2-4k tokens, suitable for injection into session context.
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -21,6 +23,8 @@ from typing import Any, Optional
 # Add parent dir to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from lib.mind_paths import get_mind_path
+from lib.stream_distill import build_narrative
 from lib.stream_writer import StreamWriter, Surface
 
 # Surface categories for different formatting treatment
@@ -35,17 +39,41 @@ TOKEN_WEIGHTS = {
     "sense": 0.15,           # System events (compact)
 }
 
+CLOSED_THREAD_STATUSES = {
+    "closed",
+    "done",
+    "resolved",
+    "complete",
+    "completed",
+    "archived",
+}
+
 
 def estimate_tokens(text: str) -> int:
     """Rough token estimate (4 chars per token on average)."""
     return len(text) // 4
 
 
+def is_digest_content(text: str) -> bool:
+    """Check if digest content is non-empty and not the default empty message."""
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return "No recent events found." not in stripped
+
+
 def format_time_ago(timestamp: str) -> str:
     """Format timestamp as human-readable time ago."""
     try:
         event_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        now = datetime.now(timezone.utc)
+        now_override = os.environ.get("HOT_DIGEST_NOW")
+        if now_override:
+            try:
+                now = datetime.fromisoformat(now_override.replace("Z", "+00:00"))
+            except ValueError:
+                now = datetime.now(timezone.utc)
+        else:
+            now = datetime.now(timezone.utc)
         delta = now - event_time
 
         if delta.total_seconds() < 3600:
@@ -69,7 +97,7 @@ def group_events_by_window(
     # Sort by timestamp (newest first)
     sorted_events = sorted(
         events,
-        key=lambda e: e.get("timestamp", ""),
+        key=lambda e: (e.get("timestamp", ""), e.get("id", "")),
         reverse=True,
     )
 
@@ -252,8 +280,82 @@ Output ONLY the summary, no preamble."""
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
 
+    fallback_narrative = build_narrative(events, max_per_surface=3)
+    if fallback_narrative:
+        return fallback_narrative
+
     # Fallback: just use summaries
     return "; ".join(e.get("summary", "") for e in events[:3])
+
+
+# =============================================================================
+# Open Threads (State)
+# =============================================================================
+
+
+def load_open_threads(max_threads: int = 5) -> list[dict[str, str]]:
+    """Load open threads from state/threads.json."""
+    threads_path = get_mind_path() / "state" / "threads.json"
+    if not threads_path.exists():
+        return []
+
+    try:
+        raw = threads_path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+    except (OSError, json.JSONDecodeError):
+        return []
+
+    if isinstance(data, list):
+        threads = data
+    elif isinstance(data, dict):
+        threads = data.get("threads", [])
+    else:
+        return []
+
+    if not isinstance(threads, list):
+        return []
+
+    open_threads: list[dict[str, str]] = []
+    for thread in threads:
+        if not isinstance(thread, dict):
+            continue
+
+        title = (
+            str(thread.get("title") or thread.get("summary") or thread.get("name") or "")
+            .strip()
+        )
+        if not title:
+            continue
+
+        status = str(thread.get("status") or thread.get("state") or "").strip().lower()
+        if thread.get("done") is True or thread.get("closed") is True:
+            status = "done"
+        if thread.get("archived") is True:
+            status = "archived"
+
+        if status in CLOSED_THREAD_STATUSES:
+            continue
+
+        open_threads.append({"title": title, "status": status})
+        if len(open_threads) >= max_threads:
+            break
+
+    return open_threads
+
+
+def build_open_threads_section(threads: list[dict[str, str]]) -> str:
+    """Build a compact Open Threads section."""
+    if not threads:
+        return ""
+
+    lines = ["### Open Threads\n"]
+    for thread in threads:
+        title = thread.get("title", "").strip()
+        status = thread.get("status", "").strip()
+        suffix = f" ({status})" if status and status not in {"open", "active"} else ""
+        lines.append(f"- {title}{suffix}\n")
+
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 # =============================================================================
@@ -432,8 +534,9 @@ def build_digest(
     """
     writer = StreamWriter()
     events = writer.query(hours=hours, include_distilled=False)
+    open_threads = load_open_threads()
 
-    if not events:
+    if not events and not open_threads:
         return ""
 
     # Categorize events by surface type
@@ -452,7 +555,11 @@ def build_digest(
 
     # Calculate token budgets by priority
     header_budget = 100  # Reserve for header
-    available = max_tokens - header_budget
+    open_section = build_open_threads_section(open_threads)
+    open_tokens = estimate_tokens(open_section) if open_section else 0
+    available = max_tokens - header_budget - open_tokens
+    if available < 0:
+        available = 0
 
     conv_budget = int(available * TOKEN_WEIGHTS["conversational"])
     activity_budget = int(available * TOKEN_WEIGHTS["activity"])
@@ -466,6 +573,10 @@ def build_digest(
 
     # Build sections in priority order
     sections = []
+
+    # 0. Open threads from state (highest visibility)
+    if open_section:
+        sections.append(open_section)
 
     # 1. Conversational section (highest priority - most important for continuity)
     if conversational_events:
@@ -496,6 +607,28 @@ def build_digest(
     return "\n".join(digest_lines)
 
 
+def read_cached_output(output_path: Path, cache_ttl: int) -> Optional[str]:
+    """Return cached output if within TTL and non-empty."""
+    if cache_ttl <= 0:
+        return None
+
+    try:
+        mtime = output_path.stat().st_mtime
+    except OSError:
+        return None
+
+    age = time.time() - mtime
+    if age > cache_ttl:
+        return None
+
+    try:
+        cached = output_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+    return cached if is_digest_content(cached) else None
+
+
 def main():
     """CLI entry point."""
     import argparse
@@ -506,8 +639,29 @@ def main():
     parser.add_argument("--no-ollama", action="store_true", help="Disable Ollama summarization")
     parser.add_argument("--model", default="qwen3:8b", help="Ollama model to use")
     parser.add_argument("--format", choices=["text", "json"], default="text")
+    parser.add_argument("--output", type=Path, help="Write digest to a file path")
+    parser.add_argument("--cache-ttl", type=int, help="Cache TTL in seconds for --output")
 
     args = parser.parse_args()
+
+    cached_digest = None
+    if args.output and args.cache_ttl is not None:
+        cached_digest = read_cached_output(args.output, args.cache_ttl)
+
+    if cached_digest is not None:
+        if args.format == "json":
+            print(
+                json.dumps(
+                    {
+                        "digest": cached_digest,
+                        "tokens_estimate": estimate_tokens(cached_digest),
+                        "cached": True,
+                    }
+                )
+            )
+        else:
+            print(cached_digest)
+        return
 
     digest = build_digest(
         hours=args.hours,
@@ -516,8 +670,23 @@ def main():
         ollama_model=args.model,
     )
 
+    if args.output and is_digest_content(digest):
+        try:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(digest, encoding="utf-8")
+        except OSError:
+            pass
+
     if args.format == "json":
-        print(json.dumps({"digest": digest, "tokens_estimate": estimate_tokens(digest)}))
+        print(
+            json.dumps(
+                {
+                    "digest": digest,
+                    "tokens_estimate": estimate_tokens(digest),
+                    "cached": False,
+                }
+            )
+        )
     else:
         if digest:
             print(digest)
