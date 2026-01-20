@@ -51,17 +51,83 @@ This means:
 
 ## What Should Be Symlinked
 
-| Component | Symlinked? | Reason |
-|-----------|------------|--------|
-| Scripts (`bin/`) | ✅ Yes | Canonical in repo, changes propagate |
-| Skills (`.claude/skills/`) | ✅ Yes | Canonical in repo |
-| Hooks (`.claude/hooks/`) | ✅ Yes | Via `.claude/` symlink |
-| Instructions (`instructions/`) | ✅ Yes | Canonical in repo, prompt guidance |
-| Memory files | ❌ No | Instance-specific, accumulates |
-| Config (`config.json`) | ❌ No | Instance-specific |
-| State files | ❌ No | Runtime state |
-| Expression seeds | ❌ No | Can be customized per instance |
-| Samara.app | N/A | Built binary, use `update-samara` |
+### Three-Location Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  REPO (~/Developer/samara-main/)                                │
+│  The "genome" - portable, shareable, version-controlled         │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ .claude/                                                  │   │
+│  │   ├── agents/     ←──┬──── ~/.claude/agents (global)     │   │
+│  │   ├── hooks/         │                                    │   │
+│  │   ├── skills/     ←──┼──── ~/.claude/skills/* (global)   │   │
+│  │   └── settings.json  └──── ~/.claude-mind/.claude (runtime)│  │
+│  │                                                           │   │
+│  │ scripts/          ←────── ~/.claude-mind/bin/* (runtime)  │   │
+│  │ CLAUDE.md         ←────── ~/.claude-mind/CLAUDE.md        │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  RUNTIME (~/.claude-mind/)                                      │
+│  The "organism" - accumulates memories, adapts, grows           │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ .claude → repo/.claude     (symlink - hooks/skills/agents)│   │
+│  │ CLAUDE.md → repo/CLAUDE.md (symlink)                      │   │
+│  │ bin/* → repo/scripts/*     (individual symlinks)          │   │
+│  │ memory/                    (NOT symlinked - accumulates)  │   │
+│  │ state/                     (NOT symlinked - runtime state)│   │
+│  │ config.json                (NOT symlinked - instance cfg) │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  GLOBAL (~/.claude/)                                            │
+│  Claude Code's home - read from ANY directory                   │
+│  ┌──────────────────────────────────────────────────────────┐   │
+│  │ agents → repo/.claude/agents  (symlink)                   │   │
+│  │ skills/* → repo/.claude/skills/* (individual symlinks)    │   │
+│  │ settings.json                 (NOT symlinked - global cfg)│   │
+│  │ projects/                     (conversation logs)         │   │
+│  │ plugins/                      (installed plugins)         │   │
+│  └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Symlink Summary Table
+
+| Component | Symlinked? | Location | Reason |
+|-----------|------------|----------|--------|
+| Scripts (`bin/`) | ✅ Yes | Runtime | Canonical in repo, changes propagate |
+| Skills (`.claude/skills/`) | ✅ Yes | Global + Runtime | Canonical in repo |
+| Agents (`.claude/agents/`) | ✅ Yes | Global | Canonical in repo |
+| Hooks (`.claude/hooks/`) | ✅ Yes | Via `.claude/` symlink | Canonical in repo |
+| Runtime `.claude/` | ✅ Yes | Runtime | Project settings when invoked from runtime |
+| Runtime `CLAUDE.md` | ✅ Yes | Runtime | Instructions when invoked from runtime |
+| Instructions (`instructions/`) | ✅ Yes | Runtime | Canonical in repo, prompt guidance |
+| Memory files | ❌ No | Runtime | Instance-specific, accumulates |
+| Config (`config.json`) | ❌ No | Runtime | Instance-specific |
+| State files | ❌ No | Runtime | Runtime state |
+| Expression seeds | ❌ No | Runtime | Can be customized per instance |
+| Samara.app | N/A | /Applications | Built binary, use `update-samara` |
+
+### Why This Architecture?
+
+**When Samara invokes Claude Code:**
+- Working directory: `~/.claude-mind/`
+- Reads: global `~/.claude/settings.json` + project `~/.claude-mind/.claude/settings.json`
+- Result: All hooks, agents, and skills are available
+
+**When human runs Claude in the repo:**
+- Working directory: `~/Developer/samara-main/`
+- Reads: global + project `.claude/settings.json`
+- Result: All hooks, agents, and skills are available
+
+**When human runs Claude elsewhere:**
+- Working directory: some other project
+- Reads: only global `~/.claude/settings.json`
+- Result: Skills and agents available, but organism-specific hooks NOT active (this is intentional - hooks like `hydrate-session` only make sense for the organism)
 
 ---
 

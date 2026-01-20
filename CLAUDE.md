@@ -126,6 +126,7 @@ Interactive workflows available via Claude Code. Invoke with `/skillname` or tri
 | `/diagnose-leaks` | Diagnose thinking/session ID leaks |
 | `/webhook` | Manage webhook sources - add, test, view events |
 | `/wallet` | Check crypto wallet balances, addresses, and history |
+| `/services` | Toggle services on/off (X, Bluesky, GitHub, wallet, etc.) |
 
 Skills are defined in `.claude/skills/` and symlinked to `~/.claude/skills/`.
 
@@ -258,6 +259,40 @@ Full Disk Access is tied to the app's **designated requirement** (Bundle ID, Tea
 1. **New file per plan iteration** — Don't modify existing plans; create a successor
 2. **Reference predecessors** — Add `supersedes: previous-plan-name.md` in the plan header
 3. **Explain evolution** — Note why the plan changed
+
+### Implementing New Senses/Services
+
+**All new senses and services MUST be toggleable.** When implementing any new capability that:
+- Polls external services (watchers, checkers)
+- Processes sense events (SenseRouter handlers)
+- Contributes to memory systems (episode logs, observations, learnings)
+- Consumes tokens during wake cycles
+
+You MUST:
+
+1. **Add to ServicesConfig** (`Configuration.swift`):
+   ```swift
+   let newservice: Bool?
+   // And in isEnabled():
+   case "newservice": return newservice ?? true
+   ```
+
+2. **Guard the handler** (`SenseRouter.swift`):
+   ```swift
+   if services.isEnabled("newservice") {
+       handlers["newservice"] = { ... }
+   }
+   ```
+
+3. **Update service-toggle** (`scripts/service-toggle`):
+   - Add to `SERVICES` list
+   - Add to `get_agents()` case statement with launchd agent names
+
+4. **Update config.json** with the new service (default: `true`)
+
+5. **Document in `/services` skill** (`SKILL.md`)
+
+This ensures the collaborator can cleanly disable any service without code changes. See existing implementations (x, bluesky, wallet) for patterns.
 
 ### AppleScript over MCP
 

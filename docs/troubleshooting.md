@@ -106,3 +106,38 @@ archive-index rebuild
 3. Consider if new task types need classification in TaskRouter
 
 See [Xcode Build Guide](xcode-build-guide.md#response-sanitization-critical) for sanitization details.
+
+---
+
+## Dream/Wake cycle fails with "Invalid session ID"
+
+**Symptom:** Dream or wake logs show:
+```
+ERROR: Claude invocation failed: Error: Invalid session ID. Must be a valid UUID.
+```
+
+**Cause:** Claude Code requires `--session-id` to be a valid UUID format (e.g., `a1b2c3d4-e5f6-7890-abcd-ef1234567890`). Date-based IDs like `dream-20260118` are rejected.
+
+**Fix:** The scripts now use `uuidgen` to create valid UUIDs:
+```bash
+# Old (broken)
+SESSION_ID="dream-$(date +%Y%m%d)"
+
+# New (correct)
+SESSION_UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+```
+
+**Verify the fix:**
+```bash
+# Check UUID generation works
+uuidgen | tr '[:upper:]' '[:lower:]'
+
+# Run tests
+PYTHONPATH=. pytest tests/test_ritual_scripts.py -v
+```
+
+**Catch up on missed weekly rituals:**
+```bash
+# Run weekly synthesis and blog post for a missed date
+~/.claude-mind/bin/dream-weekly-catchup 2026-01-12
+```

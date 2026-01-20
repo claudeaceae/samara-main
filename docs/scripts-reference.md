@@ -83,6 +83,21 @@ x-reply-playwright 1234567890 "Test reply"
 
 ---
 
+## Service Management Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `service-toggle list` | Show status of all services (config + launchd) |
+| `service-toggle <svc> on` | Enable a service (config + load launchd) |
+| `service-toggle <svc> off` | Disable a service (config + unload launchd) |
+| `service-toggle <svc> status` | Check status of a specific service |
+
+**Available services:** `x`, `bluesky`, `github`, `wallet`, `meeting`, `webhook`, `location`
+
+See `/services` skill for full documentation.
+
+---
+
 ## Wake/Dream Scripts
 
 | Script | Purpose |

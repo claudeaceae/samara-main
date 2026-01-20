@@ -239,6 +239,60 @@ install_skills() {
     fi
 }
 
+# Install Claude Code agents
+install_agents() {
+    log_info "Installing Claude Code agents..."
+
+    local agents_src="$SCRIPT_DIR/.claude/agents"
+    local agents_dst="$HOME/.claude/agents"
+
+    if [ -d "$agents_src" ]; then
+        # Remove existing if present
+        if [ -L "$agents_dst" ] || [ -d "$agents_dst" ]; then
+            rm -rf "$agents_dst"
+        fi
+
+        ln -s "$agents_src" "$agents_dst"
+        log_success "Agents symlinked: $agents_dst → $agents_src"
+    else
+        log_warn "No agents directory found at $agents_src"
+    fi
+}
+
+# Create runtime .claude symlink and CLAUDE.md
+# This allows Claude Code to find hooks/skills/agents when invoked from ~/.claude-mind/
+install_runtime_claude_config() {
+    log_info "Setting up runtime Claude Code configuration..."
+
+    # Symlink .claude directory (for hooks, settings when invoked from runtime)
+    local claude_src="$SCRIPT_DIR/.claude"
+    local claude_dst="$TARGET_DIR/.claude"
+
+    if [ -d "$claude_src" ]; then
+        # Remove existing if present
+        if [ -L "$claude_dst" ] || [ -d "$claude_dst" ]; then
+            rm -rf "$claude_dst"
+        fi
+
+        ln -s "$claude_src" "$claude_dst"
+        log_success "Runtime .claude symlinked: $claude_dst → $claude_src"
+    fi
+
+    # Symlink CLAUDE.md
+    local claudemd_src="$SCRIPT_DIR/CLAUDE.md"
+    local claudemd_dst="$TARGET_DIR/CLAUDE.md"
+
+    if [ -f "$claudemd_src" ]; then
+        # Remove existing if present
+        if [ -L "$claudemd_dst" ] || [ -f "$claudemd_dst" ]; then
+            rm -f "$claudemd_dst"
+        fi
+
+        ln -s "$claudemd_src" "$claudemd_dst"
+        log_success "Runtime CLAUDE.md symlinked: $claudemd_dst → $claudemd_src"
+    fi
+}
+
 # Configure Claude Code global settings
 configure_claude_code() {
     log_info "Configuring Claude Code retention policy..."
@@ -488,6 +542,8 @@ main() {
     install_templates
     install_scripts
     install_skills
+    install_agents
+    install_runtime_claude_config
     configure_claude_code
     create_launchd_templates
     print_next_steps

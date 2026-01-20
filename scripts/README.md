@@ -23,6 +23,7 @@ Shell scripts that power the Claude organism's autonomous capabilities.
 | `update-samara` | Dev | Rebuild Samara.app |
 | `log-session` | Internal | Log session summaries |
 | `export-messages` | Utility | Export iMessage history |
+| `stream-audit` | Utility | Audit stream coverage and digest inclusion |
 
 ---
 
