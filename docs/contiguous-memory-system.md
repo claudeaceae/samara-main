@@ -23,10 +23,10 @@ Surfaces (iMessage, CLI, wake/dream, webhooks, email, calendar, location, X, Blu
 EpisodeLogger / SenseRouter / stream CLI
         |
         v
-~/.claude-mind/stream/events.jsonl (append-only)
+~/.claude-mind/stream/daily/events-YYYY-MM-DD.jsonl (append-only)
         |                 |                    |
         |                 |                    +--> Stream audit (coverage, digest inclusion)
-        |                 +--> Hot digest (last 12h) -> session hydration
+        |                 +--> Hot digest (adaptive window) -> session hydration
         +--> Dream cycle distillation -> episode logs, mark distilled, archive
 ```
 
@@ -37,7 +37,7 @@ sequenceDiagram
     participant Surface as Surface (iMessage/CLI/Wake/etc)
     participant Logger as EpisodeLogger/SenseRouter
     participant Stream as StreamWriter (stream CLI)
-    participant Log as events.jsonl
+    participant Log as daily shard
     participant Digest as Hot Digest
     participant Session as Session Hydration
     participant Episode as Episode Log
@@ -46,7 +46,7 @@ sequenceDiagram
     Surface->>Logger: Interaction or sense event
     Logger->>Stream: write event
     Stream->>Log: append JSONL (locked)
-    Note over Log: Append-only stream
+    Note over Log: Append-only daily shards
 
     Session->>Digest: build recent digest (12h)
     Digest->>Log: query undistilled events
@@ -59,7 +59,8 @@ sequenceDiagram
 
 ## Event schema
 
-Each event is a JSON object on its own line in `events.jsonl`.
+Each event is a JSON object on its own line in daily shard files
+(`stream/daily/events-YYYY-MM-DD.jsonl`).
 
 Required fields:
 - `schema_version` (string): currently `"1"`
@@ -104,9 +105,13 @@ Example event:
 
 ```
 ~/.claude-mind/stream/
-├── events.jsonl                   # Append-only primary stream
+├── daily/
+│   └── events-YYYY-MM-DD.jsonl     # Append-only daily shards
+├── distilled-index.jsonl          # Sidecar distilled IDs (append-only)
+├── events.jsonl                   # Legacy single-file stream (pre-sharding)
+├── events.legacy.jsonl            # Legacy file after migrate-daily (rollback)
 └── archive/
-    └── events-YYYY-MM-DD.jsonl     # Old events moved by archive job
+    └── events-YYYY-MM-DD.jsonl     # Old daily shards moved by archive job
 ```
 
 ## Writers and ingestion points
@@ -169,7 +174,7 @@ Use the stream CLI or Python API:
 `lib/hot_digest_builder.py` builds a compact digest of recent activity for session hydration.
 
 Key behaviors:
-- Default window: last 12 hours
+- Default window: adaptive (density + velocity), bounded by min/max
 - Token budget allocation:
   - Conversations: 50 percent (iMessage, X, Bluesky, email)
   - Sessions: 35 percent (CLI, wake, dream)
@@ -199,7 +204,7 @@ This runs on **SessionStart** and is intentionally fast; it prefers cached diges
 
 ### iMessage sessions (Samara app)
 
-`MemoryContext.buildHotDigest(...)` calls `build-hot-digest` with a 5 second timeout and injects the result into the iMessage context. If the digest is unavailable, it falls back to open threads.
+`MemoryContext.buildHotDigest(...)` calls `build-hot-digest` with a 5 second timeout and injects the result into the iMessage context. The default uses `--hours auto`; numeric hours still work. If the digest is unavailable, it falls back to open threads.
 
 ## Distillation and lifecycle
 
@@ -217,7 +222,7 @@ stream --format json undistilled --before YYYY-MM-DD
 
 4) Append narrative to episode file under `## Stream Consolidation`
 
-5) Mark events as distilled:
+5) Mark events as distilled (sidecar index):
 ```
 stream mark-distilled --before YYYY-MM-DD
 ```
@@ -245,6 +250,13 @@ Schema validation:
 stream validate
 ```
 
+Legacy migration:
+```
+stream migrate-daily
+stream rebuild-distilled-index
+```
+`migrate-daily` splits `events.jsonl` into daily shards and renames the legacy file to `events.legacy.jsonl`.
+
 ## Testing and verification
 
 Automated:
@@ -255,6 +267,7 @@ Manual:
 ```
 stream stats
 stream query --hours 12
+stream query --hours auto
 stream validate
 stream-audit --format text
 ```
@@ -308,6 +321,8 @@ stream write --surface cli --type interaction --direction inbound \
 stream query --hours 12 --surface imessage
 stream undistilled --before 2026-01-17
 stream mark-distilled evt_123_abc evt_456_def
+stream rebuild-distilled-index
+stream migrate-daily
 stream archive --days 30
 stream stats
 stream validate
@@ -317,7 +332,7 @@ stream-audit --format text
 ## Troubleshooting
 
 - Stream is empty: verify `~/.claude-mind/bin/stream` is present and executable. Run `sync-core`.
-- Digest is empty: run `build-hot-digest --hours 12 --no-ollama` and check `events.jsonl`.
+- Digest is empty: run `build-hot-digest --hours auto --no-ollama` and check `stream/daily/`.
 - Missing surfaces in audit: confirm the upstream sense event exists and `EpisodeLogger` mapping covers it.
 - Hydration missing in CLI: verify `.claude/settings.json` SessionStart hook points to `.claude/hooks/hydrate-session.sh`.
 - Calendar events missing: run `scripts/meeting-check` and confirm sense events are processed.
@@ -328,6 +343,7 @@ stream-audit --format text
 - `lib/stream_cli.py` - CLI implementation
 - `lib/stream_validator.py` - schema validation
 - `lib/stream_audit.py` - coverage and digest inclusion audit
+- `lib/stream_metrics.py` - density/velocity metrics for adaptive windowing
 - `lib/hot_digest_builder.py` - hot digest logic
 - `scripts/build-hot-digest` - CLI wrapper
 - `scripts/stream` - CLI wrapper

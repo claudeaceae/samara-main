@@ -23,10 +23,11 @@ Samara maintains multiple complementary memory systems:
 
 ## Contiguous Memory (Unified Stream)
 
-Samara writes every interaction and sense event into a single append-only stream at
-`~/.claude-mind/stream/events.jsonl`. This stream powers the hot digest used for
-session hydration and provides an auditable timeline across iMessage, CLI, wake/dream,
-and satellite services.
+Samara writes every interaction and sense event into daily shard files at
+`~/.claude-mind/stream/daily/events-YYYY-MM-DD.jsonl`, with a sidecar distilled index
+at `~/.claude-mind/stream/distilled-index.jsonl`. This stream powers the hot digest
+used for session hydration and provides an auditable timeline across iMessage, CLI,
+wake/dream, and satellite services.
 
 Key touchpoints:
 - Samara app dual-writes to the stream via `EpisodeLogger.swift`

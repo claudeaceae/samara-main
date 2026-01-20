@@ -605,7 +605,7 @@ def build_digest(
     Build a hot digest from recent events with priority-based token budgeting.
 
     Args:
-        hours: Look back this many hours
+        hours: Look back this many hours, or "auto" for adaptive windowing
         max_tokens: Target maximum tokens for output
         use_ollama: Use Ollama for summarization (if False, use heuristics only)
         ollama_model: Ollama model to use
