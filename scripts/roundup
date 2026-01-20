@@ -117,15 +117,38 @@ log "Step 3: Delivering roundup..."
 # Get summary for message
 SUMMARY=$(python3 -c "
 import json
+import os
+
 with open('$JSON_FILE') as f:
     data = json.load(f)
+
 rel = data['relational']
 prod = data['productive']
 refl = data['reflective']
-print(f'''$PERIOD_TYPE roundup for $PERIOD:
-- {rel['total_messages']} messages, {rel['conversations']} conversations
-- {prod['git_commits']} commits, {prod['lines_changed']} lines changed
-- {refl['reflections_written']} reflections, {refl['dream_cycles']} dream cycles''')
+
+lines = [
+    f'$PERIOD_TYPE roundup for $PERIOD:',
+    f'- {rel[\"total_messages\"]} messages, {rel[\"conversations\"]} conversations',
+    f'- {prod[\"git_commits\"]} commits, {prod[\"lines_changed\"]} lines changed',
+    f'- {refl[\"reflections_written\"]} reflections, {refl[\"dream_cycles\"]} dream cycles',
+]
+
+audit_path = os.path.join('$MIND_PATH', 'state', 'stream-audit.json')
+if '$PERIOD_TYPE' == 'weekly' and os.path.exists(audit_path):
+    try:
+        with open(audit_path) as f:
+            audit = json.load(f)
+        gaps = audit.get('gaps', {})
+        missing = gaps.get('missing_surfaces', [])
+        digest = audit.get('digest_inclusion', {}).get('total', {})
+        rate = digest.get('rate')
+        rate_str = f'{round(rate * 100, 1)}%' if rate is not None else 'n/a'
+        handoff = 'stale' if gaps.get('handoff_stale') else 'ok'
+        lines.append(f'- Stream audit: {len(missing)} missing surfaces, digest {rate_str}, handoffs {handoff}')
+    except Exception:
+        pass
+
+print('\\n'.join(lines))
 ")
 
 # Send via iMessage
@@ -137,6 +160,18 @@ fi
 
 "$MIND_PATH/bin/message-e" "$SUMMARY"
 log "Sent summary message"
+
+# Write roundup event to unified stream
+STREAM_CMD="$MIND_PATH/bin/stream"
+if [ -x "$STREAM_CMD" ]; then
+    "$STREAM_CMD" write \
+        --surface system \
+        --type system \
+        --direction internal \
+        --summary "Roundup generated: $PERIOD_TYPE $PERIOD" \
+        --metadata "{\"period_type\": \"$PERIOD_TYPE\", \"period\": \"$PERIOD\"}" \
+        >> "$LOG_FILE" 2>&1 || true
+fi
 
 # For monthly/yearly, also send email
 if [[ "$PERIOD_TYPE" =~ ^(monthly|yearly)$ ]]; then

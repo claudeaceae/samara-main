@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+# service-toggle - Toggle services on/off in config.json and manage launchd agents
+#
+# Usage:
+#   service-toggle <service> <action>
+#   service-toggle list
+#
+# Actions:
+#   on      Enable service in config and load launchd agent(s)
+#   off     Disable service in config and unload launchd agent(s)
+#   status  Show current status of service
+#   list    Show status of all services
+#
+# Examples:
+#   service-toggle x off        # Disable X/Twitter
+#   service-toggle bluesky on   # Enable Bluesky
+#   service-toggle list         # Show all services
+
+set -eo pipefail
+
+MIND_PATH="${MIND_PATH:-$HOME/.claude-mind}"
+CONFIG_FILE="$MIND_PATH/config.json"
+LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
+
+# All known services
+SERVICES="x bluesky github wallet meeting webhook location"
+
+# Get launchd agents for a service
+get_agents() {
+    local service="$1"
+    case "$service" in
+        x)        echo "com.claude.x-watcher com.claude.x-engage" ;;
+        bluesky)  echo "com.claude.bluesky-watcher com.claude.bluesky-engage" ;;
+        wallet)   echo "com.claude.wallet-watcher" ;;
+        meeting)  echo "com.claude.meeting-check" ;;
+        github)   echo "com.claude.github-watcher" ;;
+        webhook)  echo "com.claude.webhook-receiver" ;;
+        location) echo "co.organelle.location-receiver" ;;
+        *)        echo "" ;;
+    esac
+}
+
+usage() {
+    echo "Usage: service-toggle <service> <on|off|status>"
+    echo "       service-toggle list"
+    echo ""
+    echo "Services: $SERVICES"
+    exit 1
+}
+
+get_service_status() {
+    local service="$1"
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        echo "true"  # Default to enabled if no config
+        return
+    fi
+    local status
+    # Use 'if .services.SERVICE == null then true else .services.SERVICE end' to handle missing keys
+    status=$(jq -r "if .services.$service == null then true else .services.$service end" "$CONFIG_FILE" 2>/dev/null || echo "true")
+    echo "$status"
+}
+
+set_service_status() {
+    local service="$1"
+    local enabled="$2"  # true or false
+
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        echo "Error: Config file not found at $CONFIG_FILE" >&2
+        exit 1
+    fi
+
+    # Create services object if it doesn't exist, then set the value
+    local tmp_file
+    tmp_file=$(mktemp)
+    jq ".services.$service = $enabled" "$CONFIG_FILE" > "$tmp_file"
+    mv "$tmp_file" "$CONFIG_FILE"
+}
+
+sync_launchd() {
+    local service="$1"
+    local enabled="$2"
+
+    local agents
+    agents=$(get_agents "$service")
+    if [[ -z "$agents" ]]; then
+        return  # No agents to manage
+    fi
+
+    for agent in $agents; do
+        local plist="$LAUNCH_AGENTS_DIR/${agent}.plist"
+        if [[ ! -f "$plist" ]]; then
+            continue  # Agent plist doesn't exist
+        fi
+
+        if [[ "$enabled" == "true" ]]; then
+            launchctl load "$plist" 2>/dev/null || true
+        else
+            launchctl unload "$plist" 2>/dev/null || true
+        fi
+    done
+}
+
+show_status() {
+    local service="$1"
+    local status
+    status=$(get_service_status "$service")
+
+    local launchd_status="n/a"
+    local agents
+    agents=$(get_agents "$service")
+    if [[ -n "$agents" ]]; then
+        # Check first agent
+        local first_agent
+        first_agent=$(echo "$agents" | awk '{print $1}')
+        if launchctl list 2>/dev/null | grep -q "$first_agent"; then
+            launchd_status="loaded"
+        else
+            launchd_status="unloaded"
+        fi
+    fi
+
+    printf "%-12s config: %-5s  launchd: %s\n" "$service" "$status" "$launchd_status"
+}
+
+list_all() {
+    echo "Service Status:"
+    echo "---------------"
+    for service in $SERVICES; do
+        show_status "$service"
+    done
+}
+
+toggle_service() {
+    local service="$1"
+    local action="$2"
+
+    case "$action" in
+        on)
+            set_service_status "$service" "true"
+            sync_launchd "$service" "true"
+            echo "✓ $service enabled"
+            echo "  Note: Restart Samara.app for handler changes to take effect"
+            ;;
+        off)
+            set_service_status "$service" "false"
+            sync_launchd "$service" "false"
+            echo "✓ $service disabled"
+            echo "  Note: Restart Samara.app for handler changes to take effect"
+            ;;
+        status)
+            show_status "$service"
+            ;;
+        *)
+            usage
+            ;;
+    esac
+}
+
+# Main
+if [[ $# -lt 1 ]]; then
+    usage
+fi
+
+if [[ "$1" == "list" ]]; then
+    list_all
+    exit 0
+fi
+
+if [[ $# -lt 2 ]]; then
+    usage
+fi
+
+SERVICE="$1"
+ACTION="$2"
+
+# Validate service name
+valid_service=false
+for s in $SERVICES; do
+    if [[ "$s" == "$SERVICE" ]]; then
+        valid_service=true
+        break
+    fi
+done
+
+if [[ "$valid_service" != "true" ]]; then
+    echo "Error: Unknown service '$SERVICE'" >&2
+    echo "Valid services: $SERVICES" >&2
+    exit 1
+fi
+
+toggle_service "$SERVICE" "$ACTION"

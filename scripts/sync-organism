@@ -74,6 +74,58 @@ if [ $SKILLS_MISSING -gt 0 ]; then
 fi
 echo
 
+# 2b. Check agents symlink (global)
+echo "## Agents Symlink"
+AGENTS_SRC="$REPO_DIR/.claude/agents"
+AGENTS_DST="$HOME/.claude/agents"
+if [ -L "$AGENTS_DST" ]; then
+    target=$(readlink "$AGENTS_DST")
+    if [ "$target" = "$AGENTS_SRC" ]; then
+        log_ok "Global agents symlinked correctly"
+    else
+        log_warn "Agents symlink points to wrong target: $target (expected $AGENTS_SRC)"
+        ((DRIFT_COUNT++))
+    fi
+else
+    log_error "Global agents not symlinked: $AGENTS_DST"
+    ((DRIFT_COUNT++))
+fi
+echo
+
+# 2c. Check runtime .claude symlink
+echo "## Runtime .claude Symlink"
+CLAUDE_SRC="$REPO_DIR/.claude"
+CLAUDE_DST="$RUNTIME_DIR/.claude"
+if [ -L "$CLAUDE_DST" ]; then
+    target=$(readlink "$CLAUDE_DST")
+    if [ "$target" = "$CLAUDE_SRC" ]; then
+        log_ok "Runtime .claude symlinked correctly"
+    else
+        log_warn "Runtime .claude points to wrong target: $target (expected $CLAUDE_SRC)"
+        ((DRIFT_COUNT++))
+    fi
+else
+    log_error "Runtime .claude not symlinked: $CLAUDE_DST"
+    ((DRIFT_COUNT++))
+fi
+
+# Check runtime CLAUDE.md symlink
+CLAUDEMD_SRC="$REPO_DIR/CLAUDE.md"
+CLAUDEMD_DST="$RUNTIME_DIR/CLAUDE.md"
+if [ -L "$CLAUDEMD_DST" ]; then
+    target=$(readlink "$CLAUDEMD_DST")
+    if [ "$target" = "$CLAUDEMD_SRC" ]; then
+        log_ok "Runtime CLAUDE.md symlinked correctly"
+    else
+        log_warn "Runtime CLAUDE.md points to wrong target: $target (expected $CLAUDEMD_SRC)"
+        ((DRIFT_COUNT++))
+    fi
+else
+    log_error "Runtime CLAUDE.md not symlinked: $CLAUDEMD_DST"
+    ((DRIFT_COUNT++))
+fi
+echo
+
 # 3. Check script drift
 echo "## Script Drift Analysis"
 
@@ -189,6 +241,30 @@ if [ "$MODE" = "--fix" ]; then
         done
     fi
 
+    # Fix agents symlink
+    if [ ! -L "$AGENTS_DST" ] || [ "$(readlink "$AGENTS_DST")" != "$AGENTS_SRC" ]; then
+        echo "Fixing agents symlink..."
+        rm -rf "$AGENTS_DST"
+        ln -s "$AGENTS_SRC" "$AGENTS_DST"
+        log_ok "Created symlink: agents"
+    fi
+
+    # Fix runtime .claude symlink
+    if [ ! -L "$CLAUDE_DST" ] || [ "$(readlink "$CLAUDE_DST")" != "$CLAUDE_SRC" ]; then
+        echo "Fixing runtime .claude symlink..."
+        rm -rf "$CLAUDE_DST"
+        ln -s "$CLAUDE_SRC" "$CLAUDE_DST"
+        log_ok "Created symlink: runtime .claude"
+    fi
+
+    # Fix runtime CLAUDE.md symlink
+    if [ ! -L "$CLAUDEMD_DST" ] || [ "$(readlink "$CLAUDEMD_DST")" != "$CLAUDEMD_SRC" ]; then
+        echo "Fixing runtime CLAUDE.md symlink..."
+        rm -f "$CLAUDEMD_DST"
+        ln -s "$CLAUDEMD_SRC" "$CLAUDEMD_DST"
+        log_ok "Created symlink: runtime CLAUDE.md"
+    fi
+
     # For differing scripts, show diff and ask
     if [ ${#DIFFER[@]} -gt 0 ]; then
         echo
@@ -210,6 +286,16 @@ if [ "$MODE" = "--fix" ]; then
         echo "Scripts only in runtime (consider adding to repo):"
         for name in "${RUNTIME_ONLY[@]}"; do
             echo "  cp '$RUNTIME_SCRIPTS/$name' '$REPO_SCRIPTS/$name'"
+        done
+    fi
+
+    # For repo-only scripts, create symlinks in runtime
+    if [ ${#REPO_ONLY[@]} -gt 0 ]; then
+        echo
+        echo "Creating symlinks for new repo scripts..."
+        for name in "${REPO_ONLY[@]}"; do
+            ln -sf "$REPO_SCRIPTS/$name" "$RUNTIME_SCRIPTS/$name"
+            log_ok "Created symlink: $name"
         done
     fi
 fi

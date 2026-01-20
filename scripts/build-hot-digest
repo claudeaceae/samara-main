@@ -3,7 +3,7 @@
 # Compresses recent events into context-friendly format
 #
 # Usage:
-#   build-hot-digest [--hours 12] [--max-tokens 3000] [--no-ollama]
+#   build-hot-digest [--hours 12] [--max-tokens 3000] [--no-ollama] [--output PATH] [--cache-ttl SECONDS]
 
 set -e
 

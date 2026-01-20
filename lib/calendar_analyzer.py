@@ -311,11 +311,23 @@ class CalendarAnalyzer:
             if not raw_output:
                 return []
 
-            # Split events - AppleScript list items are separated by ", "
-            # Format: "summary|||date|||date|||location|||calendar|||attendees, next_summary|||..."
-            # Attendees end with ";" so we split after that
-            # Use regex to split on ", " followed by non-||| content (a new summary)
-            event_strings = re.split(r',\s*(?=[^|]+\|\|\|)', raw_output)
+            # Split events - AppleScript list items are separated by ", " but
+            # date strings include commas, so we stitch tokens until we have
+            # enough field separators for a full event.
+            tokens = raw_output.split(", ")
+            event_strings = []
+            current_parts = []
+            for token in tokens:
+                current_parts.append(token)
+                joined = ", ".join(current_parts)
+                # An event has at least 4 separators: summary/start/end/location/calendar.
+                if joined.count("|||") >= 4:
+                    event_strings.append(joined)
+                    current_parts = []
+            if current_parts:
+                joined = ", ".join(current_parts)
+                if joined.count("|||") >= 4:
+                    event_strings.append(joined)
 
             for event_str in event_strings:
                 if not event_str.strip():

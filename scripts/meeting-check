@@ -110,7 +110,7 @@ if [ "$PREP_COUNT" != "0" ]; then
     python3 << EOF
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 senses_dir = "$SENSES_DIR"
 prefs = json.loads('''$PREFS''')
@@ -148,7 +148,7 @@ for meeting in meetings:
             pass
 
     # Write sense event
-    timestamp = datetime.now().isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     event_data = {
         "sense": "meeting_prep",
         "timestamp": timestamp,
@@ -183,7 +183,7 @@ if [ "$DEBRIEF_COUNT" != "0" ]; then
     python3 << EOF
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 senses_dir = "$SENSES_DIR"
 prefs = json.loads('''$PREFS''')
@@ -224,7 +224,7 @@ for meeting in meetings:
             pass
 
     # Write sense event
-    timestamp = datetime.now().isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     # Extract attendee names for the prompt
     attendee_names = [a.get("name") or a.get("email", "").split("@")[0]

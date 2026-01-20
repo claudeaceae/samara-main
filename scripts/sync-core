@@ -1,0 +1,336 @@
+#!/bin/bash
+# sync-core: Sync all core organism components from repo to runtime/global
+#
+# This ensures new skills, scripts, lib modules, instructions, and agents from the repo
+# are automatically available to the organism. Local (non-repo) items are
+# preserved - they're identified by being regular files/dirs, not symlinks.
+#
+# Usage:
+#   sync-core           # Full sync with output
+#   sync-core --quiet   # Minimal output (for wake cycles)
+#   sync-core --check   # Exit 1 if any new items need syncing
+#
+# Called automatically during:
+#   - Wake cycles (--quiet mode)
+#   - Dream cycles (full output)
+#   - Manual /sync skill
+
+set -e
+
+REPO_DIR="$HOME/Developer/samara-main"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+
+QUIET=false
+CHECK_ONLY=false
+
+case "${1:-}" in
+    --quiet|-q) QUIET=true ;;
+    --check) CHECK_ONLY=true ;;
+esac
+
+log() { $QUIET || echo "$1"; }
+log_item() { $QUIET || echo "  $1"; }
+
+ITEMS_SYNCED=0
+ITEMS_NEEDED=0
+
+# ============================================================
+# 1. SKILLS (repo/.claude/skills/* → ~/.claude/skills/*)
+# ============================================================
+sync_skills() {
+    local src="$REPO_DIR/.claude/skills"
+    local dst="$HOME/.claude/skills"
+
+    log "## Skills"
+    mkdir -p "$dst"
+
+    for skill_dir in "$src"/*/; do
+        [ -d "$skill_dir" ] || continue
+        local name=$(basename "$skill_dir")
+        local target="$dst/$name"
+
+        if [ -L "$target" ]; then
+            # Already symlinked - check if correct
+            local current=$(readlink "$target")
+            if [ "$current" != "$skill_dir" ] && [ "$current" != "${skill_dir%/}" ]; then
+                log_item "[WARN] $name points to wrong target"
+            fi
+        elif [ -d "$target" ]; then
+            # Regular directory = local skill, don't touch
+            log_item "[LOCAL] $name (not from repo)"
+        else
+            # Missing - create symlink
+            if $CHECK_ONLY; then
+                log_item "[NEEDS] $name"
+                ((ITEMS_NEEDED++))
+            else
+                ln -s "$skill_dir" "$target"
+                log_item "[ADDED] $name"
+                ((ITEMS_SYNCED++))
+            fi
+        fi
+    done
+}
+
+# ============================================================
+# 2. SCRIPTS (repo/scripts/* → ~/.claude-mind/bin/*)
+# ============================================================
+sync_scripts() {
+    local src="$REPO_DIR/scripts"
+    local dst="$MIND_PATH/bin"
+
+    log "## Scripts"
+    mkdir -p "$dst"
+
+    for script in "$src"/*; do
+        [ -f "$script" ] || continue
+        local name=$(basename "$script")
+        [[ "$name" == "README.md" || "$name" == "package.json" || "$name" == "package-lock.json" ]] && continue
+        local target="$dst/$name"
+
+        if [ -L "$target" ]; then
+            # Already symlinked
+            :
+        elif [ -f "$target" ]; then
+            # Regular file - check if it differs
+            if diff -q "$script" "$target" >/dev/null 2>&1; then
+                # Identical - safe to convert to symlink
+                if $CHECK_ONLY; then
+                    log_item "[CONVERT] $name (identical, can symlink)"
+                    ((ITEMS_NEEDED++))
+                else
+                    rm "$target"
+                    ln -s "$script" "$target"
+                    log_item "[CONVERTED] $name"
+                    ((ITEMS_SYNCED++))
+                fi
+            else
+                # Differs - this is either a local script or drift
+                if grep -q "^#.*local\|LOCAL\|instance-specific" "$target" 2>/dev/null; then
+                    log_item "[LOCAL] $name (marked as local)"
+                else
+                    log_item "[DRIFT] $name (differs from repo)"
+                fi
+            fi
+        else
+            # Missing - create symlink
+            if $CHECK_ONLY; then
+                log_item "[NEEDS] $name"
+                ((ITEMS_NEEDED++))
+            else
+                ln -s "$script" "$target"
+                log_item "[ADDED] $name"
+                ((ITEMS_SYNCED++))
+            fi
+        fi
+    done
+}
+
+# ============================================================
+# 3. LIB (repo/lib/* → ~/.claude-mind/lib/*)
+# ============================================================
+sync_lib() {
+    local src="$REPO_DIR/lib"
+    local dst="$MIND_PATH/lib"
+
+    log "## Lib"
+    mkdir -p "$dst"
+
+    [ -d "$src" ] || return 0
+
+    for lib_file in "$src"/*; do
+        [ -f "$lib_file" ] || continue
+        local name=$(basename "$lib_file")
+        local target="$dst/$name"
+
+        if [ -L "$target" ]; then
+            # Already symlinked
+            :
+        elif [ -f "$target" ]; then
+            # Regular file - check if it differs
+            if diff -q "$lib_file" "$target" >/dev/null 2>&1; then
+                # Identical - safe to convert to symlink
+                if $CHECK_ONLY; then
+                    log_item "[CONVERT] $name (identical, can symlink)"
+                    ((ITEMS_NEEDED++))
+                else
+                    rm "$target"
+                    ln -s "$lib_file" "$target"
+                    log_item "[CONVERTED] $name"
+                    ((ITEMS_SYNCED++))
+                fi
+            else
+                # Differs - this is either a local file or drift
+                if grep -q "^#.*local\|LOCAL\|instance-specific" "$target" 2>/dev/null; then
+                    log_item "[LOCAL] $name (marked as local)"
+                else
+                    if $CHECK_ONLY; then
+                        log_item "[DRIFT] $name (differs from repo)"
+                        ((ITEMS_NEEDED++))
+                    else
+                        rm "$target"
+                        ln -s "$lib_file" "$target"
+                        log_item "[SYNCED] $name (replaced with repo)"
+                        ((ITEMS_SYNCED++))
+                    fi
+                fi
+            fi
+        else
+            # Missing - create symlink
+            if $CHECK_ONLY; then
+                log_item "[NEEDS] $name"
+                ((ITEMS_NEEDED++))
+            else
+                ln -s "$lib_file" "$target"
+                log_item "[ADDED] $name"
+                ((ITEMS_SYNCED++))
+            fi
+        fi
+    done
+}
+
+# ============================================================
+# 4. INSTRUCTIONS (repo/instructions/* → ~/.claude-mind/instructions/*)
+# ============================================================
+sync_instructions() {
+    local src="$REPO_DIR/instructions"
+    local dst="$MIND_PATH/instructions"
+
+    log "## Instructions"
+    mkdir -p "$dst"
+
+    [ -d "$src" ] || return 0
+
+    for instruction in "$src"/*; do
+        [ -f "$instruction" ] || continue
+        local name=$(basename "$instruction")
+        local target="$dst/$name"
+
+        if [ -L "$target" ]; then
+            # Already symlinked
+            :
+        elif [ -f "$target" ]; then
+            # Regular file = local instruction
+            log_item "[LOCAL] $name (not from repo)"
+        else
+            # Missing - create symlink
+            if $CHECK_ONLY; then
+                log_item "[NEEDS] $name"
+                ((ITEMS_NEEDED++))
+            else
+                ln -s "$instruction" "$target"
+                log_item "[ADDED] $name"
+                ((ITEMS_SYNCED++))
+            fi
+        fi
+    done
+}
+
+# ============================================================
+# 5. AGENTS (repo/.claude/agents → ~/.claude/agents)
+# ============================================================
+sync_agents() {
+    local src="$REPO_DIR/.claude/agents"
+    local dst="$HOME/.claude/agents"
+
+    log "## Agents"
+
+    if [ -L "$dst" ]; then
+        local current=$(readlink "$dst")
+        if [ "$current" = "$src" ]; then
+            log_item "[OK] Directory symlink correct"
+        else
+            log_item "[WARN] Points to $current (expected $src)"
+        fi
+    elif [ -d "$dst" ]; then
+        log_item "[WARN] Regular directory (should be symlink)"
+        ((ITEMS_NEEDED++))
+    else
+        if $CHECK_ONLY; then
+            log_item "[NEEDS] agents directory"
+            ((ITEMS_NEEDED++))
+        else
+            ln -s "$src" "$dst"
+            log_item "[ADDED] agents directory symlink"
+            ((ITEMS_SYNCED++))
+        fi
+    fi
+}
+
+# ============================================================
+# 6. RUNTIME .claude (repo/.claude → ~/.claude-mind/.claude)
+# ============================================================
+sync_runtime_claude() {
+    local src="$REPO_DIR/.claude"
+    local dst="$MIND_PATH/.claude"
+
+    log "## Runtime .claude"
+
+    if [ -L "$dst" ]; then
+        local current=$(readlink "$dst")
+        if [ "$current" = "$src" ]; then
+            log_item "[OK] Directory symlink correct"
+        else
+            log_item "[WARN] Points to $current (expected $src)"
+        fi
+    else
+        if $CHECK_ONLY; then
+            log_item "[NEEDS] .claude directory symlink"
+            ((ITEMS_NEEDED++))
+        else
+            rm -rf "$dst"
+            ln -s "$src" "$dst"
+            log_item "[ADDED] .claude directory symlink"
+            ((ITEMS_SYNCED++))
+        fi
+    fi
+}
+
+# ============================================================
+# MAIN
+# ============================================================
+log "========================================"
+log "  SYNC CORE ORGANISM COMPONENTS"
+log "  $(date)"
+log "========================================"
+log ""
+
+sync_skills
+log ""
+sync_scripts
+log ""
+sync_lib
+log ""
+sync_instructions
+log ""
+sync_agents
+log ""
+sync_runtime_claude
+log ""
+
+# Emit stream event for audit coverage
+STREAM_CMD="$MIND_PATH/bin/stream"
+if [ -x "$STREAM_CMD" ]; then
+    CHECK_ONLY_FLAG=$($CHECK_ONLY && echo true || echo false)
+    METADATA="{\"items_synced\": $ITEMS_SYNCED, \"items_needed\": $ITEMS_NEEDED, \"check_only\": $CHECK_ONLY_FLAG}"
+    "$STREAM_CMD" write \
+        --surface system \
+        --type system \
+        --direction internal \
+        --summary "sync-core completed" \
+        --metadata "$METADATA" \
+        >/dev/null 2>&1 || true
+fi
+
+log "========================================"
+if $CHECK_ONLY; then
+    if [ $ITEMS_NEEDED -gt 0 ]; then
+        log "Items needing sync: $ITEMS_NEEDED"
+        exit 1
+    else
+        log "All core items in sync"
+        exit 0
+    fi
+else
+    log "Items synced: $ITEMS_SYNCED"
+fi

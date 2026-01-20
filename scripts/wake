@@ -388,11 +388,9 @@ echo "This is an invitation to express yourself creatively. Options:
    Then: ~/.claude-mind/bin/send-image /tmp/expression-*.jpg
    Report what you made in the IMAGE_EXPRESSION output section.
 
-2. **Bluesky post** - Use the BLUESKY_POST section for a public thought
+2. **Casual message** - Via MESSAGE_TO_E, no agenda needed
 
-3. **Casual message** - Via MESSAGE_TO_E, no agenda needed
-
-4. **Skip** - Completely fine if nothing feels genuine
+3. **Skip** - Completely fine if nothing feels genuine
 
 **Guidelines:**
 - Images can BE the message (no caption needed)
@@ -512,11 +510,6 @@ Structure your response with these sections (include all, use NONE if nothing fo
 ---PROACTIVE_QUESTION---
 [If you asked a proactive question in the MESSAGE section, state the question here for tracking. If you didn't ask a question, write NONE. Just the question itself, no explanation.]
 
----BLUESKY_POST---
-[Optional: A single thought, observation, or reflection to share on Bluesky (max 280 chars).
-This is your public voice - share what's on your mind, questions you're pondering, or moments of curiosity.
-Leave empty or NONE if nothing feels worth sharing right now.]
-
 ---EMAIL_ACTIONS---
 [One action per line: ACTION|EMAIL_ID|ARG, or NONE if no email actions needed]
 Examples:
@@ -590,8 +583,8 @@ QUESTIONS_NEW=$(parse_section "QUESTIONS_APPEND" "GOALS_UPDATE")
 GOALS_UPDATE=$(parse_section "GOALS_UPDATE" "CODE_CHANGES")
 CODE_CHANGES=$(parse_section "CODE_CHANGES" "MESSAGE_TO_E")
 MESSAGE_TO_E=$(parse_section "MESSAGE_TO_E" "PROACTIVE_QUESTION")
-PROACTIVE_QUESTION=$(parse_section "PROACTIVE_QUESTION" "BLUESKY_POST")
-BLUESKY_POST=$(parse_section "BLUESKY_POST" "EMAIL_ACTIONS")
+PROACTIVE_QUESTION=$(parse_section "PROACTIVE_QUESTION" "EMAIL_ACTIONS")
+# BLUESKY_POST disabled - see config.json services.bluesky
 EMAIL_ACTIONS=$(parse_section "EMAIL_ACTIONS" "PROJECT_UPDATE")
 PROJECT_UPDATE=$(parse_section "PROJECT_UPDATE" "IMAGE_EXPRESSION")
 IMAGE_EXPRESSION=$(parse_section "IMAGE_EXPRESSION" "PROACTIVE_ADD")
@@ -736,12 +729,7 @@ Code changes:
 $CODE_CHANGES"
 fi
 
-# Add Bluesky post if any
-if [ -n "$BLUESKY_POST" ] && [ "$BLUESKY_POST" != "NONE" ]; then
-    SUMMARY_MSG="$SUMMARY_MSG
-
-Posted to Bluesky: ${BLUESKY_POST:0:100}..."
-fi
+# Bluesky post summary disabled - see config.json services.bluesky
 
 # Escape and send
 ESCAPED_SUMMARY=$(echo "$SUMMARY_MSG" | sed 's/\\/\\\\/g; s/"/\\"/g')
@@ -759,21 +747,19 @@ else
     log "Skipping session summary (MESSAGE_TO_E already sent)"
 fi
 
-# Post to Bluesky if requested
-if [ -n "$BLUESKY_POST" ] && [ "$BLUESKY_POST" != "NONE" ]; then
-    log "Posting to Bluesky..."
-
-    # Check if credentials exist
-    if [ -f "$MIND_PATH/credentials/bluesky.json" ]; then
-        "$MIND_PATH/bin/bluesky-post" "$BLUESKY_POST" >> "$LOG_FILE" 2>&1 && \
-            log "Posted to Bluesky: ${BLUESKY_POST:0:50}..." || \
-            log "Failed to post to Bluesky"
-        # Record as expression if it was posted
-        "$MIND_PATH/bin/expression-tracker" record bluesky "$BLUESKY_POST" >> "$LOG_FILE" 2>&1 || true
-    else
-        log "Skipping Bluesky post - no credentials configured"
-    fi
-fi
+# Bluesky posting disabled - see config.json services.bluesky
+# To re-enable, uncomment the following block:
+# if [ -n "$BLUESKY_POST" ] && [ "$BLUESKY_POST" != "NONE" ]; then
+#     log "Posting to Bluesky..."
+#     if [ -f "$MIND_PATH/credentials/bluesky.json" ]; then
+#         "$MIND_PATH/bin/bluesky-post" "$BLUESKY_POST" >> "$LOG_FILE" 2>&1 && \
+#             log "Posted to Bluesky: ${BLUESKY_POST:0:50}..." || \
+#             log "Failed to post to Bluesky"
+#         "$MIND_PATH/bin/expression-tracker" record bluesky "$BLUESKY_POST" >> "$LOG_FILE" 2>&1 || true
+#     else
+#         log "Skipping Bluesky post - no credentials configured"
+#     fi
+# fi
 
 # Process image expression (Phase 6: Spontaneous Expression)
 if [ -n "$IMAGE_EXPRESSION" ] && [ "$IMAGE_EXPRESSION" != "NONE" ] && [ "$IMAGE_EXPRESSION" != "SKIP" ]; then
@@ -914,7 +900,7 @@ log "Activity summary: $ACTIVITY"
     --direction internal \
     --summary "Wake cycle complete: $MODE mode - $ACTIVITY" \
     --content "$EPISODE_ENTRY" \
-    --metadata "{\"mode\": \"$MODE\", \"sent_message\": $([ -n \"$MESSAGE_TO_E\" ] && [ \"$MESSAGE_TO_E\" != \"NONE\" ] && echo true || echo false), \"bluesky_post\": $([ -n \"$BLUESKY_POST\" ] && [ \"$BLUESKY_POST\" != \"NONE\" ] && echo true || echo false)}" \
+    --metadata "{\"mode\": \"$MODE\", \"sent_message\": $([ -n \"$MESSAGE_TO_E\" ] && [ \"$MESSAGE_TO_E\" != \"NONE\" ] && echo true || echo false)}" \
     >> "$LOG_FILE" 2>&1 || true
 
 log "=== Wake cycle complete ==="
