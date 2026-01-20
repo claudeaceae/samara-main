@@ -9,12 +9,16 @@ Commands:
     stream archive [--days 30]
     stream stats
     stream validate
+    stream rebuild-distilled-index
+    stream migrate-daily
 
 Usage:
     ./stream_cli.py write --surface cli --type interaction --direction inbound --summary "User asked..."
     ./stream_cli.py query --hours 12 --format json
     ./stream_cli.py mark-distilled evt_123_abc evt_456_def
     ./stream_cli.py archive --days 30
+    ./stream_cli.py rebuild-distilled-index
+    ./stream_cli.py migrate-daily
 """
 from __future__ import annotations
 
@@ -237,7 +241,19 @@ def cmd_stats(args: argparse.Namespace) -> int:
 def cmd_validate(args: argparse.Namespace) -> int:
     """Validate stream events against schema."""
     writer = StreamWriter()
-    errors, total = validate_stream_file(writer.stream_file)
+    errors: list[dict[str, object]] = []
+    total = 0
+    stream_files = writer.list_stream_files()
+
+    if not stream_files:
+        errors, total = [], 0
+    else:
+        for stream_file in stream_files:
+            file_errors, file_total = validate_stream_file(stream_file)
+            for error in file_errors:
+                error["file"] = str(stream_file)
+            errors.extend(file_errors)
+            total += file_total
 
     result = {
         "valid": len(errors) == 0,
@@ -258,6 +274,32 @@ def cmd_validate(args: argparse.Namespace) -> int:
                 event_id = error.get("id", "unknown")
                 detail = "; ".join(error.get("errors", []))
                 print(f"  line {line} [{event_id}]: {detail}")
+
+    return 0
+
+
+def cmd_rebuild_distilled_index(args: argparse.Namespace) -> int:
+    """Rebuild distilled sidecar index from stream file."""
+    writer = StreamWriter()
+    count = writer.rebuild_distilled_index()
+
+    if args.format == "json":
+        print(json.dumps({"rebuilt": count}))
+    else:
+        print(f"Rebuilt distilled index ({count} event(s))")
+
+    return 0
+
+
+def cmd_migrate_daily(args: argparse.Namespace) -> int:
+    """Migrate legacy stream file into daily shards."""
+    writer = StreamWriter()
+    count = writer.migrate_legacy_to_daily(archive_legacy=not args.keep_legacy)
+
+    if args.format == "json":
+        print(json.dumps({"migrated": count}))
+    else:
+        print(f"Migrated {count} event(s) to daily shards")
 
     return 0
 
@@ -366,6 +408,23 @@ def main() -> int:
     # validate command
     validate_parser = subparsers.add_parser("validate", help="Validate stream schema")
     validate_parser.set_defaults(func=cmd_validate)
+
+    rebuild_parser = subparsers.add_parser(
+        "rebuild-distilled-index",
+        help="Rebuild distilled index from stream file",
+    )
+    rebuild_parser.set_defaults(func=cmd_rebuild_distilled_index)
+
+    migrate_parser = subparsers.add_parser(
+        "migrate-daily",
+        help="Migrate legacy events.jsonl into daily shards",
+    )
+    migrate_parser.add_argument(
+        "--keep-legacy",
+        action="store_true",
+        help="Keep events.jsonl after migration",
+    )
+    migrate_parser.set_defaults(func=cmd_migrate_daily)
 
     # undistilled command
     undistilled_parser = subparsers.add_parser(

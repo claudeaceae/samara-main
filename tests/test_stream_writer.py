@@ -26,6 +26,11 @@ from lib.stream_writer import (
 )
 
 
+def daily_file_for_event(stream_dir: Path, timestamp: str) -> Path:
+    date_str = timestamp[:10]
+    return stream_dir / "daily" / f"events-{date_str}.jsonl"
+
+
 @pytest.fixture
 def temp_stream_dir():
     """Create a temporary stream directory for testing."""
@@ -134,7 +139,7 @@ class TestStreamWriting:
         writer.write(event)
 
         # Read and parse
-        stream_file = temp_stream_dir / "events.jsonl"
+        stream_file = daily_file_for_event(temp_stream_dir, event.timestamp)
         assert stream_file.exists()
 
         with open(stream_file) as f:
@@ -159,8 +164,9 @@ class TestStreamWriting:
             )
             writer.write(event)
 
-        stream_file = temp_stream_dir / "events.jsonl"
-        with open(stream_file) as f:
+        daily_files = list((temp_stream_dir / "daily").glob("events-*.jsonl"))
+        assert len(daily_files) == 1
+        with open(daily_files[0]) as f:
             lines = f.readlines()
 
         assert len(lines) == 5
@@ -169,9 +175,9 @@ class TestStreamWriting:
             assert data["summary"] == f"Event {i}"
 
     def test_write_creates_file_if_not_exists(self, temp_stream_dir):
-        """First write creates events.jsonl if it doesn't exist."""
-        stream_file = temp_stream_dir / "events.jsonl"
-        assert not stream_file.exists()
+        """First write creates daily shard file if it doesn't exist."""
+        daily_dir = temp_stream_dir / "daily"
+        assert not daily_dir.exists()
 
         writer = StreamWriter(stream_dir=temp_stream_dir)
         event = writer.create_event(
@@ -182,6 +188,7 @@ class TestStreamWriting:
         )
         writer.write(event)
 
+        stream_file = daily_file_for_event(temp_stream_dir, event.timestamp)
         assert stream_file.exists()
 
     def test_handles_special_characters(self, writer, temp_stream_dir):
@@ -195,7 +202,7 @@ class TestStreamWriting:
         )
         writer.write(event)
 
-        stream_file = temp_stream_dir / "events.jsonl"
+        stream_file = daily_file_for_event(temp_stream_dir, event.timestamp)
         with open(stream_file) as f:
             data = json.loads(f.readline())
 
@@ -205,6 +212,34 @@ class TestStreamWriting:
 
 class TestStreamQuerying:
     """Tests for querying events from the stream."""
+
+    def test_list_stream_files_across_day_boundary(self, writer, temp_stream_dir):
+        """Daily shards are selected across day boundaries."""
+        event1 = writer.create_event(
+            surface=Surface.CLI,
+            event_type=EventType.INTERACTION,
+            direction=Direction.INBOUND,
+            summary="Late event",
+        )
+        event1.timestamp = "2026-01-18T23:30:00Z"
+        writer.write(event1)
+
+        event2 = writer.create_event(
+            surface=Surface.CLI,
+            event_type=EventType.INTERACTION,
+            direction=Direction.INBOUND,
+            summary="Early event",
+        )
+        event2.timestamp = "2026-01-19T00:30:00Z"
+        writer.write(event2)
+
+        now = datetime(2026, 1, 19, 1, 0, 0, tzinfo=timezone.utc)
+        files = writer.list_stream_files(hours=2, now=now)
+        expected_files = {
+            temp_stream_dir / "daily" / "events-2026-01-18.jsonl",
+            temp_stream_dir / "daily" / "events-2026-01-19.jsonl",
+        }
+        assert expected_files.issubset(set(files))
 
     def test_query_by_time_range(self, writer, temp_stream_dir):
         """Can query events within a time window."""
@@ -281,6 +316,7 @@ class TestStreamQuerying:
 
         all_results = writer.query(include_distilled=True)
         assert len(all_results) == 2
+        assert any(event["distilled"] is True for event in all_results)
 
     def test_query_empty_stream(self, writer):
         """Query on empty stream returns empty list, not error."""
@@ -292,7 +328,7 @@ class TestDistillationMarking:
     """Tests for marking events as distilled."""
 
     def test_mark_distilled(self, writer, temp_stream_dir):
-        """Can mark events as distilled without modifying content."""
+        """Marks events as distilled via sidecar index."""
         event = writer.create_event(
             surface=Surface.CLI,
             event_type=EventType.INTERACTION,
@@ -303,12 +339,19 @@ class TestDistillationMarking:
 
         writer.mark_distilled(event.id)
 
-        # Re-read to verify
-        stream_file = temp_stream_dir / "events.jsonl"
+        # Sidecar index should include the event
+        index_file = temp_stream_dir / "distilled-index.jsonl"
+        assert index_file.exists()
+        with open(index_file) as f:
+            index_entry = json.loads(f.readline())
+        assert index_entry["id"] == event.id
+
+        # Re-read to verify stream content is unchanged
+        stream_file = daily_file_for_event(temp_stream_dir, event.timestamp)
         with open(stream_file) as f:
             data = json.loads(f.readline())
 
-        assert data["distilled"] is True
+        assert data["distilled"] is False
         assert data["summary"] == "Original summary"  # Content unchanged
 
     def test_mark_multiple_distilled(self, writer, temp_stream_dir):
@@ -329,6 +372,11 @@ class TestDistillationMarking:
 
         results = writer.query(include_distilled=False)
         assert len(results) == 2
+
+        index_file = temp_stream_dir / "distilled-index.jsonl"
+        with open(index_file) as f:
+            index_lines = [json.loads(line) for line in f if line.strip()]
+        assert len(index_lines) == 3
 
 
 class TestArchiving:
@@ -407,8 +455,9 @@ class TestConcurrency:
         assert not errors, f"Errors during concurrent write: {errors}"
 
         # Verify all events were written
-        stream_file = temp_stream_dir / "events.jsonl"
-        with open(stream_file) as f:
+        daily_files = list((temp_stream_dir / "daily").glob("events-*.jsonl"))
+        assert len(daily_files) == 1
+        with open(daily_files[0]) as f:
             lines = f.readlines()
 
         assert len(lines) == 100  # 5 threads * 20 events
@@ -446,7 +495,8 @@ class TestErrorHandling:
             writer.write(event)
 
             assert non_existent.exists()
-            assert (non_existent / "events.jsonl").exists()
+            daily_files = list((non_existent / "daily").glob("events-*.jsonl"))
+            assert daily_files
 
 
 class TestSurfaceTypes:

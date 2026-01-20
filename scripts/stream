@@ -10,6 +10,8 @@
 #   stream stats
 #   stream undistilled [--date YYYY-MM-DD]
 #   stream validate
+#   stream rebuild-distilled-index
+#   stream migrate-daily
 
 set -e
 

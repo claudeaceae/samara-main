@@ -48,7 +48,6 @@ def test_validate_event_detects_errors():
 def test_validate_stream_file_reports_invalid_lines(tmp_path: Path):
     stream_dir = tmp_path / "stream"
     stream_dir.mkdir()
-    stream_file = stream_dir / "events.jsonl"
 
     writer = StreamWriter(stream_dir=stream_dir)
     event = writer.create_event(
@@ -59,6 +58,7 @@ def test_validate_stream_file_reports_invalid_lines(tmp_path: Path):
     )
     writer.write(event)
 
+    stream_file = stream_dir / "daily" / f"events-{event.timestamp[:10]}.jsonl"
     with stream_file.open("a", encoding="utf-8") as handle:
         handle.write("{invalid json}\n")
         handle.write(json.dumps({"id": "evt_missing_fields"}) + "\n")

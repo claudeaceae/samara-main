@@ -101,6 +101,35 @@ def test_mark_distilled_filters_results(mind_env):
     assert len(events) == 1
 
 
+def test_rebuild_distilled_index(mind_env):
+    mind_path, env = mind_env
+
+    writer = StreamWriter(stream_dir=mind_path / "stream")
+    event = writer.create_event(
+        surface=Surface.CLI,
+        event_type=EventType.INTERACTION,
+        direction=Direction.INBOUND,
+        summary="Legacy distilled",
+    )
+    writer.write(event)
+
+    date_str = event.timestamp[:10]
+    stream_file = mind_path / "stream" / "daily" / f"events-{date_str}.jsonl"
+    data = json.loads(stream_file.read_text(encoding="utf-8").strip())
+    data["distilled"] = True
+    stream_file.write_text(json.dumps(data) + "\n", encoding="utf-8")
+
+    index_file = mind_path / "stream" / "distilled-index.jsonl"
+    assert not index_file.exists()
+
+    result = run_cli(["rebuild-distilled-index"], env)
+    assert result.returncode == 0, result.stderr
+    assert index_file.exists()
+
+    index_entry = json.loads(index_file.read_text(encoding="utf-8").strip())
+    assert index_entry["id"] == event.id
+
+
 def test_handoff_event_links_thread_ids(mind_env):
     _, env = mind_env
     thread_ids = ["thread_abc123"]
@@ -247,7 +276,8 @@ def test_validate_reports_invalid_lines(mind_env):
     )
     assert result.returncode == 0, result.stderr
 
-    stream_file = mind_path / "stream" / "events.jsonl"
+    date_str = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")[:10]
+    stream_file = mind_path / "stream" / "daily" / f"events-{date_str}.jsonl"
     with stream_file.open("a", encoding="utf-8") as handle:
         handle.write("{not json}\n")
 
@@ -257,3 +287,31 @@ def test_validate_reports_invalid_lines(mind_env):
     payload = json.loads(result.stdout)
     assert payload["valid"] is False
     assert payload["error_count"] == 1
+
+
+def test_migrate_daily_creates_shard(mind_env):
+    mind_path, env = mind_env
+
+    stream_dir = mind_path / "stream"
+    stream_dir.mkdir(parents=True, exist_ok=True)
+    legacy_file = stream_dir / "events.jsonl"
+
+    event = {
+        "schema_version": "1",
+        "id": "evt_legacy",
+        "timestamp": "2026-01-19T05:00:00Z",
+        "surface": "cli",
+        "type": "interaction",
+        "direction": "inbound",
+        "summary": "Legacy event",
+        "distilled": False,
+    }
+    legacy_file.write_text(json.dumps(event) + "\n", encoding="utf-8")
+
+    result = run_cli(["migrate-daily"], env)
+    assert result.returncode == 0, result.stderr
+
+    daily_file = stream_dir / "daily" / "events-2026-01-19.jsonl"
+    assert daily_file.exists()
+    assert "evt_legacy" in daily_file.read_text(encoding="utf-8")
+    assert not legacy_file.exists()

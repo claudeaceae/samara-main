@@ -146,9 +146,16 @@ class StreamWriter:
 
         # Ensure directories exist
         self.stream_dir.mkdir(parents=True, exist_ok=True)
-        (self.stream_dir / "archive").mkdir(exist_ok=True)
+        self.archive_dir = self.stream_dir / "archive"
+        self.archive_dir.mkdir(exist_ok=True)
 
         self.stream_file = self.stream_dir / "events.jsonl"
+        self.legacy_stream_file = self.stream_dir / "events.legacy.jsonl"
+        self.daily_dir = self.stream_dir / "daily"
+        self.daily_dir.mkdir(exist_ok=True)
+
+        self.distilled_index_file = self.stream_dir / "distilled-index.jsonl"
+        self.use_daily_shards = True
 
     def _generate_event_id(self) -> str:
         """Generate unique event ID: evt_{timestamp}_{random}."""
@@ -209,8 +216,12 @@ class StreamWriter:
         """
         line = json.dumps(event.to_dict(), ensure_ascii=False) + "\n"
 
+        target_file = self.stream_file
+        if self.use_daily_shards:
+            target_file = self._daily_file_for_timestamp(event.timestamp)
+
         # Atomic append with file locking
-        with open(self.stream_file, "a", encoding="utf-8") as f:
+        with open(target_file, "a", encoding="utf-8") as f:
             # Acquire exclusive lock
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
@@ -219,6 +230,133 @@ class StreamWriter:
                 os.fsync(f.fileno())
             finally:
                 fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+    def _daily_file_for_timestamp(self, timestamp: str) -> Path:
+        """Return the daily shard file path for a timestamp."""
+        date_str = timestamp[:10] if isinstance(timestamp, str) and len(timestamp) >= 10 else ""
+        if not date_str:
+            date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        return self.daily_dir / f"events-{date_str}.jsonl"
+
+    def _iter_stream_files(self, hours: Optional[float], now: datetime) -> list[Path]:
+        """List stream files to read for a given window."""
+        files: list[Path] = []
+
+        daily_files: list[Path] = []
+        if self.daily_dir.exists():
+            if hours is None:
+                daily_files = sorted(self.daily_dir.glob("events-*.jsonl"))
+            else:
+                start_date = (now - timedelta(hours=hours)).date()
+                end_date = now.date()
+                total_days = (end_date - start_date).days
+                for offset in range(total_days + 1):
+                    date = start_date + timedelta(days=offset)
+                    path = self.daily_dir / f"events-{date.strftime('%Y-%m-%d')}.jsonl"
+                    if path.exists():
+                        daily_files.append(path)
+
+        files.extend(daily_files)
+
+        legacy_file = None
+        if daily_files:
+            if self.stream_file.exists():
+                legacy_file = self.stream_file
+        else:
+            if self.legacy_stream_file.exists():
+                legacy_file = self.legacy_stream_file
+            elif self.stream_file.exists():
+                legacy_file = self.stream_file
+
+        if legacy_file is not None:
+            files.append(legacy_file)
+
+        return files
+
+    def list_stream_files(
+        self,
+        hours: Optional[float] = None,
+        now: Optional[datetime] = None,
+    ) -> list[Path]:
+        """Expose stream files for validation or migration."""
+        now = now or datetime.now(timezone.utc)
+        return self._iter_stream_files(hours, now)
+
+    def _load_distilled_index(self) -> set[str]:
+        """Load distilled event IDs from the sidecar index."""
+        if not self.distilled_index_file.exists():
+            return set()
+
+        ids: set[str] = set()
+        with open(self.distilled_index_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                event_id = data.get("id")
+                if isinstance(event_id, str) and event_id:
+                    ids.add(event_id)
+        return ids
+
+    def _append_distilled_index(self, entries: list[dict[str, Any]]) -> None:
+        """Append entries to the sidecar distilled index with locking."""
+        if not entries:
+            return
+        lines = "\n".join(json.dumps(entry, ensure_ascii=False) for entry in entries) + "\n"
+        with open(self.distilled_index_file, "a", encoding="utf-8") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                f.write(lines)
+                f.flush()
+                os.fsync(f.fileno())
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+    def _write_distilled_index(self, entries: list[dict[str, Any]]) -> None:
+        """Write the distilled index atomically."""
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            dir=self.stream_dir,
+            delete=False,
+            suffix=".jsonl",
+            encoding="utf-8",
+        ) as tmp:
+            if entries:
+                tmp.write("\n".join(json.dumps(entry, ensure_ascii=False) for entry in entries))
+                tmp.write("\n")
+            tmp_path = tmp.name
+
+        os.replace(tmp_path, self.distilled_index_file)
+
+    def _lookup_event_timestamps(self, event_ids: set[str]) -> dict[str, str]:
+        """Return timestamps for event IDs by scanning the stream file."""
+        timestamps: dict[str, str] = {}
+        if not event_ids:
+            return timestamps
+
+        now = datetime.now(timezone.utc)
+        for stream_file in self._iter_stream_files(None, now):
+            if not stream_file.exists():
+                continue
+            with open(stream_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    event_id = data.get("id")
+                    if event_id in event_ids and isinstance(data.get("timestamp"), str):
+                        timestamps[event_id] = data["timestamp"]
+                        if len(timestamps) >= len(event_ids):
+                            return timestamps
+        return timestamps
 
     def query(
         self,
@@ -239,46 +377,55 @@ class StreamWriter:
         Returns:
             List of event dictionaries matching criteria
         """
-        if not self.stream_file.exists():
+        now = datetime.now(timezone.utc)
+        stream_files = self._iter_stream_files(hours, now)
+        if not stream_files:
             return []
 
         results = []
+        distilled_ids = self._load_distilled_index()
         cutoff_time = None
         if hours:
-            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+            cutoff_time = now - timedelta(hours=hours)
 
-        with open(self.stream_file, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-
-                try:
-                    data = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                # Filter by distilled status
-                if not include_distilled and data.get("distilled", False):
-                    continue
-
-                # Filter by time
-                if cutoff_time:
-                    event_time = datetime.fromisoformat(
-                        data["timestamp"].replace("Z", "+00:00")
-                    )
-                    if event_time < cutoff_time:
+        for stream_file in stream_files:
+            if not stream_file.exists():
+                continue
+            with open(stream_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
                         continue
 
-                # Filter by surface
-                if surface and data.get("surface") != surface.value:
-                    continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
 
-                # Filter by type
-                if event_type and data.get("type") != event_type.value:
-                    continue
+                    # Filter by distilled status (stream flag or sidecar index)
+                    is_distilled = bool(data.get("distilled", False)) or data.get("id") in distilled_ids
+                    if not include_distilled and is_distilled:
+                        continue
+                    if is_distilled and not data.get("distilled", False):
+                        data["distilled"] = True
 
-                results.append(data)
+                    # Filter by time
+                    if cutoff_time:
+                        event_time = datetime.fromisoformat(
+                            data["timestamp"].replace("Z", "+00:00")
+                        )
+                        if event_time < cutoff_time:
+                            continue
+
+                    # Filter by surface
+                    if surface and data.get("surface") != surface.value:
+                        continue
+
+                    # Filter by type
+                    if event_type and data.get("type") != event_type.value:
+                        continue
+
+                    results.append(data)
 
         return results
 
@@ -286,8 +433,7 @@ class StreamWriter:
         """
         Mark events as distilled (processed into warm memory).
 
-        This rewrites the file - events maintain their position but
-        get their distilled flag set to True.
+        Uses a sidecar index for append-only distillation tracking.
 
         Args:
             event_ids: Single ID or list of IDs to mark
@@ -300,48 +446,28 @@ class StreamWriter:
 
         id_set = set(event_ids)
 
-        if not self.stream_file.exists():
+        now = datetime.now(timezone.utc)
+        if not id_set or not self._iter_stream_files(None, now):
             return 0
 
-        marked_count = 0
+        distilled_ids = self._load_distilled_index()
+        pending_ids = id_set - distilled_ids
+        if not pending_ids:
+            return 0
 
-        # Read all events, mark matching ones, write back atomically
-        with open(self.stream_file, "r", encoding="utf-8") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
-                lines = f.readlines()
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        timestamps = self._lookup_event_timestamps(pending_ids)
+        if not timestamps:
+            return 0
 
-        updated_lines = []
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
+        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        entries = [
+            {"id": event_id, "timestamp": ts, "distilled_at": now_iso}
+            for event_id, ts in timestamps.items()
+        ]
 
-            try:
-                data = json.loads(line)
-                if data["id"] in id_set:
-                    data["distilled"] = True
-                    marked_count += 1
-                updated_lines.append(json.dumps(data, ensure_ascii=False))
-            except json.JSONDecodeError:
-                updated_lines.append(line)
+        self._append_distilled_index(entries)
 
-        # Atomic write via temp file
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            dir=self.stream_dir,
-            delete=False,
-            suffix=".jsonl",
-            encoding="utf-8",
-        ) as tmp:
-            tmp.write("\n".join(updated_lines) + "\n")
-            tmp_path = tmp.name
-
-        os.replace(tmp_path, self.stream_file)
-
-        return marked_count
+        return len(entries)
 
     def archive(self, days_old: int = 30) -> int:
         """
@@ -353,15 +479,37 @@ class StreamWriter:
         Returns:
             Number of events archived
         """
-        if not self.stream_file.exists():
-            return 0
-
         cutoff = datetime.now(timezone.utc) - timedelta(days=days_old)
         archived_count = 0
+
+        daily_files = sorted(self.daily_dir.glob("events-*.jsonl"))
+        if daily_files:
+            cutoff_date = cutoff.date()
+            for stream_file in daily_files:
+                date_str = stream_file.stem.replace("events-", "")
+                try:
+                    file_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                except ValueError:
+                    continue
+                if file_date >= cutoff_date:
+                    continue
+
+                with open(stream_file, "r", encoding="utf-8") as f:
+                    archived_count += sum(1 for _ in f if _.strip())
+
+                archive_file = self.archive_dir / stream_file.name
+                os.replace(stream_file, archive_file)
+
+            return archived_count
+
+        legacy_file = self.legacy_stream_file if self.legacy_stream_file.exists() else self.stream_file
+        if not legacy_file.exists():
+            return 0
+
         keep_lines = []
         archive_by_date: dict[str, list[str]] = {}
 
-        with open(self.stream_file, "r", encoding="utf-8") as f:
+        with open(legacy_file, "r", encoding="utf-8") as f:
             fcntl.flock(f.fileno(), fcntl.LOCK_EX)
             try:
                 lines = f.readlines()
@@ -380,7 +528,6 @@ class StreamWriter:
                 )
 
                 if event_time < cutoff:
-                    # Archive this event
                     date_str = event_time.strftime("%Y-%m-%d")
                     if date_str not in archive_by_date:
                         archive_by_date[date_str] = []
@@ -391,14 +538,11 @@ class StreamWriter:
             except (json.JSONDecodeError, KeyError):
                 keep_lines.append(line)
 
-        # Write archive files (append to existing)
-        archive_dir = self.stream_dir / "archive"
         for date_str, event_lines in archive_by_date.items():
-            archive_file = archive_dir / f"events-{date_str}.jsonl"
+            archive_file = self.archive_dir / f"events-{date_str}.jsonl"
             with open(archive_file, "a", encoding="utf-8") as f:
                 f.write("\n".join(event_lines) + "\n")
 
-        # Rewrite main stream file
         with tempfile.NamedTemporaryFile(
             mode="w",
             dir=self.stream_dir,
@@ -410,7 +554,7 @@ class StreamWriter:
                 tmp.write("\n".join(keep_lines) + "\n")
             tmp_path = tmp.name
 
-        os.replace(tmp_path, self.stream_file)
+        os.replace(tmp_path, legacy_file)
 
         return archived_count
 
@@ -456,48 +600,93 @@ class StreamWriter:
         Returns:
             Number of events marked
         """
-        if not self.stream_file.exists():
+        now = datetime.now(timezone.utc)
+        if not self._iter_stream_files(None, now):
             return 0
 
-        marked_count = 0
+        undistilled_events = self.query_undistilled(before_date=before_date)
+        event_ids = [event.get("id") for event in undistilled_events if event.get("id")]
+        return self.mark_distilled(event_ids)
 
-        with open(self.stream_file, "r", encoding="utf-8") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
-                lines = f.readlines()
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    def rebuild_distilled_index(self) -> int:
+        """Rebuild sidecar index from stream file distilled flags."""
+        now = datetime.now(timezone.utc)
+        stream_files = self._iter_stream_files(None, now)
+        if not stream_files:
+            self._write_distilled_index([])
+            return 0
 
-        updated_lines = []
-        for line in lines:
-            line = line.strip()
-            if not line:
+        entries: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        for stream_file in stream_files:
+            if not stream_file.exists():
                 continue
+            with open(stream_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not data.get("distilled", False):
+                        continue
+                    event_id = data.get("id")
+                    timestamp = data.get("timestamp")
+                    if not isinstance(event_id, str) or not event_id:
+                        continue
+                    if event_id in seen:
+                        continue
+                    entry: dict[str, Any] = {"id": event_id, "distilled_at": now_iso}
+                    if isinstance(timestamp, str) and timestamp:
+                        entry["timestamp"] = timestamp
+                    entries.append(entry)
+                    seen.add(event_id)
 
-            try:
-                data = json.loads(line)
-                # Mark if undistilled and before the target date
-                if not data.get("distilled", False) and data["timestamp"][:10] < before_date:
-                    data["distilled"] = True
-                    marked_count += 1
-                updated_lines.append(json.dumps(data, ensure_ascii=False))
-            except json.JSONDecodeError:
-                updated_lines.append(line)
+        self._write_distilled_index(entries)
+        return len(entries)
 
-        # Atomic write via temp file
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            dir=self.stream_dir,
-            delete=False,
-            suffix=".jsonl",
-            encoding="utf-8",
-        ) as tmp:
-            tmp.write("\n".join(updated_lines) + "\n")
-            tmp_path = tmp.name
+    def migrate_legacy_to_daily(self, archive_legacy: bool = True) -> int:
+        """Split legacy events.jsonl into daily shard files."""
+        legacy_file = self.stream_file
+        if not legacy_file.exists():
+            return 0
 
-        os.replace(tmp_path, self.stream_file)
+        events_by_date: dict[str, list[str]] = {}
+        migrated_count = 0
 
-        return marked_count
+        with open(legacy_file, "r", encoding="utf-8") as f:
+            for line in f:
+                raw = line.strip()
+                if not raw:
+                    continue
+                try:
+                    data = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                timestamp = data.get("timestamp")
+                if not isinstance(timestamp, str) or len(timestamp) < 10:
+                    continue
+                date_str = timestamp[:10]
+                events_by_date.setdefault(date_str, []).append(json.dumps(data, ensure_ascii=False))
+                migrated_count += 1
+
+        for date_str, lines in events_by_date.items():
+            daily_file = self.daily_dir / f"events-{date_str}.jsonl"
+            with open(daily_file, "a", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+
+        if archive_legacy:
+            target = self.legacy_stream_file
+            if target.exists():
+                suffix = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+                target = self.stream_dir / f"events.legacy.{suffix}.jsonl"
+            os.replace(legacy_file, target)
+
+        return migrated_count
 
 
 # Convenience function for quick event writing
