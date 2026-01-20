@@ -74,6 +74,29 @@ let locationFileWatcher = LocationFileWatcher(
 
         let analysis = locationTracker.processLocation(update)
 
+        if let location = analysis.currentLocation {
+            var details = [
+                "Location update",
+                "address: \(location.address)",
+                "lat: \(String(format: "%.5f", location.latitude))",
+                "lon: \(String(format: "%.5f", location.longitude))"
+            ]
+            if let wifi = update.wifi, !wifi.isEmpty, wifi != "null" {
+                details.append("wifi: \(wifi)")
+            }
+            if let speed = update.speed {
+                details.append("speed: \(String(format: "%.2f", speed))")
+            }
+            if let battery = update.battery {
+                details.append("battery: \(battery)")
+            }
+            if !update.motion.isEmpty {
+                details.append("motion: " + update.motion.joined(separator: ", "))
+            }
+
+            episodeLogger.logSenseEvent(sense: "location", data: details.joined(separator: "\n"))
+        }
+
         if analysis.shouldMessage, let reason = analysis.reason {
             log("[Main] Location trigger: \(reason)")
 
@@ -484,7 +507,12 @@ func handleNoteChange(_ update: NoteUpdate) {
                 log("[Main] Scratchpad response: \(result.prefix(100))...")
 
                 // Log the exchange
-                episodeLogger.logExchange(from: "\(collaboratorName) (Scratchpad)", message: update.plainTextContent.prefix(200).description, response: result)
+                episodeLogger.logExchange(
+                    from: "\(collaboratorName) (Scratchpad)",
+                    message: update.plainTextContent.prefix(200).description,
+                    response: result,
+                    source: "Scratchpad"
+                )
 
             } catch {
                 log("[Main] Error processing scratchpad update: \(error)")
@@ -567,7 +595,12 @@ func handleEmail(_ email: Email) {
             try? mailStore.markAsRead(emailId: email.id)
 
             // Log the exchange
-            episodeLogger.logExchange(from: "\(collaboratorName) (Email)", message: "Subject: \(email.subject)\n\(email.content.prefix(500))", response: result)
+            episodeLogger.logExchange(
+                from: "\(collaboratorName) (Email)",
+                message: "Subject: \(email.subject)\n\(email.content.prefix(500))",
+                response: result,
+                source: "Email"
+            )
 
         } catch {
             log("[Main] Error processing email: \(error)")

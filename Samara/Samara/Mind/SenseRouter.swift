@@ -148,7 +148,8 @@ final class SenseRouter {
             episodeLogger.logExchange(
                 from: "Sense:\(event.sense)",
                 message: eventDescription,
-                response: result
+                response: result,
+                source: "Sense:\(event.sense)"
             )
 
         } catch {
@@ -243,49 +244,69 @@ final class SenseRouter {
     // MARK: - Default Handlers
 
     private func registerDefaultHandlers() {
+        let services = config.servicesConfig
+
         // Location events get special handling (integrate with LocationTracker)
-        handlers["location"] = { [weak self] event in
-            self?.handleLocationEvent(event)
+        if services.isEnabled("location") {
+            handlers["location"] = { [weak self] event in
+                self?.handleLocationEvent(event)
+            }
         }
 
         // Bluesky notifications
-        handlers["bluesky"] = { [weak self] event in
-            self?.handleBlueskyEvent(event)
+        if services.isEnabled("bluesky") {
+            handlers["bluesky"] = { [weak self] event in
+                self?.handleBlueskyEvent(event)
+            }
+        } else {
+            log("Bluesky service disabled in config", level: .info, component: "SenseRouter")
         }
 
         // GitHub notifications
-        handlers["github"] = { [weak self] event in
-            self?.handleGitHubEvent(event)
+        if services.isEnabled("github") {
+            handlers["github"] = { [weak self] event in
+                self?.handleGitHubEvent(event)
+            }
         }
 
         // X/Twitter notifications
-        handlers["x"] = { [weak self] event in
-            self?.handleXEvent(event)
+        if services.isEnabled("x") {
+            handlers["x"] = { [weak self] event in
+                self?.handleXEvent(event)
+            }
+        } else {
+            log("X service disabled in config", level: .info, component: "SenseRouter")
         }
 
-        // Test events for verification
+        // Test events for verification (always enabled)
         handlers["test"] = { [weak self] event in
             self?.handleTestEvent(event)
         }
 
         // Webhook events from external services
-        handlers["webhook"] = { [weak self] event in
-            self?.handleWebhookEvent(event)
+        if services.isEnabled("webhook") {
+            handlers["webhook"] = { [weak self] event in
+                self?.handleWebhookEvent(event)
+            }
         }
 
         // Meeting prep events (upcoming meetings)
-        handlers["meeting_prep"] = { [weak self] event in
-            self?.handleMeetingPrepEvent(event)
-        }
+        if services.isEnabled("meeting") {
+            handlers["meeting_prep"] = { [weak self] event in
+                self?.handleMeetingPrepEvent(event)
+            }
 
-        // Meeting debrief events (recently ended meetings)
-        handlers["meeting_debrief"] = { [weak self] event in
-            self?.handleMeetingDebriefEvent(event)
+            // Meeting debrief events (recently ended meetings)
+            handlers["meeting_debrief"] = { [weak self] event in
+                self?.handleMeetingDebriefEvent(event)
+            }
         }
 
         // Wallet events (balance changes, transactions)
-        handlers["wallet"] = { [weak self] event in
-            self?.handleWalletEvent(event)
+        if services.isEnabled("wallet") {
+            handlers["wallet"] = { [weak self] event in
+                self?.handleWalletEvent(event)
+            }
         }
     }
 
@@ -350,7 +371,8 @@ final class SenseRouter {
             episodeLogger.logExchange(
                 from: "Sense:bluesky",
                 message: eventDescription,
-                response: result
+                response: result,
+                source: "Sense:\(event.sense)"
             )
 
         } catch {
@@ -445,7 +467,8 @@ final class SenseRouter {
             episodeLogger.logExchange(
                 from: "Sense:github",
                 message: eventDescription,
-                response: result
+                response: result,
+                source: "Sense:\(event.sense)"
             )
 
         } catch {
@@ -535,7 +558,8 @@ final class SenseRouter {
             episodeLogger.logExchange(
                 from: "Sense:x",
                 message: eventDescription,
-                response: result
+                response: result,
+                source: "Sense:\(event.sense)"
             )
 
         } catch {
@@ -576,7 +600,8 @@ final class SenseRouter {
             episodeLogger.logExchange(
                 from: "Sense:wallet",
                 message: eventDescription,
-                response: result
+                response: result,
+                source: "Sense:\(event.sense)"
             )
 
         } catch {
@@ -710,7 +735,8 @@ final class SenseRouter {
             episodeLogger.logExchange(
                 from: "Sense:webhook:\(source)",
                 message: eventDescription,
-                response: result
+                response: result,
+                source: "Sense:\(event.sense)"
             )
 
         } catch {
@@ -909,7 +935,8 @@ final class SenseRouter {
             episodeLogger.logExchange(
                 from: "Meeting Prep",
                 message: "Upcoming: \(eventTitle) in \(minutesUntil) min with \(attendeeList)",
-                response: result
+                response: result,
+                source: "Sense:\(event.sense)"
             )
 
         } catch {
@@ -1010,7 +1037,8 @@ final class SenseRouter {
             episodeLogger.logExchange(
                 from: "Meeting Debrief",
                 message: metadata,
-                response: result
+                response: result,
+                source: "Sense:\(event.sense)"
             )
 
             // Store debrief context for when user responds
@@ -1043,4 +1071,3 @@ final class SenseRouter {
         }
     }
 }
-

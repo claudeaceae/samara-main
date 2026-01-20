@@ -53,6 +53,8 @@ final class MemoryContext {
 
     /// Maximum lines for episode files
     private let maxLinesForEpisode = 150
+    /// Hot digest cache TTL (seconds)
+    private let hotDigestCacheTTL: TimeInterval = 900
 
     /// Builds a context string from key memory files
     ///
@@ -69,6 +71,8 @@ final class MemoryContext {
         // This ensures iMessage sessions know about CLI work and vice versa
         if let hotDigest = buildHotDigest() {
             sections.append(hotDigest)
+        } else if let openThreads = loadOpenThreads() {
+            sections.append(openThreads)
         }
 
         // Identity - full, essential context
@@ -490,6 +494,97 @@ final class MemoryContext {
 
     // MARK: - Hot Digest (Cross-Surface Context)
 
+    /// Loads cached hot digest if present and fresh
+    private func loadHotDigestCache() -> String? {
+        let cachePath = (mindPath as NSString).appendingPathComponent("state/hot-digest.md")
+
+        guard FileManager.default.fileExists(atPath: cachePath) else {
+            return nil
+        }
+
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: cachePath),
+           let modified = attrs[.modificationDate] as? Date {
+            let age = Date().timeIntervalSince(modified)
+            if age > hotDigestCacheTTL {
+                return nil
+            }
+        }
+
+        guard let contents = try? String(contentsOfFile: cachePath, encoding: .utf8),
+              !contents.isEmpty,
+              !contents.contains("No recent events") else {
+            return nil
+        }
+
+        return contents
+    }
+
+    /// Loads open threads from state when no hot digest is available
+    private func loadOpenThreads(maxThreads: Int = 5) -> String? {
+        let threadsPath = (mindPath as NSString).appendingPathComponent("state/threads.json")
+        let threadsURL = URL(fileURLWithPath: threadsPath)
+
+        guard let data = try? Data(contentsOf: threadsURL),
+              let json = try? JSONSerialization.jsonObject(with: data) else {
+            return nil
+        }
+
+        let threadList: [[String: Any]]
+        if let array = json as? [[String: Any]] {
+            threadList = array
+        } else if let dict = json as? [String: Any],
+                  let array = dict["threads"] as? [[String: Any]] {
+            threadList = array
+        } else {
+            return nil
+        }
+
+        let closedStatuses: Set<String> = [
+            "closed",
+            "done",
+            "resolved",
+            "complete",
+            "completed",
+            "archived",
+        ]
+        var lines: [String] = []
+
+        for thread in threadList {
+            let title = (thread["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? (thread["summary"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? (thread["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard let threadTitle = title, !threadTitle.isEmpty else { continue }
+
+            let status = (thread["status"] as? String
+                ?? thread["state"] as? String
+                ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+
+            let isClosedFlag = (thread["done"] as? Bool == true)
+                || (thread["closed"] as? Bool == true)
+                || (thread["archived"] as? Bool == true)
+
+            if isClosedFlag || closedStatuses.contains(status) {
+                continue
+            }
+
+            var line = "- \(threadTitle)"
+            if !status.isEmpty && status != "open" && status != "active" {
+                line += " (\(status))"
+            }
+
+            lines.append(line)
+            if lines.count >= maxThreads {
+                break
+            }
+        }
+
+        guard !lines.isEmpty else { return nil }
+        return "### Open Threads\n" + lines.joined(separator: "\n")
+    }
+
     /// Builds hot digest from unified event stream for cross-surface context
     /// Returns ~2-4K tokens of recent activity across ALL surfaces (iMessage, CLI, wake, etc.)
     /// This enables continuity: iMessage sessions know about CLI work, and vice versa
@@ -497,6 +592,11 @@ final class MemoryContext {
     /// - Parameter hours: Number of hours to look back (default 12)
     /// - Returns: Formatted markdown digest, or nil if unavailable
     func buildHotDigest(hours: Int = 12) -> String? {
+        if let cached = loadHotDigestCache() {
+            log("Hot digest loaded from cache", level: .debug, component: "MemoryContext")
+            return cached
+        }
+
         let scriptPath = (mindPath as NSString).appendingPathComponent("bin/build-hot-digest")
 
         guard FileManager.default.isExecutableFile(atPath: scriptPath) else {

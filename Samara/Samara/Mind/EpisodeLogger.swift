@@ -81,6 +81,36 @@ final class EpisodeLogger {
         }
     }
 
+    private func surfaceForSource(_ source: String) -> String {
+        var normalized = source.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.hasPrefix("sense:") {
+            normalized = String(normalized.dropFirst("sense:".count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        switch normalized {
+        case "imessage":
+            return "imessage"
+        case "x", "twitter":
+            return "x"
+        case "bluesky":
+            return "bluesky"
+        case "email":
+            return "email"
+        case "calendar", "meeting_prep", "meeting_debrief", "meeting":
+            return "calendar"
+        case "location":
+            return "location"
+        case "webhook":
+            return "webhook"
+        case "system", "alert":
+            return "system"
+        case "wake":
+            return "wake"
+        default:
+            return "sense"
+        }
+    }
+
     /// Logs a conversation exchange (message + response)
     /// - Parameters:
     ///   - sender: Who sent the message (usually "É")
@@ -128,7 +158,7 @@ final class EpisodeLogger {
         }
 
         // Dual-write to unified event stream
-        let surfaceType = source.lowercased() == "imessage" ? "imessage" : "sense"
+        let surfaceType = surfaceForSource(source)
         writeToStream(
             surface: surfaceType,
             eventType: "interaction",
@@ -302,7 +332,7 @@ final class EpisodeLogger {
         case "x", "twitter": surfaceType = "x"
         case "bluesky": surfaceType = "bluesky"
         case "email": surfaceType = "email"
-        case "calendar": surfaceType = "calendar"
+        case "calendar", "meeting_prep", "meeting_debrief", "meeting": surfaceType = "calendar"
         default: surfaceType = "sense"
         }
         writeToStream(

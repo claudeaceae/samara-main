@@ -21,6 +21,8 @@ final class SanitizationTests: SamaraTestCase {
             #"^Sent (?:a |the )?(?:brief |quick |short )?(?:response|message|reply) (?:acknowledging|about|regarding|to )"#,
             // "Responded to É - ..." or "Responded to the group..."
             #"^Responded to [^.]+(?:\.|$)"#,
+            // "I sent a message..." / "I replied a response..." (describing action)
+            #"^I (?:just )?(?:sent|replied|responded) (?:a |the )?(?:message|response|reply)"#,
             // "I sent/replied/responded with..." (describing action, not content)
             #"^I (?:just )?(?:sent|replied|responded)(?: with| to| back)"#,
             // "Just sent a message..."

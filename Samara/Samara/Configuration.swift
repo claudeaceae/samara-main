@@ -50,6 +50,7 @@ struct Configuration: Codable {
     let models: ModelsConfig?
     let timeouts: TimeoutsConfig?
     let features: FeaturesConfig?
+    let services: ServicesConfig?
 
     struct EntityConfig: Codable {
         let name: String
@@ -123,6 +124,41 @@ struct Configuration: Codable {
         )
     }
 
+    /// Service toggles for enabling/disabling sense handlers and watchers
+    struct ServicesConfig: Codable {
+        let x: Bool?
+        let bluesky: Bool?
+        let github: Bool?
+        let wallet: Bool?
+        let meeting: Bool?
+        let webhook: Bool?
+        let location: Bool?
+
+        /// Check if a service is enabled (defaults to true if not specified)
+        func isEnabled(_ service: String) -> Bool {
+            switch service {
+            case "x": return x ?? true
+            case "bluesky": return bluesky ?? true
+            case "github": return github ?? true
+            case "wallet": return wallet ?? true
+            case "meeting", "meeting_prep", "meeting_debrief": return meeting ?? true
+            case "webhook": return webhook ?? true
+            case "location": return location ?? true
+            default: return true  // Unknown services default to enabled
+            }
+        }
+
+        static let defaults = ServicesConfig(
+            x: true,
+            bluesky: true,
+            github: true,
+            wallet: true,
+            meeting: true,
+            webhook: true,
+            location: true
+        )
+    }
+
     /// Default configuration (fallback if config.json doesn't exist)
     static let defaults = Configuration(
         entity: EntityConfig(
@@ -146,7 +182,8 @@ struct Configuration: Codable {
         ),
         models: nil,
         timeouts: nil,
-        features: nil
+        features: nil,
+        services: nil
     )
 
     /// Convenience accessors with defaults
@@ -160,6 +197,10 @@ struct Configuration: Codable {
 
     var featuresConfig: FeaturesConfig {
         features ?? FeaturesConfig.defaults
+    }
+
+    var servicesConfig: ServicesConfig {
+        services ?? ServicesConfig.defaults
     }
 
     /// Load configuration from ~/.claude-mind/config.json

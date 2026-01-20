@@ -51,6 +51,51 @@ final class ClaudeInvoker {
         "reasoning": {
           "type": "string",
           "description": "Internal thinking and reasoning about the response (this field is NOT sent to the user)"
+        },
+        "ledger": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string",
+              "description": "Optional short summary for the session ledger"
+            },
+            "goals": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "description": { "type": "string" },
+                  "status": { "type": "string", "enum": ["pending", "in_progress", "completed", "blocked"] },
+                  "progress": { "type": "string" }
+                },
+                "required": ["description"]
+              }
+            },
+            "decisions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "description": { "type": "string" },
+                  "rationale": { "type": "string" }
+                },
+                "required": ["description", "rationale"]
+              }
+            },
+            "next_steps": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "open_questions": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "handoff_reason": {
+              "type": "string",
+              "enum": ["context_threshold", "session_timeout", "user_requested", "task_complete", "error"]
+            }
+          },
+          "additionalProperties": false
         }
       },
       "required": ["message"],
@@ -95,22 +140,23 @@ final class ClaudeInvoker {
     ///   - chatInfo: Optional chat information (group name + participants) for group chats
     /// - Returns: ClaudeInvocationResult containing response and new session ID
     func invokeBatch(messages: [Message], context: String, resumeSessionId: String? = nil, targetHandles: Set<String> = [], chatInfo: ChatInfo? = nil) throws -> ClaudeInvocationResult {
+        let chatIdentifier = messages.first?.chatIdentifier
         let fullPrompt = buildBatchPrompt(messages: messages, context: context, targetHandles: targetHandles, chatInfo: chatInfo)
 
         // Use fallback chain if enabled
         // Note: useStructuredOutput=true enforces schema-based message extraction for clean iMessage responses
         if useFallbackChain {
-            return try invokeBatchWithFallback(prompt: fullPrompt, context: context, resumeSessionId: resumeSessionId, useStructuredOutput: true)
+            return try invokeBatchWithFallback(prompt: fullPrompt, context: context, resumeSessionId: resumeSessionId, chatIdentifier: chatIdentifier, useStructuredOutput: true)
         }
 
         // Direct invocation (fallback disabled)
-        return try invokeWithPrompt(fullPrompt, resumeSessionId: resumeSessionId, retryCount: 0, useStructuredOutput: true)
+        return try invokeWithPrompt(fullPrompt, resumeSessionId: resumeSessionId, retryCount: 0, useStructuredOutput: true, chatIdentifier: chatIdentifier)
     }
 
     /// Invokes with multi-tier fallback support (sync wrapper for async fallback chain)
     /// - Parameters:
     ///   - useStructuredOutput: If true, uses JSON schema for deterministic message extraction
-    private func invokeBatchWithFallback(prompt: String, context: String, resumeSessionId: String?, useStructuredOutput: Bool = false) throws -> ClaudeInvocationResult {
+    private func invokeBatchWithFallback(prompt: String, context: String, resumeSessionId: String?, chatIdentifier: String?, useStructuredOutput: Bool = false) throws -> ClaudeInvocationResult {
         var result: ClaudeInvocationResult?
         var thrownError: Error?
 
@@ -124,7 +170,7 @@ final class ClaudeInvoker {
                     context: context,
                     primaryInvoker: { [self] prompt, sessionId in
                         // This is the Claude CLI invocation - use structured output for clean message extraction
-                        return try self.invokeWithPrompt(prompt, resumeSessionId: sessionId, retryCount: 0, useStructuredOutput: useStructuredOutput)
+                        return try self.invokeWithPrompt(prompt, resumeSessionId: sessionId, retryCount: 0, useStructuredOutput: useStructuredOutput, chatIdentifier: chatIdentifier)
                     }
                 )
 
@@ -165,7 +211,7 @@ final class ClaudeInvoker {
     func invoke(prompt: String, context: String, attachmentPaths: [String] = []) throws -> String {
         let fullPrompt = buildPrompt(message: prompt, context: context, attachmentPaths: attachmentPaths)
         // Use structured output for clean response extraction (same as batch invocations)
-        let result = try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: 0, useStructuredOutput: true)
+        let result = try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: 0, useStructuredOutput: true, chatIdentifier: nil)
         return result.response
     }
 
@@ -243,7 +289,7 @@ final class ClaudeInvoker {
     ///   - resumeSessionId: Optional session ID to resume
     ///   - retryCount: Current retry attempt count
     ///   - useStructuredOutput: If true, uses JSON schema to enforce response structure (for iMessage)
-    private func invokeWithPrompt(_ fullPrompt: String, resumeSessionId: String?, retryCount: Int, useStructuredOutput: Bool = false) throws -> ClaudeInvocationResult {
+    private func invokeWithPrompt(_ fullPrompt: String, resumeSessionId: String?, retryCount: Int, useStructuredOutput: Bool = false, chatIdentifier: String?) throws -> ClaudeInvocationResult {
         // Guard against infinite retry loops
         if retryCount > maxRetries {
             throw ClaudeInvokerError.executionFailed(-1, "Max retries (\(maxRetries)) exceeded for session-related errors")
@@ -398,7 +444,7 @@ final class ClaudeInvoker {
         if combinedOutput.contains("No conversation found with session ID:") {
             if resumeSessionId != nil {
                 log("Session not found, retrying without --resume (attempt \(retryCount + 1)/\(maxRetries))", level: .warn, component: "ClaudeInvoker")
-                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1, useStructuredOutput: useStructuredOutput)
+                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1, useStructuredOutput: useStructuredOutput, chatIdentifier: chatIdentifier)
             }
         }
 
@@ -406,7 +452,7 @@ final class ClaudeInvoker {
         if output.contains("Prompt is too long") {
             if resumeSessionId != nil {
                 log("Prompt too long (session context exceeded), starting fresh session (attempt \(retryCount + 1)/\(maxRetries))", level: .warn, component: "ClaudeInvoker")
-                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1, useStructuredOutput: useStructuredOutput)
+                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1, useStructuredOutput: useStructuredOutput, chatIdentifier: chatIdentifier)
             }
             // If already no session and still too long, that's a real error
             throw ClaudeInvokerError.executionFailed(Int(process.terminationStatus), "Prompt is too long even without session context")
@@ -417,7 +463,7 @@ final class ClaudeInvoker {
             // Not JSON, might be an error message
             if resumeSessionId != nil && output.contains("session") {
                 log("Possible session error, retrying without --resume (attempt \(retryCount + 1)/\(maxRetries))", level: .warn, component: "ClaudeInvoker")
-                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1, useStructuredOutput: useStructuredOutput)
+                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1, useStructuredOutput: useStructuredOutput, chatIdentifier: chatIdentifier)
             }
             throw ClaudeInvokerError.executionFailed(Int(process.terminationStatus), output)
         }
@@ -431,7 +477,7 @@ final class ClaudeInvoker {
             // If prompt too long with a session, retry without session
             if errorResult.contains("Prompt is too long") && resumeSessionId != nil {
                 log("Prompt too long (JSON response), starting fresh session (attempt \(retryCount + 1)/\(maxRetries))", level: .warn, component: "ClaudeInvoker")
-                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1, useStructuredOutput: useStructuredOutput)
+                return try invokeWithPrompt(fullPrompt, resumeSessionId: nil, retryCount: retryCount + 1, useStructuredOutput: useStructuredOutput, chatIdentifier: chatIdentifier)
             }
 
             throw ClaudeInvokerError.executionFailed(Int(process.terminationStatus), errorResult)
@@ -443,7 +489,7 @@ final class ClaudeInvoker {
         }
 
         // Parse JSON output to extract response and session ID
-        return parseJsonOutput(output, useStructuredOutput: useStructuredOutput)
+        return parseJsonOutput(output, useStructuredOutput: useStructuredOutput, chatIdentifier: chatIdentifier)
     }
 
     /// Sanitize Claude's response, stripping internal traces that shouldn't be visible to users
@@ -480,6 +526,8 @@ final class ClaudeInvoker {
             #"^Sent (?:a |the )?(?:brief |quick |short )?(?:response|message|reply) (?:acknowledging|about|regarding|to )"#,
             // "Responded to É - ..." or "Responded to the group..."
             #"^Responded to [^.]+(?:\.|$)"#,
+            // "I sent a message..." / "I replied a response..." (describing action)
+            #"^I (?:just )?(?:sent|replied|responded) (?:a |the )?(?:message|response|reply)"#,
             // "I sent/replied/responded with..." (describing action, not content)
             #"^I (?:just )?(?:sent|replied|responded)(?: with| to| back)"#,
             // "Just sent a message..."
@@ -568,7 +616,7 @@ final class ClaudeInvoker {
     /// - Parameters:
     ///   - output: The raw JSON output from Claude CLI
     ///   - useStructuredOutput: If true, prefer structured_output.message over result (deterministic extraction)
-    private func parseJsonOutput(_ output: String, useStructuredOutput: Bool = false) -> ClaudeInvocationResult {
+    private func parseJsonOutput(_ output: String, useStructuredOutput: Bool = false, chatIdentifier: String?) -> ClaudeInvocationResult {
         // Claude's JSON output format has "result" and "session_id" fields
         // When using --json-schema, it also has "structured_output" with the schema-validated response
         guard let data = output.data(using: .utf8) else {
@@ -585,6 +633,9 @@ final class ClaudeInvoker {
                 if useStructuredOutput,
                    let structuredOutput = json["structured_output"] as? [String: Any],
                    let message = structuredOutput["message"] as? String {
+                    if let chatIdentifier = chatIdentifier, !chatIdentifier.isEmpty {
+                        applyLedgerUpdates(from: structuredOutput, chatIdentifier: chatIdentifier, sessionId: sessionId)
+                    }
                     // Direct extraction - the API schema enforcement guarantees this is the user-facing message
                     // No sanitization needed because the schema structurally separates message from reasoning
                     log("Extracted message from structured_output (deterministic path)", level: .debug, component: "ClaudeInvoker")
@@ -654,6 +705,104 @@ final class ClaudeInvoker {
         log("Raw output was: \(truncatedOutput)\(wasTruncated ? "... [truncated]" : "")", level: .warn, component: "ClaudeInvoker")
 
         return ClaudeInvocationResult(response: "[Processing error - please try again]", sessionId: nil)
+    }
+
+    private func applyLedgerUpdates(from structuredOutput: [String: Any], chatIdentifier: String, sessionId: String?) {
+        guard let ledgerPayload = structuredOutput["ledger"] as? [String: Any] else { return }
+
+        let sessionValue = sessionId ?? UUID().uuidString
+        let ledger = ledgerManager.getLedger(forChat: chatIdentifier, sessionId: sessionValue)
+        if let sessionId = sessionId, ledger.sessionId != sessionId {
+            var updated = ledger
+            updated.sessionId = sessionId
+            ledgerManager.updateLedger(updated)
+        }
+
+        if let summary = ledgerPayload["summary"] as? String {
+            let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                ledgerManager.setSummary(chatId: chatIdentifier, summary: trimmed)
+            }
+        }
+
+        if let goals = ledgerPayload["goals"] as? [[String: Any]] {
+            for goal in goals {
+                guard let description = goal["description"] as? String else { continue }
+                let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty { continue }
+
+                let statusRaw = (goal["status"] as? String ?? "pending")
+                    .lowercased()
+                    .replacingOccurrences(of: " ", with: "_")
+                let status: LedgerManager.Ledger.GoalStatus
+                switch statusRaw {
+                case "in_progress":
+                    status = .inProgress
+                case "completed":
+                    status = .completed
+                case "blocked":
+                    status = .blocked
+                default:
+                    status = .pending
+                }
+
+                let progress = (goal["progress"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalizedProgress = progress?.isEmpty == true ? nil : progress
+                ledgerManager.addGoal(chatId: chatIdentifier, description: trimmed, status: status, progress: normalizedProgress)
+            }
+        }
+
+        if let decisions = ledgerPayload["decisions"] as? [[String: Any]] {
+            for decision in decisions {
+                guard let description = decision["description"] as? String,
+                      let rationale = decision["rationale"] as? String else { continue }
+                let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmedRationale = rationale.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmedDescription.isEmpty || trimmedRationale.isEmpty { continue }
+                ledgerManager.recordDecision(chatId: chatIdentifier, description: trimmedDescription, rationale: trimmedRationale)
+            }
+        }
+
+        if let nextSteps = ledgerPayload["next_steps"] as? [String] {
+            let steps = nextSteps
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if !steps.isEmpty {
+                ledgerManager.addNextSteps(chatId: chatIdentifier, steps: steps)
+            }
+        }
+
+        if let openQuestions = ledgerPayload["open_questions"] as? [String] {
+            let questions = openQuestions
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            if !questions.isEmpty {
+                ledgerManager.addOpenQuestions(chatId: chatIdentifier, questions: questions)
+            }
+        }
+
+        if let reason = ledgerPayload["handoff_reason"] as? String {
+            let normalized = reason.lowercased()
+            let handoffReason: LedgerManager.Handoff.HandoffReason?
+            switch normalized {
+            case "context_threshold":
+                handoffReason = .contextThreshold
+            case "session_timeout":
+                handoffReason = .sessionTimeout
+            case "user_requested":
+                handoffReason = .userRequested
+            case "task_complete":
+                handoffReason = .taskComplete
+            case "error":
+                handoffReason = .error
+            default:
+                handoffReason = nil
+            }
+
+            if let handoffReason = handoffReason {
+                _ = ledgerManager.createHandoff(forChat: chatIdentifier, reason: handoffReason)
+            }
+        }
     }
 
     /// Builds prompt for a batch of messages

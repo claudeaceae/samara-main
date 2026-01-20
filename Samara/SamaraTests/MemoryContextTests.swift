@@ -49,4 +49,30 @@ final class MemoryContextTests: SamaraTestCase {
         let context = contextBuilder.buildContext(isCollaboratorChat: false)
         XCTAssertFalse(context.contains("### About"))
     }
+
+    func testBuildContextIncludesOpenThreadsWhenNoHotDigest() throws {
+        let statePath = TestEnvironment.mindPath.appendingPathComponent("state")
+        try FileManager.default.createDirectory(at: statePath, withIntermediateDirectories: true)
+
+        let threadsPath = statePath.appendingPathComponent("threads.json")
+        let threadsJson = """
+        {
+          "threads": [
+            { "title": "Follow up on memory plan", "status": "open" },
+            { "title": "Closed item", "status": "closed" }
+          ]
+        }
+        """
+        try threadsJson.write(to: threadsPath, atomically: true, encoding: .utf8)
+
+        let cachePath = statePath.appendingPathComponent("hot-digest.md")
+        try? FileManager.default.removeItem(at: cachePath)
+
+        let contextBuilder = MemoryContext()
+        let context = contextBuilder.buildContext()
+
+        XCTAssertTrue(context.contains("### Open Threads"))
+        XCTAssertTrue(context.contains("Follow up on memory plan"))
+        XCTAssertFalse(context.contains("Closed item"))
+    }
 }
