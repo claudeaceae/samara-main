@@ -48,9 +48,35 @@ if [ -z "$TRANSCRIPT_PATH" ] || [ ! -f "$TRANSCRIPT_PATH" ]; then
 fi
 
 # Skip distillation sessions (prevent infinite recursion!)
-FIRST_PROMPT=$(head -20 "$TRANSCRIPT_PATH" | jq -r 'select(.type == "user") | .message.content' 2>/dev/null | head -1)
-if [[ "$FIRST_PROMPT" == *"Summarize this Claude Code session for memory consolidation"* ]]; then
+# Check for various patterns that indicate this is a summarization/handoff session
+TRANSCRIPT_CONTENT=$(head -100 "$TRANSCRIPT_PATH" 2>/dev/null || echo "")
+if [[ "$TRANSCRIPT_CONTENT" == *"Summarize this Claude Code session for memory consolidation"* ]] || \
+   [[ "$TRANSCRIPT_CONTENT" == *"Analyze this Claude Code session and create a structured handoff"* ]] || \
+   [[ "$TRANSCRIPT_CONTENT" == *"## Open Threads"* ]] || \
+   [[ "$TRANSCRIPT_CONTENT" == *"## Emotional Texture"* ]] || \
+   [[ "$TRANSCRIPT_CONTENT" == *"## Continuation Hooks"* ]]; then
     log "Skipping distillation session (would cause infinite loop)"
+    echo '{"ok": true}'
+    exit 0
+fi
+
+# Also skip if invoked via -p flag (single-prompt mode, no SessionEnd should fire)
+if [[ "$TRANSCRIPT_CONTENT" == *'"type":"user"'* ]] && [[ ! "$TRANSCRIPT_CONTENT" == *'"type":"assistant"'*'"type":"user"'* ]]; then
+    # Single user message = likely a -p invocation, skip distillation
+    USER_COUNT=$(echo "$TRANSCRIPT_CONTENT" | grep -c '"type":"user"' || echo "0")
+    if [ "$USER_COUNT" -eq 1 ]; then
+        log "Skipping single-prompt session (likely -p invocation)"
+        echo '{"ok": true}'
+        exit 0
+    fi
+fi
+
+# Skip rate-limited sessions (no useful content to distill)
+# These can cascade into recursion loops when distillation also hits limits
+if [[ "$TRANSCRIPT_CONTENT" == *"You've hit your limit"* ]] || \
+   [[ "$TRANSCRIPT_CONTENT" == *"hit your limit"* ]] || \
+   [[ "$TRANSCRIPT_CONTENT" == *"rate limit"* ]]; then
+    log "Skipping rate-limited session (would cascade errors)"
     echo '{"ok": true}'
     exit 0
 fi
