@@ -82,6 +82,12 @@ Most features require explicit configuration. See [`docs/whats-changed-phases-1-
 
 ---
 
+## Contiguous Memory System
+
+Samara maintains a unified event stream that captures every interaction across surfaces and uses it to hydrate new sessions with a hot digest of the last 12 hours. This keeps iMessage, CLI, wake/dream cycles, and sense events in sync, while the dream cycle distills the stream into long-term memory. See [`docs/contiguous-memory-system.md`](docs/contiguous-memory-system.md) for the full architecture, schema, and extension guide.
+
+---
+
 ## How It Works
 
 ```
