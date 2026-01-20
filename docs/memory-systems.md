@@ -13,12 +13,29 @@ Samara maintains multiple complementary memory systems:
 | System | Purpose | Technology |
 |--------|---------|------------|
 | Episode logs | Daily narrative summaries | Markdown files |
+| Unified event stream (contiguous memory) | Cross-surface continuity and audit trail | JSONL append-only stream |
 | Learnings/Observations | Curated insights | Markdown files |
 | SQLite FTS5 | Keyword search | Swift native |
 | Chroma | Semantic search | Python + embeddings |
 | Transcript Archive | Raw session archaeology | Chroma (separate collection) |
 
 ---
+
+## Contiguous Memory (Unified Stream)
+
+Samara writes every interaction and sense event into a single append-only stream at
+`~/.claude-mind/stream/events.jsonl`. This stream powers the hot digest used for
+session hydration and provides an auditable timeline across iMessage, CLI, wake/dream,
+and satellite services.
+
+Key touchpoints:
+- Samara app dual-writes to the stream via `EpisodeLogger.swift`
+- Claude Code sessions write stream events at SessionEnd
+- Wake and dream cycles emit system events
+- Dream cycle distills the stream into episode logs and marks events as distilled
+
+Full design, schema, and extension guidance:
+`docs/contiguous-memory-system.md`
 
 ## Claude Code Session Retention
 
@@ -125,6 +142,35 @@ The wrapper methods in `ClaudeInvoker` (`recordGoal()`, `recordDecision()`, `cre
 are available but currently unused.
 
 **Implementation:** `MemoryDatabase.swift`, `LedgerManager.swift`, `lib/chroma_helper.py`
+
+---
+
+## Open Threads (Runtime State)
+
+Hot digest hydration surfaces a compact list of active threads from:
+
+```
+~/.claude-mind/state/threads.json
+```
+
+**Schema (lightweight):**
+```json
+{
+  "threads": [
+    {
+      "title": "Follow up on memory plan",
+      "status": "open"
+    }
+  ]
+}
+```
+
+**Rules:**
+- `title` is required; empty titles are ignored.
+- `status` is optional; closed statuses are filtered out (`closed`, `done`, `resolved`, `complete`, `completed`, `archived`).
+- Boolean flags `done: true`, `closed: true`, or `archived: true` also mark a thread as closed.
+
+Keep the list short (5 items max) and update only when a thread meaningfully changes.
 
 ---
 

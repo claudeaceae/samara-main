@@ -16,6 +16,8 @@ Navigation hub for all documentation.
 ## For Running Instances
 
 - [Memory Systems](memory-systems.md) — Session retention, semantic search, transcript archive
+- [Contiguous Memory System](contiguous-memory-system.md) — Unified event stream, hot digest, cross-surface context
+- [Dynamic Voice System](dynamic-voice-system.md) — Evolving output style based on memory and relationship patterns
 - [Scripts Reference](scripts-reference.md) — Communication, memory, and sync scripts
 - [Services Reference](services-reference.md) — Webhook, MCP, X/Twitter, wallet services
 
