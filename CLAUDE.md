@@ -16,6 +16,8 @@ Samara is a bootstrap specification for giving Claude a persistent body, memory,
 This is not a traditional software project. It's an experiment in AI autonomy.
 
 > **Recent enhancements (Phases 1-8):** Model fallback, semantic memory, proactive messaging, adaptive scheduling, meeting awareness, spontaneous expression, wallet awareness, transcript archive. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) and [`docs/whats-changed-phases-5-8.md`](docs/whats-changed-phases-5-8.md).
+>
+> **Claude Code 2.1.x integration:** Named sessions for wake/dream, organism-local plans, context forking for long tasks, auto-loaded rules, Setup hook, agent audit trails. See `capabilities/inventory.md` § "Claude Code 2.1.x Integration".
 
 ---
 
@@ -77,6 +79,7 @@ Samara.app (message broker)
 │   └── inventory.md
 ├── bin/ → repo/scripts/     # Symlinked scripts (61+ scripts)
 ├── state/                   # Runtime state files
+│   ├── plans/               # Organism-local plans (from Claude Code)
 │   ├── ledgers/             # Session handoff documents
 │   ├── triggers/            # Context trigger config
 │   ├── iterations/          # Active iteration state
@@ -99,9 +102,11 @@ Interactive workflows available via Claude Code. Invoke with `/skillname` or tri
 |-------|---------|
 | `/status` | System health check (Samara, wake cycles, FDA) |
 | `/sync` | Check for drift between repo and runtime |
+| `/maintenance` | Organism maintenance (drift, symlinks, services) |
 | `/reflect` | Quick capture learning/observation/insight |
 | `/memory` | Search learnings, decisions, observations |
 | `/recall` | Semantic memory search (FTS5 + Chroma) for associative recall |
+| `/stream` | Query unified event stream by surface (cli, imessage, wake, etc.) |
 | `/archive-search` | Search raw session transcripts for technical details and reasoning traces |
 | `/morning` | Morning briefing (calendar, location, context) |
 | `/samara` | Debug/restart Samara, view logs |
@@ -116,6 +121,7 @@ Interactive workflows available via Claude Code. Invoke with `/skillname` or tri
 | `/iterate` | Autonomous iteration until success criteria met |
 | `/senses` | Monitor and test sense event system |
 | `/email` | Check and respond to email |
+| `/invites` | View and manage calendar invitations (CalDAV), accept/decline, create events |
 | `/debug-session` | Debug Claude Code session issues |
 | `/diagnose-leaks` | Diagnose thinking/session ID leaks |
 | `/webhook` | Manage webhook sources - add, test, view events |
@@ -209,6 +215,7 @@ ollama pull llama3.1:8b
 | Topic | Document |
 |-------|----------|
 | Memory architecture | [Memory Systems](docs/memory-systems.md) |
+| Dynamic voice evolution | [Dynamic Voice System](docs/dynamic-voice-system.md) |
 | Script catalog | [Scripts Reference](docs/scripts-reference.md) |
 | Services (webhook, X, wallet) | [Services Reference](docs/services-reference.md) |
 | Xcode build, FDA, sanitization | [Xcode Build Guide](docs/xcode-build-guide.md) |

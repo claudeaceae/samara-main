@@ -1,0 +1,12 @@
+#!/bin/bash
+# Wrapper to run calendar-caldav.py with the correct venv
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VENV_PYTHON="$HOME/.claude-mind/venv/bin/python3"
+
+if [ -x "$VENV_PYTHON" ]; then
+    exec "$VENV_PYTHON" "$SCRIPT_DIR/calendar-caldav.py" "$@"
+else
+    echo "Error: Python venv not found at $VENV_PYTHON"
+    echo "Run: python3 -m venv ~/.claude-mind/venv && ~/.claude-mind/venv/bin/pip install caldav"
+    exit 1
+fi
