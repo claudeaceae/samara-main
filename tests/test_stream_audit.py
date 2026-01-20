@@ -9,7 +9,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from lib.stream_audit import audit_stream
+from lib.stream_audit import audit_stream, resolve_allowed_surfaces
 
 
 def test_stream_audit_metrics_and_gaps():
@@ -54,3 +54,31 @@ def test_stream_audit_metrics_and_gaps():
         "webhook",
         "x",
     ]
+
+
+def test_audit_respects_disabled_services(tmp_path, monkeypatch):
+    mind_path = tmp_path / ".claude-mind"
+    mind_path.mkdir()
+    config_path = mind_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "services": {
+                    "x": False,
+                    "bluesky": False,
+                    "meeting": False,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("MIND_PATH", str(mind_path))
+
+    allowed_surfaces, disabled_services = resolve_allowed_surfaces()
+
+    assert allowed_surfaces is not None
+    assert "x" not in allowed_surfaces
+    assert "bluesky" not in allowed_surfaces
+    assert "calendar" not in allowed_surfaces
+    assert set(disabled_services) == {"x", "bluesky", "meeting"}

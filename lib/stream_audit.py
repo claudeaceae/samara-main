@@ -21,6 +21,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from lib.hot_digest_builder import build_digest
 from lib.stream_writer import StreamWriter, Surface
 
+SERVICE_SURFACE_MAP = {
+    "x": ["x"],
+    "bluesky": ["bluesky"],
+    "webhook": ["webhook"],
+    "location": ["location"],
+    "meeting": ["calendar"],
+}
+
 
 def parse_timestamp(value: str) -> Optional[datetime]:
     try:
@@ -107,9 +115,10 @@ def compute_gaps(
     all_events: list[dict[str, Any]],
     now: datetime,
     window_hours: int,
+    allowed_surfaces: Optional[set[str]] = None,
 ) -> dict[str, Any]:
     seen_surfaces = {str(event.get("surface")) for event in window_events if event.get("surface")}
-    all_surfaces = [surface.value for surface in Surface]
+    all_surfaces = allowed_surfaces or {surface.value for surface in Surface}
     missing_surfaces = sorted([surface for surface in all_surfaces if surface not in seen_surfaces])
 
     handoff_events = [
@@ -141,6 +150,7 @@ def audit_stream(
     now: Optional[datetime] = None,
     window_hours: int = 168,
     digest_hours: int = 12,
+    allowed_surfaces: Optional[set[str]] = None,
 ) -> dict[str, Any]:
     now = now or get_now()
     window_events = filter_events_by_hours(events, window_hours, now)
@@ -155,13 +165,58 @@ def audit_stream(
         "undistilled_total": len([e for e in events if not e.get("distilled", False)]),
     }
 
-    return {
+    report = {
         "generated_at": now.isoformat().replace("+00:00", "Z"),
         "digest_window_hours": digest_hours,
         "counts": counts,
         "digest_inclusion": compute_digest_inclusion(digest_events, digest_text),
-        "gaps": compute_gaps(window_events, events, now, window_hours),
+        "gaps": compute_gaps(window_events, events, now, window_hours, allowed_surfaces),
     }
+
+    if allowed_surfaces is not None:
+        report["enabled_surfaces"] = sorted(allowed_surfaces)
+
+    return report
+
+
+def load_service_config() -> dict[str, Any]:
+    """Load services config from ~/.claude-mind/config.json."""
+    mind_path = os.environ.get("SAMARA_MIND_PATH") or os.environ.get("MIND_PATH") or "~/.claude-mind"
+    config_path = Path(mind_path).expanduser() / "config.json"
+    if not config_path.exists():
+        return {}
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    services = data.get("services")
+    if not isinstance(services, dict):
+        return {}
+    return services
+
+
+def resolve_allowed_surfaces() -> tuple[Optional[set[str]], list[str]]:
+    """Return (allowed_surfaces, disabled_services)."""
+    services = load_service_config()
+    if not services:
+        return None, []
+
+    disabled_services = [
+        name for name, value in services.items()
+        if value is False
+    ]
+    if not disabled_services:
+        return None, []
+
+    disabled_surfaces: set[str] = set()
+    for service in disabled_services:
+        for surface in SERVICE_SURFACE_MAP.get(service, []):
+            disabled_surfaces.add(surface)
+
+    all_surfaces = {surface.value for surface in Surface}
+    allowed_surfaces = {surface for surface in all_surfaces if surface not in disabled_surfaces}
+
+    return allowed_surfaces, disabled_services
 
 
 def main() -> int:
@@ -178,12 +233,17 @@ def main() -> int:
         os.environ["HOT_DIGEST_NOW"] = os.environ["STREAM_AUDIT_NOW"]
     digest_text = build_digest(hours=args.digest_hours, max_tokens=3000, use_ollama=False)
 
+    allowed_surfaces, disabled_services = resolve_allowed_surfaces()
+
     report = audit_stream(
         events=events,
         digest_text=digest_text,
         window_hours=args.hours,
         digest_hours=args.digest_hours,
+        allowed_surfaces=allowed_surfaces,
     )
+    if disabled_services:
+        report["disabled_services"] = disabled_services
 
     if args.output:
         try:
