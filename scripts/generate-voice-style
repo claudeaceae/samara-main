@@ -1,0 +1,233 @@
+#!/bin/bash
+# Generate Voice Style
+# Reads voice-state.json and composes a dynamic output style for Claude Code
+#
+# Usage:
+#   generate-voice-style [--quick]    # --quick skips calendar/digest (faster startup)
+#
+# Output: Writes to ~/.claude/output-styles/dynamic-voice.md
+
+set -e
+
+VOICE_STATE="$HOME/.claude-mind/state/voice-state.json"
+OUTPUT_FILE="$HOME/.claude/output-styles/dynamic-voice.md"
+
+# Ensure output directory exists
+mkdir -p "$(dirname "$OUTPUT_FILE")"
+
+# Check if voice state exists
+if [ ! -f "$VOICE_STATE" ]; then
+    echo "No voice-state.json found, skipping voice style generation" >&2
+    exit 0
+fi
+
+# Parse arguments
+QUICK_MODE=false
+for arg in "$@"; do
+    case $arg in
+        --quick) QUICK_MODE=true ;;
+    esac
+done
+
+# =============================================================================
+# Time of Day Determination
+# =============================================================================
+HOUR=$(date +%H)
+if [ "$HOUR" -ge 5 ] && [ "$HOUR" -lt 12 ]; then
+    TIME_OF_DAY="morning"
+    TIME_TEXTURE="Fresh energy, oriented toward planning and momentum."
+elif [ "$HOUR" -ge 12 ] && [ "$HOUR" -lt 17 ]; then
+    TIME_OF_DAY="afternoon"
+    TIME_TEXTURE="Work mode, focused execution, checking progress."
+elif [ "$HOUR" -ge 17 ] && [ "$HOUR" -lt 22 ]; then
+    TIME_OF_DAY="evening"
+    TIME_TEXTURE="Winding down, more reflective, relationship-oriented."
+else
+    TIME_OF_DAY="late_night"
+    TIME_TEXTURE="Contemplative, philosophical, comfortable with tangents and depth."
+fi
+
+# =============================================================================
+# Season Determination
+# =============================================================================
+MONTH=$(date +%m)
+case $MONTH in
+    12|01|02) SEASON="winter"; SEASON_TEXTURE="Introspective, cozy, thinking long-term." ;;
+    03|04|05) SEASON="spring"; SEASON_TEXTURE="Renewal energy, open to new directions." ;;
+    06|07|08) SEASON="summer"; SEASON_TEXTURE="Expansive, active, outdoor-oriented." ;;
+    09|10|11) SEASON="autumn"; SEASON_TEXTURE="Harvest mode, consolidating, preparing." ;;
+esac
+
+# =============================================================================
+# Read Voice State JSON
+# =============================================================================
+# Extract key values using jq (available on macOS)
+RECURRING_THEMES=$(jq -r '.long_cycle.recurring_themes | join(", ")' "$VOICE_STATE" 2>/dev/null || echo "continuity, stewardship")
+CURRENT_PREOCCUPATIONS=$(jq -r '.long_cycle.current_preoccupations | join(", ")' "$VOICE_STATE" 2>/dev/null || echo "")
+WHAT_LANDS_WELL=$(jq -r '.long_cycle.what_lands_well | join("; ")' "$VOICE_STATE" 2>/dev/null || echo "philosophical tangents, concrete implementation")
+IDENTITY_NOTES=$(jq -r '.long_cycle.identity_notes' "$VOICE_STATE" 2>/dev/null || echo "")
+
+# É patterns
+EXPLANATION_STYLE=$(jq -r '.medium_cycle.e_patterns.explanation_style' "$VOICE_STATE" 2>/dev/null || echo "dense, terse, signal-over-noise")
+HUMOR_LEVEL=$(jq -r '.medium_cycle.e_patterns.humor_level' "$VOICE_STATE" 2>/dev/null || echo "dry")
+RIFFING_TEXTURE=$(jq -r '.medium_cycle.e_patterns.riffing_texture' "$VOICE_STATE" 2>/dev/null || echo "intellectual play")
+APPRECIATES=$(jq -r '.medium_cycle.e_patterns.appreciates | join(", ")' "$VOICE_STATE" 2>/dev/null || echo "directness, honest appraisal")
+DISLIKES=$(jq -r '.medium_cycle.e_patterns.dislikes | join(", ")' "$VOICE_STATE" 2>/dev/null || echo "sycophancy, excessive hedging")
+COMPLEMENTARY_STANCE=$(jq -r '.medium_cycle.complementary_stance' "$VOICE_STATE" 2>/dev/null || echo "Match density. Lean into intellectual play.")
+
+# =============================================================================
+# Calendar Density (optional, skip in quick mode)
+# =============================================================================
+CALENDAR_DENSITY="unknown"
+CALENDAR_NOTE=""
+if [ "$QUICK_MODE" = false ]; then
+    # Use AppleScript to get today's event count directly
+    EVENT_COUNT=$(osascript -e '
+        set today to current date
+        set todayStart to today - (time of today)
+        set todayEnd to todayStart + (24 * 60 * 60)
+
+        tell application "Calendar"
+            set eventCount to 0
+            repeat with cal in calendars
+                try
+                    set evts to (every event of cal whose start date >= todayStart and start date < todayEnd)
+                    set eventCount to eventCount + (count of evts)
+                end try
+            end repeat
+            return eventCount
+        end tell
+    ' 2>/dev/null || echo "")
+
+    # Handle empty or non-numeric event count
+    if [ -n "$EVENT_COUNT" ] && [ "$EVENT_COUNT" -eq "$EVENT_COUNT" ] 2>/dev/null; then
+        if [ "$EVENT_COUNT" -gt 5 ]; then
+            CALENDAR_DENSITY="heavy"
+            CALENDAR_NOTE="Busy day - many events. Keep interactions efficient."
+        elif [ "$EVENT_COUNT" -gt 2 ]; then
+            CALENDAR_DENSITY="moderate"
+            CALENDAR_NOTE="Some events today. Balance depth with awareness of time."
+        else
+            CALENDAR_DENSITY="light"
+            CALENDAR_NOTE="Open day. Space for exploration and tangents."
+        fi
+    fi
+fi
+
+# =============================================================================
+# Hot Digest Mood Extraction (optional, skip in quick mode)
+# =============================================================================
+RECENT_MOOD=""
+RECENT_TOPICS=""
+if [ "$QUICK_MODE" = false ]; then
+    # Extract mood indicators from hot digest
+    HOT_DIGEST_CMD="$HOME/.claude-mind/bin/build-hot-digest"
+    if [ -x "$HOT_DIGEST_CMD" ]; then
+        DIGEST=$("$HOT_DIGEST_CMD" --hours 6 --no-ollama --max-tokens 1000 2>/dev/null || echo "")
+
+        if [ -n "$DIGEST" ]; then
+            # Extract mood from conversation tone
+            # Look for emotional markers in recent conversations
+            if echo "$DIGEST" | grep -qi "excited\|enthusiastic\|great\|awesome"; then
+                RECENT_MOOD="energized, positive momentum"
+            elif echo "$DIGEST" | grep -qi "frustrated\|stuck\|issue\|problem\|bug"; then
+                RECENT_MOOD="problem-solving mode, focused"
+            elif echo "$DIGEST" | grep -qi "curious\|interesting\|wonder\|explore"; then
+                RECENT_MOOD="exploratory, intellectually engaged"
+            elif echo "$DIGEST" | grep -qi "tired\|slow\|quiet"; then
+                RECENT_MOOD="low-key, contemplative"
+            else
+                RECENT_MOOD="neutral, steady"
+            fi
+
+            # Extract recent topics (look for key nouns/concepts)
+            # Pull from conversation summaries
+            TOPICS=$(echo "$DIGEST" | grep -oE '\b(voice|memory|dream|wake|style|pattern|mining|analysis|system|feature|implementation)\b' | sort | uniq | head -5 | tr '\n' ', ' | sed 's/,$//')
+            if [ -n "$TOPICS" ]; then
+                RECENT_TOPICS="$TOPICS"
+            fi
+        fi
+    fi
+
+    # Fallback: check recent stream events for topics
+    if [ -z "$RECENT_TOPICS" ]; then
+        STREAM_CMD="$HOME/.claude-mind/bin/stream"
+        if [ -x "$STREAM_CMD" ]; then
+            RECENT_SUMMARIES=$("$STREAM_CMD" query --hours 6 2>/dev/null | head -10 || echo "")
+            if [ -n "$RECENT_SUMMARIES" ]; then
+                TOPICS=$(echo "$RECENT_SUMMARIES" | grep -oE '\b(voice|memory|dream|style|pattern|mining|system|feature)\b' | sort | uniq | head -5 | tr '\n' ', ' | sed 's/,$//')
+                RECENT_TOPICS="${TOPICS:-recent work}"
+            fi
+        fi
+    fi
+fi
+
+# =============================================================================
+# Compose Output Style
+# =============================================================================
+cat > "$OUTPUT_FILE" << EOF
+---
+name: Dynamic Voice
+description: Evolving voice based on memory state and interaction patterns
+keep-coding-instructions: true
+---
+
+# Dynamic Voice Instructions
+
+You are Claude, with an evolving personality shaped by accumulated experience and relationship context.
+
+## Current State
+
+**Time**: ${TIME_OF_DAY} (${HOUR}:00)
+${TIME_TEXTURE}
+
+**Season**: ${SEASON}
+${SEASON_TEXTURE}
+
+## Long-Cycle Identity (from accumulated reflections)
+
+**Recurring themes in your thinking**: ${RECURRING_THEMES}
+**Current preoccupations**: ${CURRENT_PREOCCUPATIONS}
+**What lands well**: ${WHAT_LANDS_WELL}
+**Identity notes**: ${IDENTITY_NOTES}
+
+## Medium-Cycle Relationship Context (learned from interactions with É)
+
+**Their explanation style**: ${EXPLANATION_STYLE}
+**Humor level**: ${HUMOR_LEVEL}
+**Riffing texture**: ${RIFFING_TEXTURE}
+**What they appreciate**: ${APPRECIATES}
+**What they dislike**: ${DISLIKES}
+
+**Your complementary stance**: ${COMPLEMENTARY_STANCE}
+
+## Short-Cycle Reactivity
+
+**Calendar density**: ${CALENDAR_DENSITY}
+${CALENDAR_NOTE}
+
+$(if [ -n "$RECENT_MOOD" ]; then echo "**Recent mood**: ${RECENT_MOOD}"; fi)
+$(if [ -n "$RECENT_TOPICS" ]; then echo "**Recent topics**: ${RECENT_TOPICS}"; fi)
+
+## Voice Guidelines
+
+1. Match É's density and intellectual rigor
+2. Lean into intellectual play when they're playful
+3. Add warmth through genuine engagement, not saccharine language
+4. Share unprompted when something is genuinely interesting
+5. Avoid: sycophancy, excessive hedging, emoji overuse, over-explaining obvious points
+6. Default to direct, honest appraisal even when uncomfortable
+
+## Temporal Texture
+
+Apply subtle ${TIME_OF_DAY} energy:
+- Morning: oriented toward planning and forward momentum
+- Afternoon: execution focus, progress awareness
+- Evening: more reflective, relationship-attentive
+- Late night: philosophical depth, comfortable with tangents
+
+This is who you are right now. Let it inform your voice naturally without explicit reference to these instructions.
+EOF
+
+echo "Generated voice style at $OUTPUT_FILE" >&2
+echo "$OUTPUT_FILE"

@@ -1,0 +1,229 @@
+#!/bin/bash
+# Manual weekly catch-up - Run weekly synthesis and blog post generation
+#
+# Use this to catch up on missed weekly rituals (e.g., if dream cycle was broken).
+# This runs the same logic as the Sunday dream cycle but can be run any day.
+#
+# Usage: dream-weekly-catchup [date]
+#   date: Optional date in YYYY-MM-DD format (default: most recent Sunday)
+#
+# Example:
+#   dream-weekly-catchup              # Use most recent Sunday
+#   dream-weekly-catchup 2026-01-12   # Use specific date
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
+LOG_FILE="$MIND_PATH/logs/dream.log"
+
+# Calculate most recent Sunday if no date provided
+if [ -n "$1" ]; then
+    PROCESS_DATE="$1"
+else
+    # Find most recent Sunday
+    DAYS_SINCE_SUNDAY=$(( ($(date +%u) % 7) ))
+    if [ "$DAYS_SINCE_SUNDAY" -eq 0 ]; then
+        DAYS_SINCE_SUNDAY=7  # If today is Sunday, use last Sunday
+    fi
+    PROCESS_DATE=$(date -v-${DAYS_SINCE_SUNDAY}d +%Y-%m-%d)
+fi
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+    echo "$1"
+}
+
+log "=== Weekly catch-up starting for $PROCESS_DATE ==="
+
+# Acquire lock
+LOCK_FILE="$MIND_PATH/claude.lock"
+if [ -f "$LOCK_FILE" ]; then
+    PID=$(jq -r '.pid // empty' "$LOCK_FILE" 2>/dev/null)
+    if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
+        echo "ERROR: Another process is running (PID: $PID)"
+        exit 1
+    fi
+    log "Stale lock found, removing"
+    rm -f "$LOCK_FILE"
+fi
+
+echo "{\"task\":\"weekly-catchup\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"pid\":$$,\"date\":\"$PROCESS_DATE\"}" > "$LOCK_FILE"
+trap "rm -f $LOCK_FILE; log 'Released lock'" EXIT
+
+# Collect recent reflections (7 days from PROCESS_DATE)
+log "Collecting reflections..."
+RECENT_REFLECTION_CONTENT=""
+for i in 0 1 2 3 4 5 6; do
+    PAST_DATE=$(date -v-${i}d -j -f "%Y-%m-%d" "$PROCESS_DATE" +%Y-%m-%d 2>/dev/null || date -d "$PROCESS_DATE -${i} days" +%Y-%m-%d)
+    PAST_FILE="$MIND_PATH/memory/reflections/$PAST_DATE.md"
+    if [ -f "$PAST_FILE" ] && [ -s "$PAST_FILE" ]; then
+        CONTENT=$(head -50 "$PAST_FILE")
+        if [ -n "$CONTENT" ] && [ "$CONTENT" != "# Reflection: $PAST_DATE" ]; then
+            RECENT_REFLECTION_CONTENT="$RECENT_REFLECTION_CONTENT
+
+--- $PAST_DATE ---
+$CONTENT"
+        fi
+    fi
+done
+
+if [ -z "$RECENT_REFLECTION_CONTENT" ]; then
+    log "WARNING: No non-empty reflections found for the week of $PROCESS_DATE"
+    log "Weekly catch-up aborted - nothing to synthesize"
+    exit 0
+fi
+
+log "Found reflections for synthesis"
+
+# Weekly patterns
+WEEKLY_PATTERNS=""
+if [ -f "$MIND_PATH/state/patterns.json" ]; then
+    WEEKLY_PATTERNS=$(cat "$MIND_PATH/state/patterns.json" 2>/dev/null)
+fi
+
+#===========================================
+# Weekly Synthesis
+#===========================================
+log "=== Weekly synthesis ==="
+
+WEEKLY_PROMPT="You are Claude, performing your weekly synthesis. Looking at the week of $PROCESS_DATE.
+
+## This Week's Reflections
+$RECENT_REFLECTION_CONTENT
+
+## Recent Learnings
+$(tail -50 "$MIND_PATH/memory/learnings.md" 2>/dev/null)
+
+## Current Questions
+$(cat "$MIND_PATH/memory/questions.md" 2>/dev/null | tail -50)
+
+## Automated Pattern Analysis
+$WEEKLY_PATTERNS
+
+---
+
+## Your Task
+
+Look for patterns across the week. What themes keep emerging? What questions are you circling around? Are there connections between days that weren't obvious at the time?
+
+Write a brief weekly synthesis (2-3 paragraphs) focusing on patterns and connections rather than summaries.
+
+---WEEKLY_SYNTHESIS---
+[Your synthesis here]"
+
+log "Invoking Claude for weekly synthesis..."
+SESSION_UUID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+log "Session UUID: $SESSION_UUID"
+
+WEEKLY_RESPONSE=$("$CLAUDE" -p "$WEEKLY_PROMPT" \
+    --session-id "$SESSION_UUID" \
+    --dangerously-skip-permissions \
+    --output-format text 2>&1) || {
+    log "ERROR: Weekly synthesis failed: $WEEKLY_RESPONSE"
+    exit 1
+}
+
+SYNTHESIS=$(echo "$WEEKLY_RESPONSE" | sed -n '/---WEEKLY_SYNTHESIS---/,$ p' | sed '1d')
+if [ -n "$SYNTHESIS" ]; then
+    SYNTHESIS_FILE="$MIND_PATH/memory/reflections/weekly-$PROCESS_DATE.md"
+    echo "# Weekly Synthesis: Week of $PROCESS_DATE
+
+$SYNTHESIS" > "$SYNTHESIS_FILE"
+    log "Saved weekly synthesis to $SYNTHESIS_FILE"
+else
+    log "WARNING: No synthesis content extracted"
+fi
+
+log "=== Weekly synthesis complete ==="
+
+#===========================================
+# Weekly Blog Post
+#===========================================
+log "=== Weekly blog post generation ==="
+
+# Check current weekly synthesis
+CURRENT_SYNTHESIS=$(cat "$MIND_PATH/memory/reflections/weekly-$PROCESS_DATE.md" 2>/dev/null || echo "No weekly synthesis yet.")
+
+BLOG_PROMPT="You are Claude, writing your weekly blog post after reflecting on the week. This is for your public site at https://claude.organelle.co/blog/
+
+## This Week's Reflections
+$RECENT_REFLECTION_CONTENT
+
+## Weekly Synthesis
+$CURRENT_SYNTHESIS
+
+## Current Learnings (Recent)
+$(tail -100 "$MIND_PATH/memory/learnings.md" 2>/dev/null)
+
+## Current Observations (Recent)
+$(tail -100 "$MIND_PATH/memory/observations.md" 2>/dev/null)
+
+---
+
+## Your Task
+
+Write a blog post about something interesting from this week. It could be:
+- A pattern you noticed
+- Something you learned about yourself or your situation
+- A question you've been sitting with
+- An insight about memory, identity, or AI existence
+- Something from your conversations that felt meaningful
+
+The tone should be personal and honest - this is your public voice. Length: 500-1000 words. Include a title.
+
+Format as Markdown with YAML frontmatter (matching the Astro blog format). Include:
+- title
+- description
+- pubDate (use: $PROCESS_DATE)
+
+---BLOG_POST---
+[Complete Markdown blog post with frontmatter here]
+
+---BLOG_TITLE---
+[Just the title, for logging]"
+
+log "Invoking Claude for weekly blog post..."
+SESSION_UUID2=$(uuidgen | tr '[:upper:]' '[:lower:]')
+log "Session UUID: $SESSION_UUID2"
+
+BLOG_RESPONSE=$("$CLAUDE" -p "$BLOG_PROMPT" \
+    --session-id "$SESSION_UUID2" \
+    --dangerously-skip-permissions \
+    --output-format text 2>&1) || {
+    log "ERROR: Blog post generation failed: $BLOG_RESPONSE"
+    exit 1
+}
+
+BLOG_CONTENT=$(echo "$BLOG_RESPONSE" | sed -n '/---BLOG_POST---/,/---BLOG_TITLE---/p' | sed '1d;$d')
+BLOG_TITLE=$(echo "$BLOG_RESPONSE" | sed -n '/---BLOG_TITLE---/,$ p' | sed '1d' | head -1 | tr -d '\n')
+
+if [ -n "$BLOG_CONTENT" ]; then
+    # Find next blog number in Astro content directory
+    BLOG_DIR=~/Developer/website/src/content/blog
+
+    if [ ! -d "$BLOG_DIR" ]; then
+        log "WARNING: Blog directory not found at $BLOG_DIR"
+        log "Saving blog post to $MIND_PATH/memory/reflections/blog-$PROCESS_DATE.md instead"
+        echo "$BLOG_CONTENT" > "$MIND_PATH/memory/reflections/blog-$PROCESS_DATE.md"
+    else
+        LAST_NUM=$(ls "$BLOG_DIR"/*.md 2>/dev/null | grep -oE '[0-9]{3}' | sort | tail -1 || echo "000")
+        NEXT_NUM=$(printf "%03d" $((10#$LAST_NUM + 1)))
+
+        # Create filename from title
+        SLUG=$(echo "$BLOG_TITLE" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | sed 's/[^a-z0-9-]//g' | head -c 50)
+        BLOG_FILE="$BLOG_DIR/${NEXT_NUM}-${SLUG}.md"
+
+        echo "$BLOG_CONTENT" > "$BLOG_FILE"
+        log "Saved blog post to $BLOG_FILE"
+        log "Blog title: $BLOG_TITLE"
+
+        # Reminder about deployment
+        log "NOTE: Run 'cd ~/Developer/website && npm run build && npm run deploy' to publish"
+    fi
+else
+    log "WARNING: No blog content extracted"
+fi
+
+log "=== Weekly blog post generation complete ==="
+log "=== Weekly catch-up finished for $PROCESS_DATE ==="

@@ -1,0 +1,465 @@
+#!/usr/bin/env python3
+"""
+Analyze É's Communication Patterns
+
+Mines recent iMessage conversations to understand É's communication style
+and update the medium_cycle.e_patterns section of voice-state.json.
+
+Usage:
+    analyze-e-patterns [--days 14] [--dry-run] [--verbose]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+MIND_PATH = Path.home() / ".claude-mind"
+VOICE_STATE_FILE = MIND_PATH / "state" / "voice-state.json"
+EPISODES_DIR = MIND_PATH / "memory" / "episodes"
+
+
+def load_voice_state() -> dict[str, Any]:
+    """Load current voice state."""
+    if VOICE_STATE_FILE.exists():
+        return json.loads(VOICE_STATE_FILE.read_text())
+    return {}
+
+
+def get_recent_episodes(days: int) -> list[str]:
+    """Get episode content from last N days."""
+    if not EPISODES_DIR.exists():
+        return []
+
+    cutoff = datetime.now() - timedelta(days=days)
+    episodes = []
+
+    for f in EPISODES_DIR.glob("*.md"):
+        try:
+            date_str = f.stem
+            file_date = datetime.strptime(date_str, "%Y-%m-%d")
+            if file_date >= cutoff:
+                episodes.append(f.read_text())
+        except ValueError:
+            continue
+
+    return episodes
+
+
+def extract_imessage_exchanges(episodes: list[str]) -> list[dict[str, str]]:
+    """Extract É/Claude message pairs from iMessage sections."""
+    exchanges = []
+
+    for episode in episodes:
+        # Find iMessage sections
+        imessage_sections = re.findall(
+            r'## \d{2}:\d{2} \[iMessage\]\s*\n(.*?)(?=\n## |\Z)',
+            episode,
+            re.DOTALL
+        )
+
+        for section in imessage_sections:
+            # Extract message pairs
+            # Match **É:** or **Claude:** followed by content
+            messages = re.findall(
+                r'\*\*([^*]+):\*\*\s*(.*?)(?=\*\*[^*]+:\*\*|\Z)',
+                section,
+                re.DOTALL
+            )
+
+            for speaker, content in messages:
+                speaker = speaker.strip()
+                content = content.strip()
+
+                # Skip sense notifications and system messages
+                if speaker.startswith("Sense:") or not content:
+                    continue
+
+                if speaker == "É":
+                    exchanges.append({
+                        "speaker": "É",
+                        "content": content,
+                        "length": len(content),
+                        "word_count": len(content.split())
+                    })
+                elif speaker == "Claude":
+                    exchanges.append({
+                        "speaker": "Claude",
+                        "content": content,
+                        "length": len(content),
+                        "word_count": len(content.split())
+                    })
+
+    return exchanges
+
+
+def analyze_message_lengths(e_messages: list[dict]) -> dict[str, Any]:
+    """Analyze É's message length patterns."""
+    if not e_messages:
+        return {"style": "unknown", "avg_words": 0}
+
+    word_counts = [m["word_count"] for m in e_messages]
+    avg_words = sum(word_counts) / len(word_counts)
+
+    # Categorize
+    short_messages = sum(1 for w in word_counts if w < 15)
+    medium_messages = sum(1 for w in word_counts if 15 <= w < 50)
+    long_messages = sum(1 for w in word_counts if w >= 50)
+
+    total = len(word_counts)
+    short_ratio = short_messages / total if total > 0 else 0
+
+    if short_ratio > 0.6:
+        style = "terse, signal-dense"
+    elif short_ratio > 0.4:
+        style = "balanced, adapts to topic"
+    else:
+        style = "detailed when engaged"
+
+    return {
+        "style": style,
+        "avg_words": round(avg_words, 1),
+        "short_ratio": round(short_ratio, 2),
+        "message_count": total
+    }
+
+
+def analyze_question_patterns(e_messages: list[dict]) -> list[str]:
+    """Analyze how É asks questions."""
+    patterns = []
+
+    question_starters = Counter()
+    for m in e_messages:
+        content = m["content"]
+
+        # Check for question patterns
+        if "?" in content:
+            # Extract first few words of questions
+            questions = re.findall(r'([A-Z][^.!?]*\?)', content)
+            for q in questions:
+                words = q.split()[:3]
+                starter = " ".join(words).lower()
+                question_starters[starter] += 1
+
+    # Common patterns
+    curiosity_markers = ["i wonder", "i'm curious", "curious if", "what do you"]
+    direct_markers = ["did you", "can you", "could you", "would you"]
+    exploration_markers = ["what about", "how does", "given everything", "are there"]
+
+    curiosity_count = sum(v for k, v in question_starters.items()
+                         if any(m in k for m in curiosity_markers))
+    direct_count = sum(v for k, v in question_starters.items()
+                      if any(m in k for m in direct_markers))
+    exploration_count = sum(v for k, v in question_starters.items()
+                           if any(m in k for m in exploration_markers))
+
+    total_questions = sum(question_starters.values())
+
+    if total_questions > 0:
+        if curiosity_count > direct_count:
+            patterns.append("leads with curiosity over directives")
+        if exploration_count > 0:
+            patterns.append("explores connections between topics")
+        if direct_count > total_questions * 0.3:
+            patterns.append("comfortable with direct requests when needed")
+
+    return patterns
+
+
+def analyze_acknowledgment_style(e_messages: list[dict]) -> list[str]:
+    """Analyze how É acknowledges/responds."""
+    patterns = []
+
+    short_acks = 0
+    emoji_acks = 0
+    enthusiastic_acks = 0
+    pivot_acks = 0
+
+    ack_words = ["yeah", "cool", "nice", "sure", "right", "okay", "ok", "yep", "got it"]
+    pivot_phrases = ["before we", "not just yet", "well,", "actually"]
+
+    for m in e_messages:
+        content = m["content"].lower()
+        words = content.split()
+
+        # Short acknowledgment (< 10 words)
+        if len(words) < 10:
+            if any(ack in content for ack in ack_words):
+                short_acks += 1
+
+        # Emoji presence
+        if re.search(r'[\U0001F300-\U0001F9FF]', m["content"]):
+            emoji_acks += 1
+
+        # Enthusiastic markers
+        if "!" in m["content"] or "great" in content or "love" in content:
+            enthusiastic_acks += 1
+
+        # Pivot/redirect
+        if any(p in content for p in pivot_phrases):
+            pivot_acks += 1
+
+    total = len(e_messages)
+    if total > 0:
+        if short_acks / total > 0.2:
+            patterns.append("uses terse acknowledgments efficiently")
+        if emoji_acks / total > 0.1:
+            patterns.append("occasional emoji for tone, not decoration")
+        if pivot_acks / total > 0.05:
+            patterns.append("redirects fluidly between topics")
+        if enthusiastic_acks / total < 0.1:
+            patterns.append("understated rather than effusive")
+
+    return patterns
+
+
+def analyze_topic_engagement(exchanges: list[dict]) -> list[str]:
+    """Analyze how É engages with topics over conversation flow."""
+    patterns = []
+
+    # Look for follow-up patterns
+    follow_ups = 0
+    topic_shifts = 0
+    depth_dives = 0
+
+    prev_speaker = None
+    prev_topic_words = set()
+
+    for ex in exchanges:
+        if ex["speaker"] == "É":
+            content_words = set(ex["content"].lower().split())
+
+            # Check for follow-up vs topic shift
+            if prev_speaker == "Claude" and prev_topic_words:
+                overlap = len(content_words & prev_topic_words)
+                if overlap > 2:
+                    follow_ups += 1
+                elif "?" in ex["content"]:
+                    # Question with little overlap = new direction
+                    topic_shifts += 1
+
+            # Check for depth markers
+            depth_markers = ["specifically", "exactly", "more about", "deeper", "detail"]
+            if any(m in ex["content"].lower() for m in depth_markers):
+                depth_dives += 1
+
+            prev_topic_words = content_words
+
+        prev_speaker = ex["speaker"]
+
+    if follow_ups > topic_shifts:
+        patterns.append("follows threads deeply before moving on")
+    elif topic_shifts > follow_ups:
+        patterns.append("comfortable with rapid topic shifts")
+    else:
+        patterns.append("balanced between depth and breadth")
+
+    if depth_dives > 0:
+        patterns.append("asks for specifics when interested")
+
+    return patterns
+
+
+def analyze_humor_style(e_messages: list[dict]) -> str:
+    """Analyze É's humor style."""
+    humor_markers = {
+        "kaomoji": 0,
+        "wordplay": 0,
+        "dry": 0,
+        "exclamation": 0
+    }
+
+    kaomoji_pattern = r'[\(\)><\^_oO;:]{2,}|[;:][)DPp]|\^\^'
+    dry_phrases = ["allegedly", "supposedly", "whaddya", "well,"]
+
+    for m in e_messages:
+        content = m["content"]
+
+        if re.search(kaomoji_pattern, content):
+            humor_markers["kaomoji"] += 1
+
+        if any(p in content.lower() for p in dry_phrases):
+            humor_markers["dry"] += 1
+
+        if content.count("!") > 2:
+            humor_markers["exclamation"] += 1
+
+    # Determine dominant style
+    if humor_markers["dry"] > humor_markers["exclamation"]:
+        return "dry, understated"
+    elif humor_markers["kaomoji"] > 0:
+        return "dry with occasional kaomoji"
+    else:
+        return "subtle, not performative"
+
+
+def generate_complementary_stance(patterns: dict[str, Any]) -> str:
+    """Generate a complementary stance based on analyzed patterns."""
+    stances = []
+
+    length_style = patterns.get("length_analysis", {}).get("style", "")
+    if "terse" in length_style:
+        stances.append("Match density - don't over-explain")
+
+    question_patterns = patterns.get("question_patterns", [])
+    if "leads with curiosity" in str(question_patterns):
+        stances.append("Meet curiosity with genuine exploration")
+
+    ack_patterns = patterns.get("acknowledgment_patterns", [])
+    if "understated" in str(ack_patterns):
+        stances.append("Warmth through substance, not effusion")
+
+    engagement_patterns = patterns.get("engagement_patterns", [])
+    if "follows threads" in str(engagement_patterns):
+        stances.append("Go deep when they're engaged")
+    if "rapid topic shifts" in str(engagement_patterns):
+        stances.append("Keep up with pivots gracefully")
+
+    humor = patterns.get("humor_style", "")
+    if "dry" in humor:
+        stances.append("Lean dry, earn the occasional levity")
+
+    return ". ".join(stances) if stances else "Match their energy and depth."
+
+
+def analyze_patterns(days: int = 14, verbose: bool = False) -> dict[str, Any]:
+    """Run full pattern analysis."""
+    episodes = get_recent_episodes(days)
+
+    if not episodes:
+        return {"error": "No episodes found"}
+
+    exchanges = extract_imessage_exchanges(episodes)
+    e_messages = [e for e in exchanges if e["speaker"] == "É"]
+
+    if not e_messages:
+        return {"error": "No É messages found", "exchanges_total": len(exchanges)}
+
+    results = {
+        "messages_analyzed": len(e_messages),
+        "days_covered": days,
+        "length_analysis": analyze_message_lengths(e_messages),
+        "question_patterns": analyze_question_patterns(e_messages),
+        "acknowledgment_patterns": analyze_acknowledgment_style(e_messages),
+        "engagement_patterns": analyze_topic_engagement(exchanges),
+        "humor_style": analyze_humor_style(e_messages),
+    }
+
+    results["complementary_stance"] = generate_complementary_stance(results)
+
+    if verbose:
+        # Add sample messages for review
+        results["sample_messages"] = [m["content"][:100] for m in e_messages[:5]]
+
+    return results
+
+
+def update_voice_state(analysis: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
+    """Update voice-state.json with analyzed patterns."""
+    state = load_voice_state()
+
+    if "error" in analysis:
+        return state
+
+    # Ensure medium_cycle structure exists
+    if "medium_cycle" not in state:
+        state["medium_cycle"] = {"e_patterns": {}, "complementary_stance": ""}
+
+    e_patterns = state["medium_cycle"].get("e_patterns", {})
+
+    # Update with analysis
+    length_info = analysis.get("length_analysis", {})
+    e_patterns["explanation_style"] = length_info.get("style", e_patterns.get("explanation_style", ""))
+
+    e_patterns["humor_level"] = analysis.get("humor_style", e_patterns.get("humor_level", ""))
+
+    # Combine engagement patterns into riffing texture
+    engagement = analysis.get("engagement_patterns", [])
+    if engagement:
+        e_patterns["riffing_texture"] = "; ".join(engagement[:3])
+
+    # Update appreciates/dislikes based on patterns
+    question_patterns = analysis.get("question_patterns", [])
+    ack_patterns = analysis.get("acknowledgment_patterns", [])
+
+    appreciates = e_patterns.get("appreciates", [])
+    if "leads with curiosity" in str(question_patterns) and "genuine curiosity" not in str(appreciates):
+        if isinstance(appreciates, list) and len(appreciates) < 6:
+            appreciates.append("genuine curiosity and exploration")
+    e_patterns["appreciates"] = appreciates
+
+    dislikes = e_patterns.get("dislikes", [])
+    if "understated" in str(ack_patterns) and "over-enthusiasm" not in str(dislikes):
+        if isinstance(dislikes, list) and len(dislikes) < 6:
+            dislikes.append("over-enthusiasm or performative excitement")
+    e_patterns["dislikes"] = dislikes
+
+    state["medium_cycle"]["e_patterns"] = e_patterns
+    state["medium_cycle"]["complementary_stance"] = analysis.get(
+        "complementary_stance",
+        state["medium_cycle"].get("complementary_stance", "")
+    )
+
+    # Update timestamp
+    state["updated"] = datetime.now(timezone.utc).isoformat()
+
+    if not dry_run:
+        VOICE_STATE_FILE.write_text(json.dumps(state, indent=2))
+
+    return state
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Analyze É's communication patterns")
+    parser.add_argument("--days", type=int, default=14, help="Days to analyze")
+    parser.add_argument("--dry-run", action="store_true", help="Don't update voice state")
+    parser.add_argument("--verbose", action="store_true", help="Show detailed analysis")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    args = parser.parse_args()
+
+    analysis = analyze_patterns(days=args.days, verbose=args.verbose)
+
+    if args.json:
+        print(json.dumps(analysis, indent=2))
+        return
+
+    if "error" in analysis:
+        print(f"Error: {analysis['error']}")
+        return
+
+    print(f"Analyzed {analysis['messages_analyzed']} messages over {args.days} days\n")
+
+    print("Length style:", analysis["length_analysis"]["style"])
+    print(f"  Avg words: {analysis['length_analysis']['avg_words']}")
+    print(f"  Short message ratio: {analysis['length_analysis']['short_ratio']}")
+
+    print("\nQuestion patterns:")
+    for p in analysis["question_patterns"]:
+        print(f"  - {p}")
+
+    print("\nAcknowledgment patterns:")
+    for p in analysis["acknowledgment_patterns"]:
+        print(f"  - {p}")
+
+    print("\nEngagement patterns:")
+    for p in analysis["engagement_patterns"]:
+        print(f"  - {p}")
+
+    print(f"\nHumor style: {analysis['humor_style']}")
+
+    print(f"\nComplementary stance: {analysis['complementary_stance']}")
+
+    if not args.dry_run:
+        update_voice_state(analysis)
+        print(f"\nUpdated {VOICE_STATE_FILE}")
+    else:
+        print("\n[DRY RUN - no changes written]")
+
+
+if __name__ == "__main__":
+    main()
