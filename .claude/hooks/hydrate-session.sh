@@ -56,7 +56,7 @@ fi
 
 # Fallback to generating digest if cache missing/stale
 if [ -z "$HOT_DIGEST" ] && [ -x "$HOT_DIGEST_CMD" ]; then
-    HOT_DIGEST=$("$HOT_DIGEST_CMD" --hours 12 --no-ollama --output "$HOT_DIGEST_CACHE" --cache-ttl "$HOT_DIGEST_CACHE_TTL" 2>/dev/null || echo "")
+    HOT_DIGEST=$("$HOT_DIGEST_CMD" --hours auto --no-ollama --output "$HOT_DIGEST_CACHE" --cache-ttl "$HOT_DIGEST_CACHE_TTL" 2>/dev/null || echo "")
     HOT_DIGEST_SOURCE="script"
 fi
 

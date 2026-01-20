@@ -589,9 +589,9 @@ final class MemoryContext {
     /// Returns ~2-4K tokens of recent activity across ALL surfaces (iMessage, CLI, wake, etc.)
     /// This enables continuity: iMessage sessions know about CLI work, and vice versa
     ///
-    /// - Parameter hours: Number of hours to look back (default 12)
+    /// - Parameter hours: Number of hours to look back, or "auto" for adaptive windowing
     /// - Returns: Formatted markdown digest, or nil if unavailable
-    func buildHotDigest(hours: Int = 12) -> String? {
+    func buildHotDigest(hours: String = "auto") -> String? {
         if let cached = loadHotDigestCache() {
             log("Hot digest loaded from cache", level: .debug, component: "MemoryContext")
             return cached
@@ -610,7 +610,7 @@ final class MemoryContext {
         defer { try? outputHandle.close() }
 
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [scriptPath, "--hours", String(hours), "--no-ollama"]
+        process.arguments = [scriptPath, "--hours", hours, "--no-ollama"]
         process.standardOutput = outputPipe
         process.standardError = FileHandle.nullDevice
 

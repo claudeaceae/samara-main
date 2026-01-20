@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from lib.hot_digest_builder import build_digest, summarize_with_ollama
+from lib.hot_digest_builder import build_digest, select_window_hours, summarize_with_ollama
 from lib.stream_writer import StreamWriter, EventType, Direction, Surface
 
 
@@ -277,3 +277,21 @@ def test_summarize_with_ollama_fallback_uses_stream_distill(monkeypatch):
     result = summarize_with_ollama(events, model="qwen3:8b")
     assert "CLI activity:" in result
     assert "Did one thing" in result
+
+
+def test_select_window_hours_shrinks_for_dense_activity():
+    metrics = {"long_rate": 20.0, "velocity": 3.0}
+    window = select_window_hours(metrics, base_hours=12.0, min_hours=2.0, max_hours=24.0, target_rate=10.0)
+    assert window == pytest.approx(4.24, rel=0.05)
+
+
+def test_select_window_hours_expands_for_quiet_activity():
+    metrics = {"long_rate": 1.0, "velocity": 0.5}
+    window = select_window_hours(metrics, base_hours=12.0, min_hours=2.0, max_hours=24.0, target_rate=10.0)
+    assert window == 24.0
+
+
+def test_select_window_hours_defaults_to_base():
+    metrics = {"long_rate": 10.0, "velocity": 1.0}
+    window = select_window_hours(metrics, base_hours=12.0, min_hours=2.0, max_hours=24.0, target_rate=10.0)
+    assert window == pytest.approx(12.0)

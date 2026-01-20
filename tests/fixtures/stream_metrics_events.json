@@ -1,0 +1,31 @@
+[
+  {"id": "evt_01", "timestamp": "2026-01-19T11:35:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Short 1", "distilled": false},
+  {"id": "evt_02", "timestamp": "2026-01-19T11:40:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Short 2", "distilled": false},
+  {"id": "evt_03", "timestamp": "2026-01-19T11:45:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Short 3", "distilled": false},
+  {"id": "evt_04", "timestamp": "2026-01-19T11:50:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Short 4", "distilled": false},
+  {"id": "evt_05", "timestamp": "2026-01-19T11:55:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Short 5", "distilled": false},
+  {"id": "evt_06", "timestamp": "2026-01-19T11:59:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Short 6", "distilled": false},
+
+  {"id": "evt_07", "timestamp": "2026-01-19T10:15:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Mid 1", "distilled": false},
+  {"id": "evt_08", "timestamp": "2026-01-19T10:30:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Mid 2", "distilled": false},
+  {"id": "evt_09", "timestamp": "2026-01-19T10:45:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Mid 3", "distilled": false},
+  {"id": "evt_10", "timestamp": "2026-01-19T11:00:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Mid 4", "distilled": false},
+  {"id": "evt_11", "timestamp": "2026-01-19T11:10:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Mid 5", "distilled": false},
+  {"id": "evt_12", "timestamp": "2026-01-19T11:20:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Mid 6", "distilled": false},
+
+  {"id": "evt_13", "timestamp": "2026-01-19T00:30:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Long 1", "distilled": false},
+  {"id": "evt_14", "timestamp": "2026-01-19T01:00:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Long 2", "distilled": false},
+  {"id": "evt_15", "timestamp": "2026-01-19T02:00:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Long 3", "distilled": false},
+  {"id": "evt_16", "timestamp": "2026-01-19T03:00:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Long 4", "distilled": false},
+  {"id": "evt_17", "timestamp": "2026-01-19T04:00:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Long 5", "distilled": false},
+  {"id": "evt_18", "timestamp": "2026-01-19T05:00:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Long 6", "distilled": false},
+  {"id": "evt_19", "timestamp": "2026-01-19T06:00:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Long 7", "distilled": false},
+  {"id": "evt_20", "timestamp": "2026-01-19T07:00:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Long 8", "distilled": false},
+  {"id": "evt_21", "timestamp": "2026-01-19T08:00:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Long 9", "distilled": false},
+  {"id": "evt_22", "timestamp": "2026-01-19T09:00:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Long 10", "distilled": false},
+  {"id": "evt_23", "timestamp": "2026-01-19T09:30:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Long 11", "distilled": false},
+  {"id": "evt_24", "timestamp": "2026-01-19T09:45:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Long 12", "distilled": false},
+
+  {"id": "evt_25", "timestamp": "2026-01-18T23:00:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Outside 1", "distilled": false},
+  {"id": "evt_26", "timestamp": "2026-01-18T20:00:00Z", "surface": "cli", "type": "interaction", "direction": "internal", "summary": "Outside 2", "distilled": false}
+]

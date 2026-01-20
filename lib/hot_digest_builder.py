@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from lib.mind_paths import get_mind_path
 from lib.stream_distill import build_narrative
+from lib.stream_metrics import compute_event_metrics, filter_events_by_hours
 from lib.stream_writer import StreamWriter, Surface
 
 # Surface categories for different formatting treatment
@@ -84,6 +85,84 @@ def format_time_ago(timestamp: str) -> str:
             return f"{int(delta.total_seconds() // 86400)}d ago"
     except (ValueError, TypeError):
         return "recently"
+
+
+def get_now() -> datetime:
+    """Get current time with optional override for deterministic tests."""
+    now_override = os.environ.get("HOT_DIGEST_NOW")
+    if now_override:
+        try:
+            return datetime.fromisoformat(now_override.replace("Z", "+00:00"))
+        except ValueError:
+            return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc)
+
+
+def clamp(value: float, min_value: float, max_value: float) -> float:
+    """Clamp a value within [min_value, max_value]."""
+    return max(min_value, min(max_value, value))
+
+
+def format_window_hours(value: float) -> str:
+    """Format window hours for headers (avoid noisy decimals)."""
+    rounded = round(value, 1)
+    if abs(rounded - round(rounded)) < 0.05:
+        return str(int(round(rounded)))
+    return f"{rounded:.1f}"
+
+
+def select_window_hours(
+    metrics: dict[str, float],
+    base_hours: float = 12.0,
+    min_hours: float = 2.0,
+    max_hours: float = 24.0,
+    target_rate: float = 10.0,
+    rate_floor: float = 0.5,
+    velocity_floor: float = 0.5,
+) -> float:
+    """Select adaptive window hours using density and velocity."""
+    long_rate = float(metrics.get("long_rate", 0.0) or 0.0)
+    velocity = float(metrics.get("velocity", 0.0) or 0.0)
+
+    density_scale = clamp((target_rate / max(long_rate, rate_floor)) ** 0.5, 0.5, 2.0)
+    velocity_scale = clamp(1.0 / max(velocity, velocity_floor), 0.5, 1.5)
+
+    window_hours = base_hours * density_scale * velocity_scale
+    return clamp(window_hours, min_hours, max_hours)
+
+
+def resolve_window_hours(
+    events: list[dict[str, Any]],
+    now: datetime,
+    base_hours: float = 12.0,
+    min_hours: float = 2.0,
+    max_hours: float = 24.0,
+    target_rate: float = 10.0,
+    short_window_hours: float = 0.5,
+    mid_window_hours: float = 2.0,
+    long_window_hours: float = 12.0,
+    rate_floor: float = 0.5,
+    velocity_floor: float = 0.5,
+) -> tuple[float, dict[str, float]]:
+    """Compute adaptive window hours and return metrics."""
+    metrics = compute_event_metrics(
+        events,
+        now=now,
+        short_window_hours=short_window_hours,
+        mid_window_hours=mid_window_hours,
+        long_window_hours=long_window_hours,
+        rate_floor=rate_floor,
+    )
+    window_hours = select_window_hours(
+        metrics,
+        base_hours=base_hours,
+        min_hours=min_hours,
+        max_hours=max_hours,
+        target_rate=target_rate,
+        rate_floor=rate_floor,
+        velocity_floor=velocity_floor,
+    )
+    return window_hours, metrics
 
 
 def group_events_by_window(
@@ -512,11 +591,16 @@ def build_sense_section(events: list[dict[str, Any]], token_budget: int) -> str:
 
 
 def build_digest(
-    hours: int = 12,
+    hours: int | float | str = 12,
     max_tokens: int = 3000,
     use_ollama: bool = True,
     ollama_model: str = "qwen3:8b",
-) -> str:
+    auto_min_hours: float = 2.0,
+    auto_max_hours: float = 24.0,
+    auto_base_hours: float = 12.0,
+    auto_target_rate: float = 10.0,
+    return_metadata: bool = False,
+) -> str | tuple[str, dict[str, Any]]:
     """
     Build a hot digest from recent events with priority-based token budgeting.
 
@@ -533,78 +617,132 @@ def build_digest(
         - System Events (webhook, location) - 15% budget
     """
     writer = StreamWriter()
-    events = writer.query(hours=hours, include_distilled=False)
+    now = get_now()
     open_threads = load_open_threads()
 
+    resolved_hours: float
+    metrics: Optional[dict[str, float]] = None
+    all_events: list[dict[str, Any]]
+
+    if isinstance(hours, str) and hours.lower() == "auto":
+        all_events = writer.query(hours=auto_max_hours, include_distilled=False)
+        resolved_hours, metrics = resolve_window_hours(
+            all_events,
+            now=now,
+            base_hours=auto_base_hours,
+            min_hours=auto_min_hours,
+            max_hours=auto_max_hours,
+            target_rate=auto_target_rate,
+        )
+        events = filter_events_by_hours(all_events, now, resolved_hours)
+    else:
+        try:
+            resolved_hours = float(hours)
+        except (TypeError, ValueError):
+            resolved_hours = 12.0
+        all_events = writer.query(hours=resolved_hours, include_distilled=False)
+        events = all_events
+
     if not events and not open_threads:
+        if return_metadata:
+            metadata: dict[str, Any] = {"window_hours": resolved_hours}
+            if metrics is not None:
+                metadata["metrics"] = metrics
+            return "", metadata
         return ""
 
-    # Categorize events by surface type
-    conversational_events: list[dict[str, Any]] = []
-    activity_events: list[dict[str, Any]] = []
-    sense_events: list[dict[str, Any]] = []
+    def build_for_events(
+        window_events: list[dict[str, Any]],
+        window_hours: float,
+    ) -> str:
+        # Categorize events by surface type
+        conversational_events: list[dict[str, Any]] = []
+        activity_events: list[dict[str, Any]] = []
+        sense_events: list[dict[str, Any]] = []
 
-    for event in events:
-        surface = event.get("surface", "unknown")
-        if surface in CONVERSATIONAL_SURFACES:
-            conversational_events.append(event)
-        elif surface in ACTIVITY_SURFACES:
-            activity_events.append(event)
-        else:
-            sense_events.append(event)
+        for event in window_events:
+            surface = event.get("surface", "unknown")
+            if surface in CONVERSATIONAL_SURFACES:
+                conversational_events.append(event)
+            elif surface in ACTIVITY_SURFACES:
+                activity_events.append(event)
+            else:
+                sense_events.append(event)
 
-    # Calculate token budgets by priority
-    header_budget = 100  # Reserve for header
-    open_section = build_open_threads_section(open_threads)
-    open_tokens = estimate_tokens(open_section) if open_section else 0
-    available = max_tokens - header_budget - open_tokens
-    if available < 0:
-        available = 0
+        # Calculate token budgets by priority
+        header_budget = 100  # Reserve for header
+        open_section = build_open_threads_section(open_threads)
+        open_tokens = estimate_tokens(open_section) if open_section else 0
+        available = max_tokens - header_budget - open_tokens
+        if available < 0:
+            available = 0
 
-    conv_budget = int(available * TOKEN_WEIGHTS["conversational"])
-    activity_budget = int(available * TOKEN_WEIGHTS["activity"])
-    sense_budget = int(available * TOKEN_WEIGHTS["sense"])
+        conv_budget = int(available * TOKEN_WEIGHTS["conversational"])
+        activity_budget = int(available * TOKEN_WEIGHTS["activity"])
+        sense_budget = int(available * TOKEN_WEIGHTS["sense"])
 
-    # Build header
-    digest_lines = [
-        f"## Recent Activity (last {hours}h)\n",
-        "*Background context from memory. This is NOT the current conversation.*\n",
-    ]
+        # Build header
+        hours_label = format_window_hours(window_hours)
+        digest_lines = [
+            f"## Recent Activity (last {hours_label}h)\n",
+            "*Background context from memory. This is NOT the current conversation.*\n",
+        ]
 
-    # Build sections in priority order
-    sections = []
+        # Build sections in priority order
+        sections = []
 
-    # 0. Open threads from state (highest visibility)
-    if open_section:
-        sections.append(open_section)
+        # 0. Open threads from state (highest visibility)
+        if open_section:
+            sections.append(open_section)
 
-    # 1. Conversational section (highest priority - most important for continuity)
-    if conversational_events:
-        conv_section = build_conversational_section(
-            conversational_events, conv_budget, use_ollama, ollama_model
-        )
-        if conv_section:
-            sections.append(conv_section)
+        # 1. Conversational section (highest priority - most important for continuity)
+        if conversational_events:
+            conv_section = build_conversational_section(
+                conversational_events, conv_budget, use_ollama, ollama_model
+            )
+            if conv_section:
+                sections.append(conv_section)
 
-    # 2. Activity section (CLI/wake sessions)
-    if activity_events:
-        activity_section = build_activity_section(
-            activity_events, activity_budget, use_ollama, ollama_model
-        )
-        if activity_section:
-            sections.append(activity_section)
+        # 2. Activity section (CLI/wake sessions)
+        if activity_events:
+            activity_section = build_activity_section(
+                activity_events, activity_budget, use_ollama, ollama_model
+            )
+            if activity_section:
+                sections.append(activity_section)
 
-    # 3. Sense section (system events - lowest priority, compact)
-    if sense_events:
-        sense_section = build_sense_section(sense_events, sense_budget)
-        if sense_section:
-            sections.append(sense_section)
+        # 3. Sense section (system events - lowest priority, compact)
+        if sense_events:
+            sense_section = build_sense_section(sense_events, sense_budget)
+            if sense_section:
+                sections.append(sense_section)
 
-    # Assemble digest
-    if sections:
-        digest_lines.extend(sections)
+        # Assemble digest
+        if sections:
+            digest_lines.extend(sections)
 
-    return "\n".join(digest_lines)
+        return "\n".join(digest_lines)
+
+    digest = ""
+    if isinstance(hours, str) and hours.lower() == "auto":
+        window_hours = resolved_hours
+        for _ in range(6):
+            digest = build_for_events(events, window_hours)
+            if estimate_tokens(digest) <= max_tokens or window_hours <= auto_min_hours:
+                break
+            window_hours = max(auto_min_hours, window_hours * 0.8)
+            events = filter_events_by_hours(all_events, now, window_hours)
+        resolved_hours = window_hours
+    else:
+        digest = build_for_events(events, resolved_hours)
+
+    if return_metadata:
+        metadata: dict[str, Any] = {"window_hours": resolved_hours}
+        if metrics is not None:
+            metadata["metrics"] = metrics
+        return digest, metadata
+
+    return digest
 
 
 def read_cached_output(output_path: Path, cache_ttl: int) -> Optional[str]:
@@ -634,7 +772,35 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Build hot digest from recent events")
-    parser.add_argument("--hours", type=int, default=12, help="Hours to look back")
+    parser.add_argument(
+        "--hours",
+        default="12",
+        help="Hours to look back (number) or 'auto' for adaptive windowing",
+    )
+    parser.add_argument(
+        "--min-hours",
+        type=float,
+        default=2.0,
+        help="Minimum hours for auto windowing",
+    )
+    parser.add_argument(
+        "--max-hours",
+        type=float,
+        default=24.0,
+        help="Maximum hours for auto windowing",
+    )
+    parser.add_argument(
+        "--base-hours",
+        type=float,
+        default=12.0,
+        help="Base hours for auto windowing",
+    )
+    parser.add_argument(
+        "--target-rate",
+        type=float,
+        default=10.0,
+        help="Target events/hour for auto windowing",
+    )
     parser.add_argument("--max-tokens", type=int, default=3000, help="Max output tokens")
     parser.add_argument("--no-ollama", action="store_true", help="Disable Ollama summarization")
     parser.add_argument("--model", default="qwen3:8b", help="Ollama model to use")
@@ -663,12 +829,36 @@ def main():
             print(cached_digest)
         return
 
-    digest = build_digest(
-        hours=args.hours,
-        max_tokens=args.max_tokens,
-        use_ollama=not args.no_ollama,
-        ollama_model=args.model,
-    )
+    hours_value: int | float | str = args.hours
+    if isinstance(hours_value, str) and hours_value.lower() != "auto":
+        try:
+            hours_value = float(hours_value)
+        except ValueError:
+            hours_value = 12.0
+
+    if args.format == "json":
+        digest, metadata = build_digest(
+            hours=hours_value,
+            max_tokens=args.max_tokens,
+            use_ollama=not args.no_ollama,
+            ollama_model=args.model,
+            auto_min_hours=args.min_hours,
+            auto_max_hours=args.max_hours,
+            auto_base_hours=args.base_hours,
+            auto_target_rate=args.target_rate,
+            return_metadata=True,
+        )
+    else:
+        digest = build_digest(
+            hours=hours_value,
+            max_tokens=args.max_tokens,
+            use_ollama=not args.no_ollama,
+            ollama_model=args.model,
+            auto_min_hours=args.min_hours,
+            auto_max_hours=args.max_hours,
+            auto_base_hours=args.base_hours,
+            auto_target_rate=args.target_rate,
+        )
 
     if args.output and is_digest_content(digest):
         try:
@@ -678,15 +868,13 @@ def main():
             pass
 
     if args.format == "json":
-        print(
-            json.dumps(
-                {
-                    "digest": digest,
-                    "tokens_estimate": estimate_tokens(digest),
-                    "cached": False,
-                }
-            )
-        )
+        output = {
+            "digest": digest,
+            "tokens_estimate": estimate_tokens(digest),
+            "cached": False,
+        }
+        output.update(metadata)
+        print(json.dumps(output))
     else:
         if digest:
             print(digest)
