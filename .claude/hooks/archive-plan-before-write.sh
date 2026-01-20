@@ -6,7 +6,7 @@
 # for decision archaeology and intent preservation.
 #
 # Input: JSON with tool_name and tool_input on stdin
-# Output: JSON with decision (allow) - we archive, never block
+# Output: JSON with hookSpecificOutput.permissionDecision (allow) - we archive, never block
 #
 # Archive location: ~/.claude/plans/archive/
 # Archive naming: {original-name}-{YYYY-MM-DD-HHMMSS}.md
@@ -18,26 +18,26 @@ FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null)
 
 # Only check Write and Edit tools
 if [ "$TOOL_NAME" != "Write" ] && [ "$TOOL_NAME" != "Edit" ]; then
-    echo '{"decision": "allow"}'
+    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}'
     exit 0
 fi
 
 # Only care about files in ~/.claude/plans/
 PLANS_DIR="$HOME/.claude/plans"
 if [[ ! "$FILE_PATH" == "$PLANS_DIR"/* ]]; then
-    echo '{"decision": "allow"}'
+    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}'
     exit 0
 fi
 
 # Don't archive files in the archive directory itself
 if [[ "$FILE_PATH" == "$PLANS_DIR/archive/"* ]]; then
-    echo '{"decision": "allow"}'
+    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}'
     exit 0
 fi
 
 # If file doesn't exist yet, nothing to archive
 if [ ! -f "$FILE_PATH" ]; then
-    echo '{"decision": "allow"}'
+    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}'
     exit 0
 fi
 
@@ -59,8 +59,8 @@ if [ $? -eq 0 ]; then
     echo "*Archived at $(date '+%Y-%m-%d %H:%M:%S') before overwrite*" >> "$ARCHIVE_PATH"
 
     # Build JSON with jq to handle special characters in paths
-    jq -n --arg path "$ARCHIVE_PATH" '{decision: "allow", message: ("Archived previous version to " + $path)}' 2>/dev/null || echo '{"decision": "allow"}'
+    jq -n --arg path "$ARCHIVE_PATH" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "allow", additionalContext: ("Archived previous version to " + $path)}}' 2>/dev/null || echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}'
 else
     # Archive failed, but don't block - just warn
-    jq -n --arg path "$FILE_PATH" '{decision: "allow", message: ("Warning: Failed to archive " + $path + " before overwrite")}' 2>/dev/null || echo '{"decision": "allow"}'
+    jq -n --arg path "$FILE_PATH" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "allow", additionalContext: ("Warning: Failed to archive " + $path + " before overwrite")}}' 2>/dev/null || echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}'
 fi

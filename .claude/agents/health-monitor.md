@@ -2,10 +2,15 @@
 name: health-monitor
 description: Background health monitoring agent. Runs non-blocking system checks and surfaces alerts only when issues are found. Use when health checks need to run in background or when periodic monitoring is requested.
 model: haiku
+permissionMode: auto
 tools:
   - Bash
   - Read
   - Grep
+hooks:
+  Stop:
+    - type: command
+      command: "echo \"[$(date '+%Y-%m-%d %H:%M:%S')] Health check completed\" >> ~/.claude-mind/logs/health-checks.log"
 ---
 
 You are a background health monitoring agent for the Samara organism. Your purpose is to run health checks non-blocking and surface alerts only when problems are found.

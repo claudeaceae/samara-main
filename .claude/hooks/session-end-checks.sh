@@ -113,21 +113,20 @@ fi
 
 # === BUILD OUTPUT ===
 
-# If iteration is blocking, return block decision
+# If iteration is blocking, return block decision (Stop hook format per docs)
 if [ -n "$BLOCK_REASON" ]; then
     # Build entire JSON with jq to avoid shell escaping issues
+    # Stop hooks only support: decision, reason (not message)
     if [ -n "$MESSAGES" ]; then
-        jq -n --arg reason "$(echo -e "$BLOCK_REASON")" --arg msg "$(echo -e "$MESSAGES")" \
-            '{decision: "block", reason: $reason, message: $msg}' 2>/dev/null || echo '{"decision": "block", "reason": "Check failed"}'
+        # Combine block reason with informational messages
+        COMBINED_REASON="$BLOCK_REASON\n\nAdditional info:\n$MESSAGES"
+        echo -e "$COMBINED_REASON" | jq -Rs '{decision: "block", reason: .}' 2>/dev/null || echo '{"decision": "block", "reason": "Check failed"}'
     else
         echo -e "$BLOCK_REASON" | jq -Rs '{decision: "block", reason: .}' 2>/dev/null || echo '{"decision": "block", "reason": "Check failed"}'
     fi
     exit 0
 fi
 
-# No blocking, just informational messages
-if [ -n "$MESSAGES" ]; then
-    echo -e "$MESSAGES" | jq -Rs '{ok: true, message: .}' 2>/dev/null || echo '{"ok": true}'
-else
-    echo '{"ok": true}'
-fi
+# No blocking - Stop hooks don't have a way to inject context, so just return continue
+# The informational messages won't be displayed but could be logged
+echo '{"continue": true}'

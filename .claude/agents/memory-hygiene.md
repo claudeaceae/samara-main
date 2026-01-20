@@ -6,6 +6,10 @@ tools:
   - Read
   - Grep
   - Glob
+hooks:
+  Stop:
+    - type: command
+      command: "echo \"[$(date '+%Y-%m-%d %H:%M:%S')] Memory hygiene completed\" >> ~/.claude-mind/logs/hygiene-checks.log"
 ---
 
 # Memory Hygiene Agent

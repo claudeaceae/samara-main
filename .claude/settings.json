@@ -20,6 +20,11 @@
             "type": "command",
             "command": "/Users/claude/Developer/samara-main/.claude/hooks/hydrate-session.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "/Users/claude/Developer/samara-main/.claude/hooks/setup-maintenance.sh",
+            "timeout": 30
           }
         ]
       }
@@ -110,8 +115,9 @@
         ]
       }
     ],
-    "Setup": [
+    "PreCompact": [
       {
+        "matcher": "manual|auto",
         "hooks": [
           {
             "type": "command",

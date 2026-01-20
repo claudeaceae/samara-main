@@ -18,6 +18,13 @@ MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 LOG_FILE="$MIND_PATH/logs/hydrate-session.log"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Hook started" >> "$LOG_FILE" 2>/dev/null
 
+# 0. Generate dynamic voice style (runs before session context loads)
+VOICE_GEN="$MIND_PATH/bin/generate-voice-style"
+if [ -x "$VOICE_GEN" ]; then
+    "$VOICE_GEN" --quick >> "$LOG_FILE" 2>&1 || true
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Voice style generated" >> "$LOG_FILE" 2>/dev/null
+fi
+
 INPUT=$(cat)
 
 SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null || echo "startup")
@@ -27,11 +34,63 @@ CONTEXT=""
 
 # 0. Hot digest from unified event stream (contiguous memory foundation)
 HOT_DIGEST_CMD="$MIND_PATH/bin/build-hot-digest"
-if [ -x "$HOT_DIGEST_CMD" ]; then
-    HOT_DIGEST=$("$HOT_DIGEST_CMD" --hours 12 --no-ollama 2>/dev/null || echo "")
-    if [ -n "$HOT_DIGEST" ] && [ "$HOT_DIGEST" != "No recent events found." ]; then
-        CONTEXT+="$HOT_DIGEST\n\n"
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Injected hot digest" >> "$LOG_FILE" 2>/dev/null
+HOT_DIGEST_CACHE="$MIND_PATH/state/hot-digest.md"
+HOT_DIGEST_CACHE_TTL=900
+HOT_DIGEST=""
+HOT_DIGEST_SOURCE=""
+
+# Prefer cached digest if fresh (keep SessionStart fast)
+if [ -f "$HOT_DIGEST_CACHE" ]; then
+    CACHE_MTIME=$(stat -f %m "$HOT_DIGEST_CACHE" 2>/dev/null || echo 0)
+    if [ "$CACHE_MTIME" != "0" ]; then
+        CACHE_AGE=$(( $(date +%s) - CACHE_MTIME ))
+    else
+        CACHE_AGE=0
+    fi
+
+    if [ "$CACHE_AGE" -le "$HOT_DIGEST_CACHE_TTL" ]; then
+        HOT_DIGEST=$(cat "$HOT_DIGEST_CACHE" 2>/dev/null || echo "")
+        HOT_DIGEST_SOURCE="cache"
+    fi
+fi
+
+# Fallback to generating digest if cache missing/stale
+if [ -z "$HOT_DIGEST" ] && [ -x "$HOT_DIGEST_CMD" ]; then
+    HOT_DIGEST=$("$HOT_DIGEST_CMD" --hours 12 --no-ollama --output "$HOT_DIGEST_CACHE" --cache-ttl "$HOT_DIGEST_CACHE_TTL" 2>/dev/null || echo "")
+    HOT_DIGEST_SOURCE="script"
+fi
+
+if [ -n "$HOT_DIGEST" ] && [ "$HOT_DIGEST" != "No recent events found." ]; then
+    CONTEXT+="$HOT_DIGEST\n\n"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Injected hot digest ($HOT_DIGEST_SOURCE)" >> "$LOG_FILE" 2>/dev/null
+fi
+
+# Fallback: include open threads when no digest is available
+if [ -z "$HOT_DIGEST" ] || [ "$HOT_DIGEST" = "No recent events found." ]; then
+    THREADS_FILE="$MIND_PATH/state/threads.json"
+    if [ -f "$THREADS_FILE" ]; then
+        OPEN_THREADS=$(jq -r '
+            def status: ((.status // .state // "") | ascii_downcase);
+            def closed:
+                (.done == true) or (.closed == true) or (.archived == true)
+                or (status == "closed" or status == "done" or status == "resolved"
+                    or status == "complete" or status == "completed" or status == "archived");
+            (if type == "array" then . else .threads // [] end)
+            | map(select((closed) | not))
+            | .[0:5]
+            | map(.title // .summary // .name // "")
+            | map(select(. != ""))
+            | .[]
+        ' "$THREADS_FILE" 2>/dev/null)
+        if [ -n "$OPEN_THREADS" ]; then
+            CONTEXT+="## Open Threads\n\n"
+            while IFS= read -r thread; do
+                if [ -n "$thread" ]; then
+                    CONTEXT+="- $thread\n"
+                fi
+            done <<< "$OPEN_THREADS"
+            CONTEXT+="\n"
+        fi
     fi
 fi
 
@@ -221,12 +280,12 @@ case "$SOURCE" in
         ;;
 esac
 
-# Output JSON with additionalContext
+# Output JSON with additionalContext (SessionStart format per docs)
 if [ -n "$CONTEXT" ]; then
     # Build entire JSON with jq to avoid shell escaping issues
-    echo -e "$CONTEXT" | jq -Rs '{hookSpecificOutput: {additionalContext: .}}' 2>/dev/null || echo '{"ok": true}'
+    echo -e "$CONTEXT" | jq -Rs '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: .}}' 2>/dev/null || echo '{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "Session hydrated"}}'
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Hook completed with context (source=$SOURCE)" >> "$LOG_FILE" 2>/dev/null
 else
-    echo '{"ok": true}'
+    echo '{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": ""}}'
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Hook completed (no context, source=$SOURCE)" >> "$LOG_FILE" 2>/dev/null
 fi

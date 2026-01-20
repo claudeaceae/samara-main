@@ -9,7 +9,7 @@
 # Based on user correction: "Should have just said welcome back without the photo"
 #
 # Input: JSON with tool_name, tool_input on stdin
-# Output: JSON with decision (allow/block)
+# Output: JSON with hookSpecificOutput.permissionDecision (allow/deny)
 
 # Note: NOT using set -e to ensure we always output valid JSON
 
@@ -21,7 +21,7 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""' 2>/dev/null)
 
 # Only check Bash and Skill tools
 if [ "$TOOL_NAME" != "Bash" ] && [ "$TOOL_NAME" != "Skill" ]; then
-    echo '{"decision": "allow"}'
+    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}'
     exit 0
 fi
 
@@ -51,7 +51,7 @@ if [ "$TOOL_NAME" = "Skill" ]; then
 fi
 
 if [ "$IS_MEDIA_CAPTURE" = false ]; then
-    echo '{"decision": "allow"}'
+    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}'
     exit 0
 fi
 
@@ -65,7 +65,7 @@ EXPLICIT_REQUEST_MARKER="$MIND_PATH/state/.media-request-explicit"
 if [ -f "$EXPLICIT_REQUEST_MARKER" ]; then
     MARKER_AGE=$(($(date +%s) - $(stat -f %m "$EXPLICIT_REQUEST_MARKER" 2>/dev/null || echo 0)))
     if [ "$MARKER_AGE" -lt 300 ]; then
-        echo '{"decision": "allow"}'
+        echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}'
         exit 0
     fi
 fi
@@ -81,4 +81,4 @@ if [ -f "$EPISODE_FILE" ]; then
     echo "- $(date '+%H:%M') [Hook] Blocked autonomous $CAPTURE_TYPE capture (ask first)" >> "$EPISODE_FILE"
 fi
 
-echo "{\"decision\": \"block\", \"reason\": \"Privacy-sensitive action ($CAPTURE_TYPE capture) requires explicit user request. Ask first before capturing photos or screenshots autonomously.\"}"
+echo "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"deny\", \"permissionDecisionReason\": \"Privacy-sensitive action ($CAPTURE_TYPE capture) requires explicit user request. Ask first before capturing photos or screenshots autonomously.\"}}"

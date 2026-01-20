@@ -95,7 +95,26 @@
       "Bash(gh ssh-key:*)",
       "Bash(gh config:*)",
       "Bash(ln:*)",
-      "Bash(~/.claude-mind/bin/sync-organism:*)"
+      "Bash(~/.claude-mind/bin/sync-organism:*)",
+      "Bash(md5:*)",
+      "Bash(~/.claude-mind/bin/stream query:*)",
+      "Bash(~/.claude-mind/bin/build-hot-digest:*)",
+      "Bash(git push:*)",
+      "Bash(PYTHONPATH=. uv run pytest:*)",
+      "Bash(bash -c:*)",
+      "Bash(bash:*)",
+      "Bash(bash -n:*)",
+      "Bash(ANTHROPIC_AUTH_TOKEN=ollama ANTHROPIC_BASE_URL=http://localhost:11434 timeout 30 claude --model ollama:qwen3:8b -p \"Say hello in exactly 5 words\" --max-turns 1 --dangerously-skip-permissions)",
+      "Bash(brew upgrade:*)",
+      "Bash(brew info:*)",
+      "Bash(brew services restart:*)",
+      "Bash(ollama:*)",
+      "Bash(ANTHROPIC_AUTH_TOKEN=ollama ANTHROPIC_BASE_URL=http://localhost:11434 timeout 60 claude --model ollama:qwen3:8b -p \"Say exactly: Hello world\" --max-turns 1 --dangerously-skip-permissions)",
+      "Bash(ANTHROPIC_AUTH_TOKEN=ollama ANTHROPIC_BASE_URL=http://localhost:11434 timeout 60 claude --model qwen3:8b -p \"Say exactly: Hello world\" --max-turns 1 --dangerously-skip-permissions)",
+      "Bash(~/.claude-mind/bin/local-maintenance health-check:*)",
+      "Bash(set -x)",
+      "Bash(set +x)",
+      "Bash(ANTHROPIC_AUTH_TOKEN=ollama ANTHROPIC_BASE_URL=http://localhost:11434 timeout 60 claude --model qwen3:8b -p \"Use the Bash tool to run ''date +%Y-%m-%d'' and tell me the result\" --max-turns 3 --dangerously-skip-permissions)"
     ]
   },
   "enabledPlugins": {
