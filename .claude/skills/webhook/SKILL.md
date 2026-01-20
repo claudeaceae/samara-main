@@ -3,6 +3,7 @@
 ---
 name: webhook
 description: Manage webhook sources - list, add, test, and view incoming events
+context: fork
 triggers:
   - webhook
   - add webhook
