@@ -8,6 +8,7 @@ Commands:
     stream mark-distilled <event_id> [<event_id>...]
     stream archive [--days 30]
     stream stats
+    stream validate
 
 Usage:
     ./stream_cli.py write --surface cli --type interaction --direction inbound --summary "User asked..."
@@ -32,6 +33,14 @@ from lib.stream_writer import (
     EventType,
     Direction,
 )
+from lib.stream_validator import validate_stream_file
+
+def sort_events(events: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Sort events by timestamp (ascending) with ID as a tie-breaker."""
+    return sorted(
+        events,
+        key=lambda e: (e.get("timestamp", ""), e.get("id", "")),
+    )
 
 
 def cmd_write(args: argparse.Namespace) -> int:
@@ -112,6 +121,7 @@ def cmd_query(args: argparse.Namespace) -> int:
         include_distilled=args.include_distilled,
         event_type=event_type,
     )
+    results = sort_events(results)
 
     if args.format == "json":
         print(json.dumps(results, indent=2))
@@ -224,10 +234,39 @@ def cmd_stats(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_validate(args: argparse.Namespace) -> int:
+    """Validate stream events against schema."""
+    writer = StreamWriter()
+    errors, total = validate_stream_file(writer.stream_file)
+
+    result = {
+        "valid": len(errors) == 0,
+        "total_events": total,
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+    if args.format == "json":
+        print(json.dumps(result, indent=2))
+    else:
+        if result["valid"]:
+            print(f"Stream valid ({total} events)")
+        else:
+            print(f"Stream invalid ({len(errors)} issues across {total} events)")
+            for error in errors[:10]:
+                line = error.get("line")
+                event_id = error.get("id", "unknown")
+                detail = "; ".join(error.get("errors", []))
+                print(f"  line {line} [{event_id}]: {detail}")
+
+    return 0
+
+
 def cmd_undistilled(args: argparse.Namespace) -> int:
     """Show undistilled events (for dream cycle)."""
     writer = StreamWriter()
     results = writer.query_undistilled(date=args.date, before_date=args.before)
+    results = sort_events(results)
 
     if args.format == "json":
         print(json.dumps(results, indent=2))
@@ -323,6 +362,10 @@ def main() -> int:
     # stats command
     stats_parser = subparsers.add_parser("stats", help="Show stream statistics")
     stats_parser.set_defaults(func=cmd_stats)
+
+    # validate command
+    validate_parser = subparsers.add_parser("validate", help="Validate stream schema")
+    validate_parser.set_defaults(func=cmd_validate)
 
     # undistilled command
     undistilled_parser = subparsers.add_parser(

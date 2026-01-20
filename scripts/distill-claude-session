@@ -5,18 +5,29 @@
 # IMPORTANT: This writes to episodes (markdown), NOT SQLite.
 # This ensures all Claude contexts (iMessage, autonomous, direct)
 # read from the same unified memory.
-
-set -e
+#
+# ARCHITECTURE: Returns immediately, forks distillation to background.
+# This makes /exit instant while still capturing session memory.
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 LOG_FILE="$MIND_PATH/logs/claude-sessions.log"
 CLAUDE_PATH="${CLAUDE_PATH:-$HOME/.local/bin/claude}"
 
+# Resolve repo root (follow symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
 }
 
-# Read hook input from stdin
+# Read hook input from stdin (must happen before backgrounding)
 HOOK_INPUT=$(cat)
 
 # Parse JSON input
@@ -27,17 +38,20 @@ CWD=$(echo "$HOOK_INPUT" | jq -r '.cwd // empty')
 
 log "SessionEnd hook fired: session=$SESSION_ID reason=$REASON cwd=$CWD"
 
+# === SYNCHRONOUS CHECKS (fast, determine if we should distill) ===
+
 # Skip if no transcript
 if [ -z "$TRANSCRIPT_PATH" ] || [ ! -f "$TRANSCRIPT_PATH" ]; then
     log "No transcript found at $TRANSCRIPT_PATH, skipping"
+    echo '{"ok": true}'
     exit 0
 fi
 
 # Skip distillation sessions (prevent infinite recursion!)
-# When this script invokes Claude for summarization, that session ends and triggers this hook again
 FIRST_PROMPT=$(head -20 "$TRANSCRIPT_PATH" | jq -r 'select(.type == "user") | .message.content' 2>/dev/null | head -1)
 if [[ "$FIRST_PROMPT" == *"Summarize this Claude Code session for memory consolidation"* ]]; then
     log "Skipping distillation session (would cause infinite loop)"
+    echo '{"ok": true}'
     exit 0
 fi
 
@@ -45,45 +59,59 @@ fi
 TRANSCRIPT_SIZE=$(wc -c < "$TRANSCRIPT_PATH")
 if [ "$TRANSCRIPT_SIZE" -lt 500 ]; then
     log "Transcript too short ($TRANSCRIPT_SIZE bytes), skipping distillation"
+    echo '{"ok": true}'
     exit 0
 fi
 
-log "Processing transcript: $TRANSCRIPT_PATH ($TRANSCRIPT_SIZE bytes)"
+# === RETURN IMMEDIATELY, FORK HEAVY WORK TO BACKGROUND ===
 
-# Extract conversation content from JSONL transcript
-# Transcript format: {"type": "user"|"assistant", "message": {"role": "...", "content": "..."}}
-CONVERSATION=""
-while IFS= read -r line; do
-    # Check top-level type field (not .role)
-    TYPE=$(echo "$line" | jq -r '.type // empty')
+log "Forking distillation to background for transcript: $TRANSCRIPT_PATH ($TRANSCRIPT_SIZE bytes)"
 
-    if [ "$TYPE" = "user" ]; then
-        # User content is in .message.content
-        CONTENT=$(echo "$line" | jq -r '.message.content // empty')
-        if [ -n "$CONTENT" ] && [ "$CONTENT" != "null" ]; then
-            CONVERSATION+="[É]: $CONTENT"$'\n\n'
+# Return success to Claude Code immediately
+echo '{"ok": true}'
+
+# Fork the actual distillation work to background
+(
+    # Re-source variables for the subshell
+    MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+    LOG_FILE="$MIND_PATH/logs/claude-sessions.log"
+    CLAUDE_PATH="${CLAUDE_PATH:-$HOME/.local/bin/claude}"
+
+    log() {
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [bg] $1" >> "$LOG_FILE"
+    }
+
+    log "Background distillation started for session $SESSION_ID"
+
+    # Extract conversation content from JSONL transcript
+    CONVERSATION=""
+    while IFS= read -r line; do
+        TYPE=$(echo "$line" | jq -r '.type // empty')
+
+        if [ "$TYPE" = "user" ]; then
+            CONTENT=$(echo "$line" | jq -r '.message.content // empty')
+            if [ -n "$CONTENT" ] && [ "$CONTENT" != "null" ]; then
+                CONVERSATION+="[É]: $CONTENT"$'\n\n'
+            fi
+        elif [ "$TYPE" = "assistant" ]; then
+            CONTENT=$(echo "$line" | jq -r 'if .message.content | type == "array" then (.message.content[] | select(.type == "text") | .text) else .message.content end // empty' 2>/dev/null)
+            if [ -n "$CONTENT" ] && [ "$CONTENT" != "null" ]; then
+                TRUNCATED=$(echo "$CONTENT" | head -c 2000)
+                CONVERSATION+="[Claude]: $TRUNCATED"$'\n\n'
+            fi
         fi
-    elif [ "$TYPE" = "assistant" ]; then
-        # Assistant content is in .message.content, can be array of blocks or string
-        CONTENT=$(echo "$line" | jq -r 'if .message.content | type == "array" then (.message.content[] | select(.type == "text") | .text) else .message.content end // empty' 2>/dev/null)
-        if [ -n "$CONTENT" ] && [ "$CONTENT" != "null" ]; then
-            # Truncate long responses for distillation
-            TRUNCATED=$(echo "$CONTENT" | head -c 2000)
-            CONVERSATION+="[Claude]: $TRUNCATED"$'\n\n'
-        fi
+    done < "$TRANSCRIPT_PATH"
+
+    # Skip if no meaningful conversation extracted
+    if [ ${#CONVERSATION} -lt 100 ]; then
+        log "No meaningful conversation extracted, skipping"
+        exit 0
     fi
-done < "$TRANSCRIPT_PATH"
 
-# Skip if no meaningful conversation extracted
-if [ ${#CONVERSATION} -lt 100 ]; then
-    log "No meaningful conversation extracted, skipping"
-    exit 0
-fi
+    log "Extracted conversation (${#CONVERSATION} chars), generating summary..."
 
-log "Extracted conversation (${#CONVERSATION} chars), generating summary..."
-
-# Build the summarization prompt
-PROMPT=$(cat <<'PROMPT_EOF'
+    # Build the summarization prompt
+    PROMPT=$(cat <<'PROMPT_EOF'
 Summarize this Claude Code session for memory consolidation. Write 3-8 bullet points capturing:
 - What was worked on / accomplished
 - Key decisions made
@@ -101,44 +129,40 @@ Output ONLY the bullet points, no preamble.
 PROMPT_EOF
 )
 
-# Substitute conversation (escape for sed)
-CONVERSATION_ESCAPED=$(printf '%s' "$CONVERSATION" | head -c 30000)
-PROMPT="${PROMPT//%CONVERSATION%/$CONVERSATION_ESCAPED}"
+    CONVERSATION_ESCAPED=$(printf '%s' "$CONVERSATION" | head -c 30000)
+    PROMPT="${PROMPT//%CONVERSATION%/$CONVERSATION_ESCAPED}"
 
-# Create temp file for prompt
-PROMPT_FILE=$(mktemp)
-echo "$PROMPT" > "$PROMPT_FILE"
+    PROMPT_FILE=$(mktemp)
+    echo "$PROMPT" > "$PROMPT_FILE"
 
-# Invoke Claude for summarization (haiku for speed)
-log "Invoking Claude Haiku for summary..."
-SUMMARY=$("$CLAUDE_PATH" -p "$(cat "$PROMPT_FILE")" --output-format text --model haiku 2>/dev/null || echo "")
-rm -f "$PROMPT_FILE"
+    # Invoke Claude for summarization (haiku for speed, with timeout)
+    log "Invoking Claude Haiku for summary..."
+    SUMMARY=$(timeout 60 "$CLAUDE_PATH" -p "$(cat "$PROMPT_FILE")" --output-format text --model haiku 2>/dev/null || echo "")
+    rm -f "$PROMPT_FILE"
 
-if [ -z "$SUMMARY" ]; then
-    log "Summary generation failed, using fallback"
-    SUMMARY="- Direct Claude Code session in $CWD (summary generation failed)"
-fi
+    if [ -z "$SUMMARY" ]; then
+        log "Summary generation failed, using fallback"
+        SUMMARY="- Direct Claude Code session in $CWD (summary generation failed)"
+    fi
 
-log "Generated summary: ${SUMMARY:0:100}..."
+    log "Generated summary: ${SUMMARY:0:100}..."
 
-# Write to today's episode
-TODAY=$(date +%Y-%m-%d)
-EPISODE_FILE="$MIND_PATH/memory/episodes/$TODAY.md"
+    # Write to today's episode
+    TODAY=$(date +%Y-%m-%d)
+    EPISODE_FILE="$MIND_PATH/memory/episodes/$TODAY.md"
 
-# Create episode file if needed
-if [ ! -f "$EPISODE_FILE" ]; then
-    cat > "$EPISODE_FILE" << EOF
+    if [ ! -f "$EPISODE_FILE" ]; then
+        cat > "$EPISODE_FILE" << EOF
 # Episode: $TODAY
 
 Daily log of conversations and observations.
 
 ---
 EOF
-fi
+    fi
 
-# Add session summary to episode
-TIMESTAMP=$(date '+%H:%M')
-cat >> "$EPISODE_FILE" << EOF
+    TIMESTAMP=$(date '+%H:%M')
+    cat >> "$EPISODE_FILE" << EOF
 
 ## $TIMESTAMP [Direct Session]
 
@@ -148,43 +172,39 @@ $SUMMARY
 
 EOF
 
-log "Session summary written to episode: $EPISODE_FILE"
+    log "Session summary written to episode: $EPISODE_FILE"
 
-# ============================================
-# PHASE 2: Write to unified event stream
-# ============================================
+    # ============================================
+    # PHASE 2: Write to unified event stream
+    # ============================================
 
-# Write event to stream for contiguous memory
-STREAM_CMD="$MIND_PATH/bin/stream"
-if [ -x "$STREAM_CMD" ]; then
-    # Create a one-line summary from the bullet points
-    ONE_LINE_SUMMARY=$(echo "$SUMMARY" | head -3 | tr '\n' ' ' | sed 's/^- //' | head -c 200)
+    STREAM_CMD="$MIND_PATH/bin/stream"
+    if [ -x "$STREAM_CMD" ]; then
+        ONE_LINE_SUMMARY=$(echo "$SUMMARY" | head -3 | tr '\n' ' ' | sed 's/^- //' | head -c 200)
 
-    # Write the event
-    "$STREAM_CMD" write \
-        --surface cli \
-        --type interaction \
-        --direction internal \
-        --summary "CLI session: $ONE_LINE_SUMMARY" \
-        --session-id "$SESSION_ID" \
-        --content "$SUMMARY" \
-        --metadata "{\"cwd\": \"$CWD\", \"transcript_size\": $TRANSCRIPT_SIZE}" \
-        >> "$LOG_FILE" 2>&1 && \
-        log "Event written to stream" || \
-        log "Failed to write event to stream (non-fatal)"
-else
-    log "Stream command not found at $STREAM_CMD, skipping stream write"
-fi
+        "$STREAM_CMD" write \
+            --surface cli \
+            --type interaction \
+            --direction internal \
+            --summary "CLI session: $ONE_LINE_SUMMARY" \
+            --session-id "$SESSION_ID" \
+            --content "$SUMMARY" \
+            --metadata "{\"cwd\": \"$CWD\", \"transcript_size\": $TRANSCRIPT_SIZE}" \
+            >> "$LOG_FILE" 2>&1 && \
+            log "Event written to stream" || \
+            log "Failed to write event to stream (non-fatal)"
+    else
+        log "Stream command not found at $STREAM_CMD, skipping stream write"
+    fi
 
-# ============================================
-# PHASE 3: Generate structured handoff
-# ============================================
+    # ============================================
+    # PHASE 3: Generate structured handoff
+    # ============================================
 
-HANDOFF_DIR="$MIND_PATH/state/handoffs"
-mkdir -p "$HANDOFF_DIR"
+    HANDOFF_DIR="$MIND_PATH/state/handoffs"
+    mkdir -p "$HANDOFF_DIR"
 
-# Build handoff prompt - asks for richer context than just bullet points
-HANDOFF_PROMPT=$(cat <<'HANDOFF_PROMPT_EOF'
+    HANDOFF_PROMPT=$(cat <<'HANDOFF_PROMPT_EOF'
 Analyze this Claude Code session and create a structured handoff document.
 Extract:
 1. **Open threads** - Unresolved topics, questions raised, things left hanging
@@ -207,20 +227,20 @@ Session transcript:
 HANDOFF_PROMPT_EOF
 )
 
-# Only generate handoff for substantial sessions
-if [ ${#CONVERSATION} -gt 2000 ]; then
-    log "Generating structured handoff..."
+    # Only generate handoff for substantial sessions
+    if [ ${#CONVERSATION} -gt 2000 ]; then
+        log "Generating structured handoff..."
 
-    HANDOFF_PROMPT="${HANDOFF_PROMPT//%CONVERSATION%/$CONVERSATION_ESCAPED}"
-    HANDOFF_PROMPT_FILE=$(mktemp)
-    echo "$HANDOFF_PROMPT" > "$HANDOFF_PROMPT_FILE"
+        HANDOFF_PROMPT="${HANDOFF_PROMPT//%CONVERSATION%/$CONVERSATION_ESCAPED}"
+        HANDOFF_PROMPT_FILE=$(mktemp)
+        echo "$HANDOFF_PROMPT" > "$HANDOFF_PROMPT_FILE"
 
-    HANDOFF=$("$CLAUDE_PATH" -p "$(cat "$HANDOFF_PROMPT_FILE")" --output-format text --model haiku 2>/dev/null || echo "")
-    rm -f "$HANDOFF_PROMPT_FILE"
+        HANDOFF=$(timeout 60 "$CLAUDE_PATH" -p "$(cat "$HANDOFF_PROMPT_FILE")" --output-format text --model haiku 2>/dev/null || echo "")
+        rm -f "$HANDOFF_PROMPT_FILE"
 
-    if [ -n "$HANDOFF" ] && [ "$HANDOFF" != "" ]; then
-        HANDOFF_FILE="$HANDOFF_DIR/$(date +%Y%m%d-%H%M%S)-${SESSION_ID:0:8}.md"
-        cat > "$HANDOFF_FILE" << HANDOFF_EOF
+        if [ -n "$HANDOFF" ] && [ "$HANDOFF" != "" ]; then
+            HANDOFF_FILE="$HANDOFF_DIR/$(date +%Y%m%d-%H%M%S)-${SESSION_ID:0:8}.md"
+            cat > "$HANDOFF_FILE" << HANDOFF_EOF
 # Session Handoff: $(date '+%Y-%m-%d %H:%M')
 
 **Session ID:** $SESSION_ID
@@ -231,12 +251,52 @@ $HANDOFF
 ---
 *Generated by distill-claude-session*
 HANDOFF_EOF
-        log "Handoff written to: $HANDOFF_FILE"
-    else
-        log "Handoff generation failed or empty"
-    fi
-else
-    log "Session too short for handoff generation (${#CONVERSATION} chars)"
-fi
+            log "Handoff written to: $HANDOFF_FILE"
 
-log "Distillation complete"
+            THREAD_IDS_JSON="[]"
+            if [ -f "$REPO_ROOT/lib/thread_indexer.py" ]; then
+                INDEXER_OUTPUT=$(SAMARA_MIND_PATH="$MIND_PATH" MIND_PATH="$MIND_PATH" \
+                    PYTHONPATH="$REPO_ROOT" python3 "$REPO_ROOT/lib/thread_indexer.py" \
+                    --handoff "$HANDOFF_FILE" --format json 2>> "$LOG_FILE" || echo "")
+                if [ -n "$INDEXER_OUTPUT" ]; then
+                    THREAD_IDS_JSON=$(echo "$INDEXER_OUTPUT" | jq -c '.thread_ids // []' 2>/dev/null || echo "[]")
+                fi
+            fi
+
+            # Write handoff event to stream for cross-surface continuity
+            if [ -x "$STREAM_CMD" ]; then
+                METADATA=$(jq -nc \
+                    --arg handoff_path "$HANDOFF_FILE" \
+                    --argjson transcript_size "$TRANSCRIPT_SIZE" \
+                    --argjson thread_ids "$THREAD_IDS_JSON" \
+                    '{handoff_path: $handoff_path, transcript_size: $transcript_size, thread_ids: $thread_ids}')
+                if [ -z "$METADATA" ]; then
+                    METADATA="{\"handoff_path\": \"$HANDOFF_FILE\", \"transcript_size\": $TRANSCRIPT_SIZE, \"thread_ids\": $THREAD_IDS_JSON}"
+                fi
+
+                "$STREAM_CMD" write \
+                    --surface cli \
+                    --type handoff \
+                    --direction internal \
+                    --summary "CLI handoff generated" \
+                    --session-id "$SESSION_ID" \
+                    --metadata "$METADATA" \
+                    >> "$LOG_FILE" 2>&1 && \
+                    log "Handoff event written to stream" || \
+                    log "Failed to write handoff event to stream (non-fatal)"
+            fi
+        else
+            log "Handoff generation failed or empty"
+        fi
+    else
+        log "Session too short for handoff generation (${#CONVERSATION} chars)"
+    fi
+
+    log "Distillation complete for session $SESSION_ID"
+
+) >> "$LOG_FILE" 2>&1 &
+
+# Disown so the background process isn't tied to this shell
+disown
+
+exit 0

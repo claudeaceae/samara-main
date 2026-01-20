@@ -1,0 +1,23 @@
+#!/bin/bash
+# Stream Audit
+# Usage:
+#   stream-audit [--hours 168] [--digest-hours 12] [--output PATH] [--format json|text]
+
+set -e
+
+# Resolve actual script location (follow symlinks)
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+REPO_ROOT="$(dirname "$SCRIPT_DIR")"
+
+# Use uv run if available, otherwise fall back to python3
+if command -v uv &> /dev/null; then
+    cd "$REPO_ROOT" && PYTHONPATH="$REPO_ROOT" uv run python3 "$REPO_ROOT/lib/stream_audit.py" "$@"
+else
+    cd "$REPO_ROOT" && PYTHONPATH="$REPO_ROOT" python3 "$REPO_ROOT/lib/stream_audit.py" "$@"
+fi

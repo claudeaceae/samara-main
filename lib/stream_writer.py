@@ -79,6 +79,7 @@ class Direction(Enum):
 class Event:
     """A single event in the unified stream."""
 
+    schema_version: str
     id: str
     timestamp: str
     surface: Surface
@@ -93,6 +94,7 @@ class Event:
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
+            "schema_version": self.schema_version,
             "id": self.id,
             "timestamp": self.timestamp,
             "surface": self.surface.value,
@@ -109,6 +111,7 @@ class Event:
     def from_dict(cls, data: dict[str, Any]) -> Event:
         """Create Event from dictionary."""
         return cls(
+            schema_version=data.get("schema_version", "1"),
             id=data["id"],
             timestamp=data["timestamp"],
             surface=Surface(data["surface"]),
@@ -186,6 +189,7 @@ class StreamWriter:
             raise ValueError(f"surface must be a Surface enum, got {type(surface)}")
 
         return Event(
+            schema_version="1",
             id=self._generate_event_id(),
             timestamp=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             surface=surface,

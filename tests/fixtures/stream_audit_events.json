@@ -1,0 +1,38 @@
+[
+  {
+    "id": "evt_1",
+    "timestamp": "2026-01-18T10:00:00Z",
+    "surface": "cli",
+    "type": "interaction",
+    "direction": "internal",
+    "summary": "Updated stream audit",
+    "distilled": false
+  },
+  {
+    "id": "evt_2",
+    "timestamp": "2026-01-18T09:00:00Z",
+    "surface": "imessage",
+    "type": "interaction",
+    "direction": "inbound",
+    "summary": "Asked about memory",
+    "distilled": false
+  },
+  {
+    "id": "evt_3",
+    "timestamp": "2026-01-17T08:00:00Z",
+    "surface": "system",
+    "type": "system",
+    "direction": "internal",
+    "summary": "Maintenance check",
+    "distilled": true
+  },
+  {
+    "id": "evt_4",
+    "timestamp": "2026-01-10T08:00:00Z",
+    "surface": "cli",
+    "type": "handoff",
+    "direction": "internal",
+    "summary": "Handoff generated",
+    "distilled": false
+  }
+]

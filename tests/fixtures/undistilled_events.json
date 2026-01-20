@@ -1,0 +1,30 @@
+[
+  {
+    "id": "evt_1",
+    "timestamp": "2026-01-18T09:00:00Z",
+    "surface": "imessage",
+    "summary": "E asked about memory",
+    "content": ""
+  },
+  {
+    "id": "evt_2",
+    "timestamp": "2026-01-18T10:00:00Z",
+    "surface": "cli",
+    "summary": "Implemented thread indexer",
+    "content": ""
+  },
+  {
+    "id": "evt_3",
+    "timestamp": "2026-01-18T11:00:00Z",
+    "surface": "imessage",
+    "summary": "Discussed cache strategy",
+    "content": ""
+  },
+  {
+    "id": "evt_4",
+    "timestamp": "2026-01-18T12:00:00Z",
+    "surface": "wake",
+    "summary": "Ran dream cycle cleanup",
+    "content": ""
+  }
+]

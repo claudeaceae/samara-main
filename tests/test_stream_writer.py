@@ -56,6 +56,7 @@ class TestEventCreation:
 
         assert event.id is not None
         assert event.timestamp is not None
+        assert event.schema_version == "1"
         assert event.surface == Surface.CLI
         assert event.type == EventType.INTERACTION
         assert event.direction == Direction.INBOUND
@@ -141,6 +142,7 @@ class TestStreamWriting:
             data = json.loads(line)
 
         assert data["id"] == event.id
+        assert data["schema_version"] == "1"
         assert data["surface"] == "cli"
         assert data["type"] == "interaction"
         assert data["summary"] == "Test event"
