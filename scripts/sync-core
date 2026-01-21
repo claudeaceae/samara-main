@@ -123,6 +123,28 @@ sync_scripts() {
                 ((ITEMS_SYNCED++))
             fi
         fi
+
+        if [[ "$name" == *.swift ]]; then
+            local base_name="${name%.swift}"
+            if [ -e "$src/$base_name" ]; then
+                continue
+            fi
+            local alias_target="$dst/$base_name"
+            if [ -L "$alias_target" ]; then
+                :
+            elif [ -e "$alias_target" ]; then
+                log_item "[LOCAL] $base_name (not from repo)"
+            else
+                if $CHECK_ONLY; then
+                    log_item "[NEEDS] $base_name (swift alias)"
+                    ((ITEMS_NEEDED++))
+                else
+                    ln -s "$script" "$alias_target"
+                    log_item "[ADDED] $base_name (swift alias)"
+                    ((ITEMS_SYNCED++))
+                fi
+            fi
+        fi
     done
 }
 

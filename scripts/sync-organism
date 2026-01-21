@@ -26,6 +26,27 @@ log_ok() { echo -e "${GREEN}[OK]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[DRIFT]${NC} $1"; }
 
+resolve_link_target() {
+    local link="$1"
+    local target
+    target=$(readlink "$link" 2>/dev/null) || return 1
+    if [[ "$target" != /* ]]; then
+        local dir
+        dir=$(cd -P "$(dirname "$link")" && pwd)
+        target="$dir/$target"
+    fi
+    echo "$target"
+}
+
+is_symlink_to() {
+    local link="$1"
+    local expected="$2"
+    [ -L "$link" ] || return 1
+    local resolved
+    resolved=$(resolve_link_target "$link") || return 1
+    [ "$resolved" = "$expected" ] || [ "$resolved" = "${expected%/}" ]
+}
+
 MODE="${1:-report}"
 
 echo "========================================"
@@ -137,6 +158,13 @@ for script in "$REPO_SCRIPTS/"*; do
     name=$(basename "$script")
     [ "$name" = "README.md" ] && continue
     if [ ! -f "$RUNTIME_SCRIPTS/$name" ]; then
+        if [[ "$name" == *.swift ]]; then
+            base_name="${name%.swift}"
+            runtime_alias="$RUNTIME_SCRIPTS/$base_name"
+            if is_symlink_to "$runtime_alias" "$script"; then
+                continue
+            fi
+        fi
         REPO_ONLY+=("$name")
         log_warn "  $name (in repo, not in runtime)"
     fi
@@ -152,6 +180,10 @@ for script in "$RUNTIME_SCRIPTS/"*; do
     [ -f "$script" ] || continue
     name=$(basename "$script")
     if [ ! -f "$REPO_SCRIPTS/$name" ]; then
+        swift_source="$REPO_SCRIPTS/$name.swift"
+        if [ -f "$swift_source" ] && is_symlink_to "$script" "$swift_source"; then
+            continue
+        fi
         RUNTIME_ONLY+=("$name")
         log_warn "  $name (in runtime, not in repo)"
     fi
