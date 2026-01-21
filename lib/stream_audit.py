@@ -19,6 +19,7 @@ from typing import Any, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from lib.hot_digest_builder import build_digest
+from lib.mind_paths import get_mind_path
 from lib.stream_writer import StreamWriter, Surface
 
 SERVICE_SURFACE_MAP = {
@@ -28,6 +29,63 @@ SERVICE_SURFACE_MAP = {
     "location": ["location"],
     "meeting": ["calendar"],
 }
+
+
+def load_config() -> dict[str, Any]:
+    """Load config.json from the mind path."""
+    config_path = get_mind_path() / "config.json"
+    if not config_path.exists():
+        return {}
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_stream_config(config: dict[str, Any]) -> dict[str, Any]:
+    """Load stream config section."""
+    stream_config = config.get("stream")
+    if not isinstance(stream_config, dict):
+        return {}
+    return stream_config
+
+
+def coerce_float(value: Any) -> Optional[float]:
+    """Coerce a value to float if possible."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_surface_list(value: Any) -> list[str]:
+    """Normalize a surface list to strings."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item]
+
+
+def resolve_expected_surfaces(
+    stream_config: dict[str, Any],
+    allowed_surfaces: Optional[set[str]] = None,
+) -> tuple[set[str], str]:
+    """Return (expected_surfaces, source)."""
+    audit_config = stream_config.get("audit") if isinstance(stream_config, dict) else None
+    raw_expected = None
+    if isinstance(audit_config, dict):
+        raw_expected = normalize_surface_list(audit_config.get("expected_surfaces"))
+
+    source = "defaults"
+    expected = set(raw_expected) if raw_expected else {surface.value for surface in Surface}
+    if raw_expected:
+        source = "config"
+
+    if allowed_surfaces is not None:
+        expected = {surface for surface in expected if surface in allowed_surfaces}
+    return expected, source
 
 
 def parse_timestamp(value: str) -> Optional[datetime]:
@@ -49,7 +107,7 @@ def get_now() -> datetime:
 
 def filter_events_by_hours(
     events: list[dict[str, Any]],
-    hours: int,
+    hours: float,
     now: datetime,
 ) -> list[dict[str, Any]]:
     cutoff = now - timedelta(hours=hours)
@@ -114,11 +172,11 @@ def compute_gaps(
     window_events: list[dict[str, Any]],
     all_events: list[dict[str, Any]],
     now: datetime,
-    window_hours: int,
-    allowed_surfaces: Optional[set[str]] = None,
+    window_hours: float,
+    expected_surfaces: Optional[set[str]] = None,
 ) -> dict[str, Any]:
     seen_surfaces = {str(event.get("surface")) for event in window_events if event.get("surface")}
-    all_surfaces = allowed_surfaces or {surface.value for surface in Surface}
+    all_surfaces = expected_surfaces or {surface.value for surface in Surface}
     missing_surfaces = sorted([surface for surface in all_surfaces if surface not in seen_surfaces])
 
     handoff_events = [
@@ -148,9 +206,10 @@ def audit_stream(
     events: list[dict[str, Any]],
     digest_text: str,
     now: Optional[datetime] = None,
-    window_hours: int = 168,
-    digest_hours: int = 12,
-    allowed_surfaces: Optional[set[str]] = None,
+    window_hours: float = 168,
+    digest_hours: float = 12,
+    expected_surfaces: Optional[set[str]] = None,
+    expected_source: Optional[str] = None,
 ) -> dict[str, Any]:
     now = now or get_now()
     window_events = filter_events_by_hours(events, window_hours, now)
@@ -170,34 +229,31 @@ def audit_stream(
         "digest_window_hours": digest_hours,
         "counts": counts,
         "digest_inclusion": compute_digest_inclusion(digest_events, digest_text),
-        "gaps": compute_gaps(window_events, events, now, window_hours, allowed_surfaces),
+        "gaps": compute_gaps(window_events, events, now, window_hours, expected_surfaces),
     }
 
-    if allowed_surfaces is not None:
-        report["enabled_surfaces"] = sorted(allowed_surfaces)
+    if expected_surfaces is not None:
+        report["surface_expectations"] = {
+            "expected_surfaces": sorted(expected_surfaces),
+            "source": expected_source or "defaults",
+        }
 
     return report
 
 
-def load_service_config() -> dict[str, Any]:
-    """Load services config from ~/.claude-mind/config.json."""
-    mind_path = os.environ.get("SAMARA_MIND_PATH") or os.environ.get("MIND_PATH") or "~/.claude-mind"
-    config_path = Path(mind_path).expanduser() / "config.json"
-    if not config_path.exists():
-        return {}
-    try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    services = data.get("services")
+def load_service_config(config: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+    """Load services config from config.json."""
+    if config is None:
+        config = load_config()
+    services = config.get("services") if isinstance(config, dict) else None
     if not isinstance(services, dict):
         return {}
     return services
 
 
-def resolve_allowed_surfaces() -> tuple[Optional[set[str]], list[str]]:
+def resolve_allowed_surfaces(config: Optional[dict[str, Any]] = None) -> tuple[Optional[set[str]], list[str]]:
     """Return (allowed_surfaces, disabled_services)."""
-    services = load_service_config()
+    services = load_service_config(config)
     if not services:
         return None, []
 
@@ -221,27 +277,84 @@ def resolve_allowed_surfaces() -> tuple[Optional[set[str]], list[str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Audit stream coverage and digest inclusion")
-    parser.add_argument("--hours", type=int, default=168, help="Coverage window in hours")
-    parser.add_argument("--digest-hours", type=int, default=12, help="Digest window in hours")
+    parser.add_argument("--hours", type=float, default=None, help="Coverage window in hours")
+    parser.add_argument(
+        "--digest-hours",
+        default=None,
+        help="Digest window in hours or 'auto' for adaptive windowing",
+    )
     parser.add_argument("--format", choices=["json", "text"], default="json")
     parser.add_argument("--output", type=Path, help="Write audit report to a file")
 
     args = parser.parse_args()
 
-    events = StreamWriter().query(hours=args.hours, include_distilled=True)
+    config = load_config()
+    stream_config = load_stream_config(config)
+    audit_config = stream_config.get("audit") if isinstance(stream_config, dict) else {}
+    hot_digest_config = stream_config.get("hot_digest") if isinstance(stream_config, dict) else {}
+
+    window_hours = coerce_float(args.hours)
+    if window_hours is None:
+        window_hours = coerce_float(audit_config.get("window_hours")) or 168.0
+
+    digest_hours_setting: Any = args.digest_hours if args.digest_hours is not None else audit_config.get("digest_hours")
+    if digest_hours_setting is None:
+        digest_hours_setting = "12"
+
+    digest_hours_arg: int | float | str
+    if isinstance(digest_hours_setting, str) and digest_hours_setting.lower() == "auto":
+        digest_hours_arg = "auto"
+    else:
+        digest_hours_arg = coerce_float(digest_hours_setting) or 12.0
+
+    auto_min_hours = coerce_float(hot_digest_config.get("min_hours")) or 2.0
+    auto_max_hours = coerce_float(hot_digest_config.get("max_hours")) or 24.0
+    auto_base_hours = coerce_float(hot_digest_config.get("base_hours")) or 12.0
+    auto_target_rate = coerce_float(hot_digest_config.get("target_rate")) or 10.0
+
+    events = StreamWriter().query(hours=window_hours, include_distilled=True)
     if os.environ.get("STREAM_AUDIT_NOW") and not os.environ.get("HOT_DIGEST_NOW"):
         os.environ["HOT_DIGEST_NOW"] = os.environ["STREAM_AUDIT_NOW"]
-    digest_text = build_digest(hours=args.digest_hours, max_tokens=3000, use_ollama=False)
 
-    allowed_surfaces, disabled_services = resolve_allowed_surfaces()
+    digest_text, digest_metadata = build_digest(
+        hours=digest_hours_arg,
+        max_tokens=3000,
+        use_ollama=False,
+        auto_min_hours=auto_min_hours,
+        auto_max_hours=auto_max_hours,
+        auto_base_hours=auto_base_hours,
+        auto_target_rate=auto_target_rate,
+        return_metadata=True,
+    )
+
+    digest_window_hours = coerce_float(digest_metadata.get("window_hours")) or (
+        coerce_float(digest_hours_arg) or 12.0
+    )
+
+    allowed_surfaces, disabled_services = resolve_allowed_surfaces(config)
+    expected_surfaces, expected_source = resolve_expected_surfaces(stream_config, allowed_surfaces)
 
     report = audit_stream(
         events=events,
         digest_text=digest_text,
-        window_hours=args.hours,
-        digest_hours=args.digest_hours,
-        allowed_surfaces=allowed_surfaces,
+        window_hours=window_hours,
+        digest_hours=digest_window_hours,
+        expected_surfaces=expected_surfaces,
+        expected_source=expected_source,
     )
+    report["hot_digest"] = {
+        "requested_hours": digest_hours_setting,
+        "resolved_hours": digest_window_hours,
+        "metrics": digest_metadata.get("metrics"),
+        "auto_config": {
+            "min_hours": auto_min_hours,
+            "max_hours": auto_max_hours,
+            "base_hours": auto_base_hours,
+            "target_rate": auto_target_rate,
+        },
+    }
+    if allowed_surfaces is not None:
+        report["enabled_surfaces"] = sorted(allowed_surfaces)
     if disabled_services:
         report["disabled_services"] = disabled_services
 
@@ -260,6 +373,10 @@ def main() -> int:
         print(f"Stream audit ({counts['window_hours']}h window)")
         print(f"Total events: {counts['total_events']}")
         print(f"Undistilled total: {counts['undistilled_total']}")
+        digest_info = report.get("hot_digest", {})
+        resolved_hours = digest_info.get("resolved_hours")
+        if resolved_hours is not None:
+            print(f"Hot digest window: {resolved_hours}h")
         if digest["rate"] is not None:
             rate_pct = round(digest["rate"] * 100, 1)
             print(f"Digest inclusion rate: {rate_pct}% ({digest['included']}/{digest['eligible']})")
@@ -267,6 +384,10 @@ def main() -> int:
             print("Digest inclusion rate: n/a")
 
         gaps = report["gaps"]
+        surface_expectations = report.get("surface_expectations", {})
+        expected = surface_expectations.get("expected_surfaces")
+        if expected:
+            print(f"Expected surfaces: {', '.join(expected)}")
         if gaps["missing_surfaces"]:
             print(f"Missing surfaces: {', '.join(gaps['missing_surfaces'])}")
         if gaps["handoff_stale"]:

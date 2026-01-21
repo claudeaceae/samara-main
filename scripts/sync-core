@@ -138,24 +138,44 @@ sync_lib() {
 
     [ -d "$src" ] || return 0
 
-    for lib_file in "$src"/*; do
-        [ -f "$lib_file" ] || continue
-        local name=$(basename "$lib_file")
+    for lib_entry in "$src"/*; do
+        [ -e "$lib_entry" ] || continue
+        local name=$(basename "$lib_entry")
         local target="$dst/$name"
+
+        if [ -d "$lib_entry" ]; then
+            if [ -L "$target" ]; then
+                :
+            elif [ -d "$target" ]; then
+                log_item "[LOCAL] $name (not from repo)"
+            else
+                if $CHECK_ONLY; then
+                    log_item "[NEEDS] $name"
+                    ((ITEMS_NEEDED++))
+                else
+                    ln -s "$lib_entry" "$target"
+                    log_item "[ADDED] $name"
+                    ((ITEMS_SYNCED++))
+                fi
+            fi
+            continue
+        fi
+
+        [ -f "$lib_entry" ] || continue
 
         if [ -L "$target" ]; then
             # Already symlinked
             :
         elif [ -f "$target" ]; then
             # Regular file - check if it differs
-            if diff -q "$lib_file" "$target" >/dev/null 2>&1; then
+            if diff -q "$lib_entry" "$target" >/dev/null 2>&1; then
                 # Identical - safe to convert to symlink
                 if $CHECK_ONLY; then
                     log_item "[CONVERT] $name (identical, can symlink)"
                     ((ITEMS_NEEDED++))
                 else
                     rm "$target"
-                    ln -s "$lib_file" "$target"
+                    ln -s "$lib_entry" "$target"
                     log_item "[CONVERTED] $name"
                     ((ITEMS_SYNCED++))
                 fi
@@ -169,7 +189,7 @@ sync_lib() {
                         ((ITEMS_NEEDED++))
                     else
                         rm "$target"
-                        ln -s "$lib_file" "$target"
+                        ln -s "$lib_entry" "$target"
                         log_item "[SYNCED] $name (replaced with repo)"
                         ((ITEMS_SYNCED++))
                     fi
@@ -181,7 +201,7 @@ sync_lib() {
                 log_item "[NEEDS] $name"
                 ((ITEMS_NEEDED++))
             else
-                ln -s "$lib_file" "$target"
+                ln -s "$lib_entry" "$target"
                 log_item "[ADDED] $name"
                 ((ITEMS_SYNCED++))
             fi

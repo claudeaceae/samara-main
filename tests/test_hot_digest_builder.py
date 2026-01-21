@@ -5,6 +5,7 @@ Run with: pytest tests/test_hot_digest_builder.py -v
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -295,3 +296,41 @@ def test_select_window_hours_defaults_to_base():
     metrics = {"long_rate": 10.0, "velocity": 1.0}
     window = select_window_hours(metrics, base_hours=12.0, min_hours=2.0, max_hours=24.0, target_rate=10.0)
     assert window == pytest.approx(12.0)
+
+
+def test_build_digest_uses_config_auto_bounds(mind_env, monkeypatch):
+    mind_path, env = mind_env
+    monkeypatch.setenv("SAMARA_MIND_PATH", env["SAMARA_MIND_PATH"])
+    monkeypatch.setenv("MIND_PATH", env["MIND_PATH"])
+
+    config_path = mind_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "stream": {
+                    "hot_digest": {
+                        "min_hours": 1,
+                        "max_hours": 1,
+                        "base_hours": 1,
+                        "target_rate": 10.0,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    base = datetime.now(timezone.utc)
+    monkeypatch.setenv("HOT_DIGEST_NOW", base.isoformat().replace("+00:00", "Z"))
+
+    writer = StreamWriter(stream_dir=mind_path / "stream")
+    write_event(
+        writer,
+        (base - timedelta(minutes=5)).isoformat().replace("+00:00", "Z"),
+        Surface.CLI,
+        "CLI event",
+        "Did a thing",
+    )
+
+    _, metadata = build_digest(hours="auto", max_tokens=1200, use_ollama=False, return_metadata=True)
+    assert metadata["window_hours"] == pytest.approx(1.0)

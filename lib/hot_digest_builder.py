@@ -98,6 +98,40 @@ def get_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def load_config() -> dict[str, Any]:
+    """Load config.json from the mind path."""
+    config_path = get_mind_path() / "config.json"
+    if not config_path.exists():
+        return {}
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_hot_digest_config() -> dict[str, Any]:
+    """Load stream.hot_digest config section."""
+    config = load_config()
+    stream_config = config.get("stream")
+    if not isinstance(stream_config, dict):
+        return {}
+    hot_digest = stream_config.get("hot_digest")
+    if not isinstance(hot_digest, dict):
+        return {}
+    return hot_digest
+
+
+def coerce_float(value: Any) -> Optional[float]:
+    """Coerce a value to float if possible."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def clamp(value: float, min_value: float, max_value: float) -> float:
     """Clamp a value within [min_value, max_value]."""
     return max(min_value, min(max_value, value))
@@ -595,10 +629,10 @@ def build_digest(
     max_tokens: int = 3000,
     use_ollama: bool = True,
     ollama_model: str = "qwen3:8b",
-    auto_min_hours: float = 2.0,
-    auto_max_hours: float = 24.0,
-    auto_base_hours: float = 12.0,
-    auto_target_rate: float = 10.0,
+    auto_min_hours: Optional[float] = None,
+    auto_max_hours: Optional[float] = None,
+    auto_base_hours: Optional[float] = None,
+    auto_target_rate: Optional[float] = None,
     return_metadata: bool = False,
 ) -> str | tuple[str, dict[str, Any]]:
     """
@@ -619,6 +653,16 @@ def build_digest(
     writer = StreamWriter()
     now = get_now()
     open_threads = load_open_threads()
+
+    hot_digest_config = load_hot_digest_config()
+    if auto_min_hours is None:
+        auto_min_hours = coerce_float(hot_digest_config.get("min_hours")) or 2.0
+    if auto_max_hours is None:
+        auto_max_hours = coerce_float(hot_digest_config.get("max_hours")) or 24.0
+    if auto_base_hours is None:
+        auto_base_hours = coerce_float(hot_digest_config.get("base_hours")) or 12.0
+    if auto_target_rate is None:
+        auto_target_rate = coerce_float(hot_digest_config.get("target_rate")) or 10.0
 
     resolved_hours: float
     metrics: Optional[dict[str, float]] = None
@@ -774,31 +818,31 @@ def main():
     parser = argparse.ArgumentParser(description="Build hot digest from recent events")
     parser.add_argument(
         "--hours",
-        default="12",
+        default=None,
         help="Hours to look back (number) or 'auto' for adaptive windowing",
     )
     parser.add_argument(
         "--min-hours",
         type=float,
-        default=2.0,
+        default=None,
         help="Minimum hours for auto windowing",
     )
     parser.add_argument(
         "--max-hours",
         type=float,
-        default=24.0,
+        default=None,
         help="Maximum hours for auto windowing",
     )
     parser.add_argument(
         "--base-hours",
         type=float,
-        default=12.0,
+        default=None,
         help="Base hours for auto windowing",
     )
     parser.add_argument(
         "--target-rate",
         type=float,
-        default=10.0,
+        default=None,
         help="Target events/hour for auto windowing",
     )
     parser.add_argument("--max-tokens", type=int, default=3000, help="Max output tokens")
@@ -829,12 +873,44 @@ def main():
             print(cached_digest)
         return
 
-    hours_value: int | float | str = args.hours
+    hot_digest_config = load_hot_digest_config()
+
+    hours_value: int | float | str
+    if args.hours is not None:
+        hours_value = args.hours
+    else:
+        mode = hot_digest_config.get("mode")
+        default_hours = hot_digest_config.get("default_hours")
+        if isinstance(mode, str) and mode:
+            hours_value = mode
+        elif isinstance(default_hours, (int, float)):
+            hours_value = float(default_hours)
+        elif isinstance(default_hours, str) and default_hours:
+            hours_value = default_hours
+        else:
+            hours_value = "12"
+
     if isinstance(hours_value, str) and hours_value.lower() != "auto":
         try:
             hours_value = float(hours_value)
         except ValueError:
             hours_value = 12.0
+
+    auto_min_hours = coerce_float(args.min_hours)
+    if auto_min_hours is None:
+        auto_min_hours = coerce_float(hot_digest_config.get("min_hours")) or 2.0
+
+    auto_max_hours = coerce_float(args.max_hours)
+    if auto_max_hours is None:
+        auto_max_hours = coerce_float(hot_digest_config.get("max_hours")) or 24.0
+
+    auto_base_hours = coerce_float(args.base_hours)
+    if auto_base_hours is None:
+        auto_base_hours = coerce_float(hot_digest_config.get("base_hours")) or 12.0
+
+    auto_target_rate = coerce_float(args.target_rate)
+    if auto_target_rate is None:
+        auto_target_rate = coerce_float(hot_digest_config.get("target_rate")) or 10.0
 
     if args.format == "json":
         digest, metadata = build_digest(
@@ -842,10 +918,10 @@ def main():
             max_tokens=args.max_tokens,
             use_ollama=not args.no_ollama,
             ollama_model=args.model,
-            auto_min_hours=args.min_hours,
-            auto_max_hours=args.max_hours,
-            auto_base_hours=args.base_hours,
-            auto_target_rate=args.target_rate,
+            auto_min_hours=auto_min_hours,
+            auto_max_hours=auto_max_hours,
+            auto_base_hours=auto_base_hours,
+            auto_target_rate=auto_target_rate,
             return_metadata=True,
         )
     else:
@@ -854,10 +930,10 @@ def main():
             max_tokens=args.max_tokens,
             use_ollama=not args.no_ollama,
             ollama_model=args.model,
-            auto_min_hours=args.min_hours,
-            auto_max_hours=args.max_hours,
-            auto_base_hours=args.base_hours,
-            auto_target_rate=args.target_rate,
+            auto_min_hours=auto_min_hours,
+            auto_max_hours=auto_max_hours,
+            auto_base_hours=auto_base_hours,
+            auto_target_rate=auto_target_rate,
         )
 
     if args.output and is_digest_content(digest):
