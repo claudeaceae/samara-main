@@ -41,6 +41,11 @@ final class MessageWatcher {
         var lastSaveTime: Date
     }
 
+    /// Recently processed ROWIDs to prevent duplicates (additional layer beyond isChecking)
+    /// This catches race conditions where two threads query the DB before either updates lastRowId
+    private var recentlyProcessedRowIds = Set<Int64>()
+    private let maxRecentRowIds = 100  // Keep last 100 to prevent memory growth
+
     init(
         store: MessageStore,
         onNewMessage: @escaping (Message) -> Void,
@@ -164,11 +169,23 @@ final class MessageWatcher {
         if enablePolling {
             shouldStop = false
             let interval = self.pollInterval
+            var heartbeatCounter = 0
+            let heartbeatInterval = 60  // Log heartbeat every 60 polls (5 min at 5s interval)
+
             let thread = Thread { [weak self] in
                 log("Poll thread running", level: .info, component: "MessageWatcher")
                 while let self = self, !self.shouldStop {
                     Thread.sleep(forTimeInterval: interval)
                     if self.shouldStop { break }
+
+                    // Periodic heartbeat to confirm thread is alive
+                    heartbeatCounter += 1
+                    if heartbeatCounter >= heartbeatInterval {
+                        log("Poll thread heartbeat: still running", level: .debug, component: "MessageWatcher")
+                        heartbeatCounter = 0
+                    }
+
+                    // autoreleasepool to manage memory, checkForNewMessages handles its own errors
                     autoreleasepool {
                         self.checkForNewMessages()
                     }
@@ -235,8 +252,25 @@ final class MessageWatcher {
 
             checkLock.lock()
             for message in messages {
+                // Skip if already in recent set (catches race conditions)
+                if recentlyProcessedRowIds.contains(message.rowId) {
+                    log("Skipping duplicate ROWID \(message.rowId) (already in recent set)", level: .debug, component: "MessageWatcher")
+                    continue
+                }
+
                 // Only process if we haven't already moved past this message
                 if message.rowId > lastRowId {
+                    // Add to recent set before processing
+                    recentlyProcessedRowIds.insert(message.rowId)
+
+                    // Trim recent set if too large
+                    if recentlyProcessedRowIds.count > maxRecentRowIds {
+                        // Remove oldest (smallest) rowId
+                        if let minRowId = recentlyProcessedRowIds.min() {
+                            recentlyProcessedRowIds.remove(minRowId)
+                        }
+                    }
+
                     log("New message from \(message.handleId): \(message.text.prefix(50))...", level: .info, component: "MessageWatcher")
                     lastRowId = message.rowId
                     checkLock.unlock()

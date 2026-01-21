@@ -125,8 +125,24 @@ fi
 # Build context from episode and recent memory
 EPISODE_CONTENT=""
 if [ -f "$EPISODE_FILE" ]; then
-    EPISODE_CONTENT=$(cat "$EPISODE_FILE")
-    log "Found episode for $PROCESS_DATE ($(wc -l < "$EPISODE_FILE") lines)"
+    EPISODE_LINES=$(wc -l < "$EPISODE_FILE" | tr -d ' ')
+    EPISODE_SIZE=$(wc -c < "$EPISODE_FILE" | tr -d ' ')
+    log "Found episode for $PROCESS_DATE ($EPISODE_LINES lines, $EPISODE_SIZE bytes)"
+
+    # Limit episode content to prevent ARG_MAX errors
+    # If file is over 100KB, take first and last 500 lines
+    if [ "$EPISODE_SIZE" -gt 100000 ]; then
+        log "Episode too large ($EPISODE_SIZE bytes), truncating to first/last 500 lines"
+        EPISODE_HEAD=$(head -500 "$EPISODE_FILE")
+        EPISODE_TAIL=$(tail -500 "$EPISODE_FILE")
+        EPISODE_CONTENT="$EPISODE_HEAD
+
+[... TRUNCATED: Episode file too large ($EPISODE_LINES lines, $EPISODE_SIZE bytes). Showing first and last 500 lines. ...]
+
+$EPISODE_TAIL"
+    else
+        EPISODE_CONTENT=$(cat "$EPISODE_FILE")
+    fi
 else
     EPISODE_CONTENT="No recorded activity for this day."
     log "No episode file for $PROCESS_DATE - will reflect on quiet day"
