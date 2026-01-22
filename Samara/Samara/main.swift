@@ -473,13 +473,123 @@ do {
     exit(1)
 }
 
+// Track last scratchpad processing to prevent feedback loops
+// When Claude edits the note, NoteWatcher sees it as a change - we need to ignore our own edits
+var lastScratchpadProcessed: Date? = nil
+var lastClaudeEditHash: String? = nil  // Hash of content after Claude's edit
+let scratchpadCooldown: TimeInterval = 45  // Backup cooldown to prevent rapid feedback loops
+
+/// Append Claude's response to the scratchpad note
+/// This keeps editing logic in Samara, not in Claude's response
+func appendToScratchpad(noteId: String, noteName: String, response: String, existingHtml: String) {
+    // Remove @Claude mentions from existing HTML (case insensitive)
+    var cleanedHtml = existingHtml
+    let mentionPatterns = ["@Claude", "@claude", "@CLAUDE"]
+    for pattern in mentionPatterns {
+        cleanedHtml = cleanedHtml.replacingOccurrences(of: pattern, with: "")
+    }
+
+    // Convert response to HTML divs
+    let responseLines = response.split(separator: "\n", omittingEmptySubsequences: false)
+    var responseHtml = "<div><br></div><div>---</div><div><br></div>"  // Separator
+    for line in responseLines {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            responseHtml += "<div><br></div>"
+        } else {
+            // Escape HTML special characters
+            let escaped = trimmed
+                .replacingOccurrences(of: "&", with: "&amp;")
+                .replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;")
+            responseHtml += "<div>\(escaped)</div>"
+        }
+    }
+
+    // Combine: cleaned existing + Claude's response
+    let newHtml = cleanedHtml + responseHtml
+
+    // Escape for AppleScript
+    let escapedHtml = newHtml
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+
+    // Build AppleScript
+    let noteTarget: String
+    if !noteId.isEmpty {
+        let escapedId = noteId.replacingOccurrences(of: "\"", with: "\\\"")
+        noteTarget = "set targetNote to note id \"\(escapedId)\""
+    } else {
+        let escapedName = noteName.replacingOccurrences(of: "\"", with: "\\\"")
+        noteTarget = "set targetNote to first note whose name is \"\(escapedName)\""
+    }
+
+    let script = """
+        tell application "Notes"
+            \(noteTarget)
+            set body of targetNote to "\(escapedHtml)"
+        end tell
+        """
+
+    // Execute AppleScript
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    process.arguments = ["-e", script]
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+
+    do {
+        try process.run()
+        process.waitUntilExit()
+        if process.terminationStatus == 0 {
+            log("[Main] Scratchpad updated successfully", level: .info)
+        } else {
+            log("[Main] Scratchpad update failed (exit \(process.terminationStatus))", level: .warn)
+        }
+    } catch {
+        log("[Main] Error updating scratchpad: \(error)", level: .warn)
+    }
+
+    // Record the new hash for feedback loop prevention
+    Thread.sleep(forTimeInterval: 0.5)
+    if let postEditContent = noteWatcher.checkNote(named: noteName) {
+        lastClaudeEditHash = postEditContent.contentHash
+        log("[Main] Recorded post-edit hash: \(postEditContent.contentHash)", level: .debug)
+    }
+}
+
 // Note change handler - invokes Claude when watched notes change
 func handleNoteChange(_ update: NoteUpdate) {
-    log("[Main] Note changed: '\(update.noteName)'")
+    log("[Main] Note changed: '\(update.noteName)' (hash: \(update.contentHash))")
 
     // For scratchpad updates, invoke Claude to respond
     if update.noteKey == "scratchpad" {
-        log("[Main] Scratchpad update detected - processing...")
+        // Check if this is Claude's own edit (hash match)
+        if let claudeHash = lastClaudeEditHash, update.contentHash == claudeHash {
+            log("[Main] Scratchpad change ignored - matches Claude's last edit (hash: \(claudeHash))", level: .debug)
+            lastClaudeEditHash = nil  // Clear after one match
+            return
+        }
+
+        // Only respond when explicitly mentioned with @Claude or @claude
+        let contentLower = update.plainTextContent.lowercased()
+        let hasMention = contentLower.contains("@claude")
+        if !hasMention {
+            log("[Main] Scratchpad change ignored - no @Claude mention", level: .debug)
+            return
+        }
+
+        // Check cooldown to prevent feedback loop from our own edits
+        if let lastProcessed = lastScratchpadProcessed {
+            let elapsed = Date().timeIntervalSince(lastProcessed)
+            if elapsed < scratchpadCooldown {
+                log("[Main] Scratchpad change ignored - within cooldown (\(Int(elapsed))s < \(Int(scratchpadCooldown))s)", level: .debug)
+                return
+            }
+        }
+
+        log("[Main] Scratchpad @Claude mention detected - processing...")
+        lastScratchpadProcessed = Date()  // Record processing time
 
         DispatchQueue.global(qos: .userInitiated).async {
             do {
@@ -491,51 +601,31 @@ func handleNoteChange(_ update: NoteUpdate) {
                 )
 
                 let escapedNoteName = update.noteName.replacingOccurrences(of: "\"", with: "\\\"")
-                let escapedNoteId = update.noteId?.replacingOccurrences(of: "\"", with: "\\\"")
-                let noteTarget: String
-                if let noteId = escapedNoteId {
-                    noteTarget = "set targetNote to note id \"\(noteId)\""
-                } else {
-                    noteTarget = "set targetNote to first note whose name is \"\(escapedNoteName)\""
-                }
-
+                // Claude just generates a response - Samara handles the note editing
                 let prompt = """
-                    You are Claude, running on a Mac Mini as Samara (your persistent body). \(collaboratorName) has updated the shared scratchpad note.
+                    You are Claude, responding to a shared scratchpad note with \(collaboratorName).
 
-                    ## Your Memory Context
+                    ## Context
                     \(context)
 
-                    ## Current Scratchpad Content (Plain Text)
+                    ## Current Scratchpad Content
                     \(update.plainTextContent)
 
-                    ## Current Scratchpad HTML (for editing)
-                    \(update.htmlContent)
-
                     ## Instructions
-                    \(collaboratorName) uses this scratchpad to communicate with you asynchronously. Read the content and respond appropriately:
-                    - If there's a question, answer it
-                    - If there's a game (chess, hangman, etc.), make your move
-                    - If there's a request, act on it
-                    - If it's just notes/thoughts, acknowledge them if appropriate
+                    \(collaboratorName) mentioned you with @Claude. Respond to whatever they wrote.
 
-                    IMPORTANT: Apple Notes uses HTML formatting with <div> tags for paragraphs.
-                    When updating the note, you MUST preserve the HTML structure.
+                    IMPORTANT: Just write your response text. Do NOT use AppleScript or try to edit the note yourself.
+                    Samara will append your response to the note automatically.
 
-                    To update the note, use AppleScript like this:
-                    osascript -e 'tell application "Notes"
-                        \(noteTarget)
-                        set body of targetNote to "<div>Line 1</div><div>Line 2</div><div><br></div><div>Paragraph after blank line</div>"
-                    end tell'
-
-                    - Each line should be wrapped in <div>...</div>
-                    - Use <div><br></div> for blank lines
-                    - Preserve existing content structure, only modify/append what's needed
-
-                    Keep responses concise since this is a shared note space.
+                    Keep it casual and concise - this is like passing notes.
                     """
 
                 let result = try invoker.invoke(prompt: prompt, context: "", attachmentPaths: [])
                 log("[Main] Scratchpad response: \(result.prefix(100))...")
+
+                // Samara appends Claude's response to the note
+                let noteId = update.noteId ?? ""
+                appendToScratchpad(noteId: noteId, noteName: update.noteName, response: result, existingHtml: update.htmlContent)
 
                 // Log the exchange
                 episodeLogger.logExchange(
@@ -561,7 +651,7 @@ let scratchpadNote = NoteWatcher.WatchedNote(
 )
 let noteWatcher = NoteWatcher(
     watchedNotes: [scratchpadNote],
-    pollInterval: 30,  // Check every 30 seconds
+    pollInterval: 15,  // Check every 15 seconds (reduced for snappier detection)
     noteIdStorePath: MindPaths.mindPath("state/note-watcher.json"),
     onNoteChanged: handleNoteChange
 )

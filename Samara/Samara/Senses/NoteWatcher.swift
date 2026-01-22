@@ -61,6 +61,9 @@ final class NoteWatcher {
     /// Flag to stop watching
     private var shouldStop = false
 
+    /// Poll counter for heartbeat logging
+    private var pollCount: Int = 0
+
     // MARK: - Initialization
 
     init(
@@ -166,13 +169,26 @@ final class NoteWatcher {
 
             if shouldStop { break }
 
+            pollCount += 1
+            if pollCount % 10 == 0 {  // Log every 10th poll (~5 min at 30s interval)
+                log("Heartbeat: \(pollCount) polls, watching \(watchedNotes.count) note(s)",
+                    level: .debug,
+                    component: "NoteWatcher")
+            }
+
             checkForChanges()
         }
     }
 
     private func checkForChanges() {
+        // Trigger iCloud sync by briefly activating Notes.app
+        triggerNotesSync()
+
         for note in watchedNotes {
             guard let result = resolveNote(for: note) else {
+                log("Could not resolve note '\(note.name)' (key: \(note.key))",
+                    level: .warn,
+                    component: "NoteWatcher")
                 continue
             }
 
@@ -191,6 +207,16 @@ final class NoteWatcher {
                 }
             }
         }
+    }
+
+    /// Trigger iCloud sync by briefly activating Notes.app in background
+    private func triggerNotesSync() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = ["-g", "-a", "Notes"]  // -g = background, don't bring to front
+        try? process.run()
+        process.waitUntilExit()
+        Thread.sleep(forTimeInterval: 0.5)  // Brief pause for sync
     }
 
     private func resolveNote(for note: WatchedNote) -> NoteReadResult? {
