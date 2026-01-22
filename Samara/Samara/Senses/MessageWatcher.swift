@@ -228,62 +228,62 @@ final class MessageWatcher {
 
     /// Checks for new messages since last check
     private func checkForNewMessages() {
-        // Prevent concurrent checking
         checkLock.lock()
+
         if isChecking {
             checkLock.unlock()
             return
         }
         isChecking = true
+
+        // Query DB while holding lock - eliminates race window
         let currentLastRowId = lastRowId
-        checkLock.unlock()
-
+        let messages: [Message]
         do {
-            let messages = try store.fetchNewMessages(since: currentLastRowId)
-
-            // Reset failure counter on success
-            checkLock.lock()
+            messages = try store.fetchNewMessages(since: currentLastRowId)
             consecutiveFailures = 0
-            checkLock.unlock()
-
-            if !messages.isEmpty {
-                log("Found \(messages.count) new message(s) since ROWID \(currentLastRowId)", level: .info, component: "MessageWatcher")
-            }
-
-            checkLock.lock()
-            for message in messages {
-                // Skip if already in recent set (catches race conditions)
-                if recentlyProcessedRowIds.contains(message.rowId) {
-                    log("Skipping duplicate ROWID \(message.rowId) (already in recent set)", level: .debug, component: "MessageWatcher")
-                    continue
-                }
-
-                // Only process if we haven't already moved past this message
-                if message.rowId > lastRowId {
-                    // Add to recent set before processing
-                    recentlyProcessedRowIds.insert(message.rowId)
-
-                    // Trim recent set if too large
-                    if recentlyProcessedRowIds.count > maxRecentRowIds {
-                        // Remove oldest (smallest) rowId
-                        if let minRowId = recentlyProcessedRowIds.min() {
-                            recentlyProcessedRowIds.remove(minRowId)
-                        }
-                    }
-
-                    log("New message from \(message.handleId): \(message.text.prefix(50))...", level: .info, component: "MessageWatcher")
-                    lastRowId = message.rowId
-                    checkLock.unlock()
-                    // Persist ROWID to disk for recovery after restart
-                    saveState()
-                    onNewMessage(message)
-                    checkLock.lock()
-                }
-            }
+        } catch {
             isChecking = false
             checkLock.unlock()
-        } catch {
             handleCheckError(error)
+            return
+        }
+
+        if !messages.isEmpty {
+            log("Found \(messages.count) new message(s) since ROWID \(currentLastRowId)", level: .info, component: "MessageWatcher")
+        }
+
+        // Collect messages to dispatch (update all state while holding lock)
+        var messagesToDispatch: [Message] = []
+
+        for message in messages {
+            if recentlyProcessedRowIds.contains(message.rowId) {
+                log("Skipping duplicate ROWID \(message.rowId) (already in recent set)", level: .debug, component: "MessageWatcher")
+                continue
+            }
+
+            if message.rowId > lastRowId {
+                recentlyProcessedRowIds.insert(message.rowId)
+
+                if recentlyProcessedRowIds.count > maxRecentRowIds {
+                    if let minRowId = recentlyProcessedRowIds.min() {
+                        recentlyProcessedRowIds.remove(minRowId)
+                    }
+                }
+
+                log("New message from \(message.handleId): \(message.text.prefix(50))...", level: .info, component: "MessageWatcher")
+                lastRowId = message.rowId
+                messagesToDispatch.append(message)
+            }
+        }
+
+        isChecking = false
+        checkLock.unlock()
+
+        // Dispatch callbacks OUTSIDE lock to avoid deadlocks
+        for message in messagesToDispatch {
+            saveState()
+            onNewMessage(message)
         }
     }
 
