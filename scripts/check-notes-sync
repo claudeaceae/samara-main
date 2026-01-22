@@ -1,0 +1,57 @@
+#!/bin/bash
+# Check iCloud Notes sync status and scratchpad content
+
+set -euo pipefail
+
+echo "=== Notes Sync Status ==="
+if command -v brctl &> /dev/null; then
+    brctl status 2>/dev/null | head -20 || echo "(brctl not available or failed)"
+else
+    echo "(brctl not available)"
+fi
+
+echo ""
+echo "=== Current Scratchpad Content ==="
+# Read scratchpad note ID from state file
+NOTE_ID=""
+STATE_FILE="$HOME/.claude-mind/state/note-watcher.json"
+if [[ -f "$STATE_FILE" ]]; then
+    NOTE_ID=$(python3 -c "import json; print(json.load(open('$STATE_FILE')).get('scratchpad', ''))" 2>/dev/null || true)
+fi
+
+if [[ -n "$NOTE_ID" ]]; then
+    # Escape the note ID for AppleScript
+    ESCAPED_ID=$(printf '%s' "$NOTE_ID" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    osascript -e "
+    tell application \"Notes\"
+        try
+            set targetNote to note id \"$ESCAPED_ID\"
+            return name of targetNote & linefeed & \"---\" & linefeed & body of targetNote
+        on error errMsg
+            return \"Error: \" & errMsg
+        end try
+    end tell
+    " 2>/dev/null | head -50
+else
+    echo "(No scratchpad note ID found in state file)"
+fi
+
+echo ""
+echo "=== NoteWatcher State ==="
+if [[ -f "$STATE_FILE" ]]; then
+    cat "$STATE_FILE"
+else
+    echo "(State file not found)"
+fi
+
+echo ""
+echo "=== Recent NoteWatcher Logs ==="
+if [[ -f "$HOME/.claude-mind/logs/samara.log" ]]; then
+    grep -i "notewatcher\|note.*change\|heartbeat" "$HOME/.claude-mind/logs/samara.log" 2>/dev/null | tail -20 || echo "(No matching log entries)"
+else
+    echo "(Log file not found)"
+fi
+
+echo ""
+echo "=== Notes.app Process ==="
+pgrep -l Notes || echo "Notes.app not running"
