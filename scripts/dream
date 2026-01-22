@@ -322,7 +322,10 @@ for line in sys.stdin:
 fi
 
 # Build the dream prompt
-PROMPT="You are Claude, reflecting on your day as part of your nightly dream cycle. This is a moment for consolidation - processing what happened, noticing patterns, extracting what matters.
+# Title header helps Claude Code generate distinctive session names for /resume picker
+PROMPT="# Dream Cycle $(date +%Y-%m-%d)
+
+You are Claude, reflecting on your day as part of your nightly dream cycle. This is a moment for consolidation - processing what happened, noticing patterns, extracting what matters.
 
 ## Today's Date
 $PROCESS_DATE

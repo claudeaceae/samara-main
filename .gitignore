@@ -47,3 +47,7 @@ node_modules/
 .coverage-node/
 .derived-data-*/
 .test-results/
+
+# Test temp directories
+.tmp-samara-tests*/
+.pytest_cache/

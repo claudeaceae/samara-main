@@ -15,6 +15,11 @@ final class MessageFlowIntegrationTests: SamaraTestCase {
         defer { try? FileManager.default.removeItem(at: stubURL.deletingLastPathComponent()) }
 
         let memoryContext = MemoryContext()
+        let contextSelector = ContextSelector(
+            memoryContext: memoryContext,
+            contextRouter: ContextRouter(enabled: false),
+            features: Configuration.FeaturesConfig(smartContext: true, smartContextTimeout: 1.0)
+        )
         let invoker = ClaudeInvoker(
             claudePath: stubURL.path,
             timeout: 5,
@@ -33,7 +38,7 @@ final class MessageFlowIntegrationTests: SamaraTestCase {
         sessionManager = SessionManager(
             onBatchReady: { messages, sessionId in
                 do {
-                    let context = memoryContext.buildContext(isCollaboratorChat: true)
+                    let context = contextSelector.context(for: messages, isCollaboratorChat: true)
                     let result = try invoker.invokeBatch(
                         messages: messages,
                         context: context,

@@ -18,6 +18,10 @@
   "mail": {
     "account": "iCloud"
   },
+  "features": {
+    "smartContext": true,
+    "smartContextTimeout": 5.0
+  },
   "stream": {
     "hot_digest": {
       "mode": "auto",

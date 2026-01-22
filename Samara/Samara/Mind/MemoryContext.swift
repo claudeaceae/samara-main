@@ -197,6 +197,14 @@ final class MemoryContext {
 
     // MARK: - Smart Context Building (RAG-style)
 
+    struct CacheStatsSnapshot {
+        let hits: Int
+        let misses: Int
+        let evictions: Int
+        let entries: Int
+        let cachedTokens: Int
+    }
+
     /// Context cache for avoiding redundant file reads
     private static var contextCache: ContextCache?
 
@@ -206,6 +214,104 @@ final class MemoryContext {
             MemoryContext.contextCache = ContextCache(defaultTTL: 300, maxEntries: 50)
         }
         return MemoryContext.contextCache!
+    }
+
+    /// Invalidate cached entries (best-effort, async).
+    static func invalidateCache(keys: [String]) {
+        guard let cache = contextCache else { return }
+        Task {
+            for key in keys {
+                await cache.invalidate(key)
+            }
+        }
+    }
+
+    /// Invalidate cached entries by prefix (best-effort, async).
+    static func invalidateCachePrefix(_ prefix: String) {
+        guard let cache = contextCache else { return }
+        Task {
+            await cache.invalidatePrefix(prefix)
+        }
+    }
+
+    /// Invalidate today's episode cache after new entries are written.
+    static func invalidateEpisodeCache() {
+        invalidateCache(keys: [ContextCache.Key.episodeToday])
+    }
+
+    /// Invalidate cached location summary after location updates.
+    static func invalidateLocationCache() {
+        invalidateCache(keys: [ContextCache.Key.locationCurrent])
+    }
+
+    /// Invalidate cached person profiles after profile updates.
+    static func invalidatePersonCaches() {
+        invalidateCachePrefix(ContextCache.Key.personPrefix)
+    }
+
+    func cacheStatsSnapshot() -> CacheStatsSnapshot? {
+        guard let cache = MemoryContext.contextCache else { return nil }
+        let semaphore = DispatchSemaphore(value: 0)
+        var stats: ContextCache.CacheStats?
+        var entries = 0
+        var tokens = 0
+        Task {
+            stats = await cache.getStats()
+            entries = await cache.entryCount()
+            tokens = await cache.totalCachedTokens()
+            semaphore.signal()
+        }
+        semaphore.wait()
+        guard let stats else { return nil }
+        return CacheStatsSnapshot(
+            hits: stats.hits,
+            misses: stats.misses,
+            evictions: stats.evictions,
+            entries: entries,
+            cachedTokens: tokens
+        )
+    }
+
+    private func cacheGetSync(_ key: String, maxAge: TimeInterval? = nil) -> String? {
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: String?
+        Task {
+            result = await cache.get(key, maxAge: maxAge)
+            semaphore.signal()
+        }
+        semaphore.wait()
+        return result
+    }
+
+    private func cacheSetSync(_ key: String, content: String, source: String = "") {
+        let tokens = MemoryContext.estimateTokens(content)
+        let semaphore = DispatchSemaphore(value: 0)
+        Task {
+            await cache.set(key, content: content, tokens: tokens, source: source)
+            semaphore.signal()
+        }
+        semaphore.wait()
+    }
+
+    static func estimateTokens(_ content: String) -> Int {
+        Int(Double(content.count) * 0.30)
+    }
+
+    private func fullPath(_ relativePath: String) -> String {
+        (mindPath as NSString).appendingPathComponent(relativePath)
+    }
+
+    private func loadCachedSection(key: String, source: String = "", maxAge: TimeInterval? = nil, build: () -> String?) -> String? {
+        if let cached = cacheGetSync(key, maxAge: maxAge) {
+            return cached
+        }
+
+        guard let content = build() else {
+            return nil
+        }
+
+        cacheSetSync(key, content: content, source: source)
+        return content
     }
 
     /// Builds CORE context - minimal base that's always loaded (~3K tokens)
@@ -221,16 +327,37 @@ final class MemoryContext {
         let currentTime = formatter.string(from: Date())
         sections.append("## Current Time\n\(currentTime)")
 
+        // Hot digest (cross-surface continuity) or open threads fallback
+        if let hotDigest = buildHotDigest() {
+            sections.append(hotDigest)
+        } else if let openThreads = loadOpenThreads() {
+            sections.append(openThreads)
+        }
+
         // Identity summary (first 50 lines for essence)
-        if let identity = readFile("identity.md") {
-            let summary = abbreviate(identity, maxLines: 50)
-            sections.append("## Identity\n\(summary)")
+        if let identitySection = loadCachedSection(
+            key: ContextCache.Key.identitySummary,
+            source: fullPath("identity.md"),
+            build: {
+                guard let identity = readFile("identity.md") else { return nil }
+                let summary = abbreviate(identity, maxLines: 50)
+                return "## Identity\n\(summary)"
+            }
+        ) {
+            sections.append(identitySection)
         }
 
         // Active goals only (abbreviated)
-        if let goals = readFile("goals.md") {
-            let abbreviated = abbreviate(goals, maxLines: 30)
-            sections.append("## Goals\n\(abbreviated)")
+        if let goalsSection = loadCachedSection(
+            key: ContextCache.Key.goalsActive,
+            source: fullPath("goals.md"),
+            build: {
+                guard let goals = readFile("goals.md") else { return nil }
+                let abbreviated = abbreviate(goals, maxLines: 30)
+                return "## Goals\n\(abbreviated)"
+            }
+        ) {
+            sections.append(goalsSection)
         }
 
         // Collaborator context (brief)
@@ -292,7 +419,7 @@ final class MemoryContext {
             // Only add Chroma if FTS5 returned sparse results AND we have budget
             // This is the "lazy Chroma" optimization
             let ftsCount = findRelatedMemories(query: combinedQuery).count
-            if ftsCount < 3 && needs.estimatedTokens < 8000 {
+            if ftsCount < 3 && needs.estimatedTokens < 7500 {
                 if let chromaResults = findRelatedPastContext(for: combinedQuery) {
                     sections.append(chromaResults)
                 }
@@ -346,27 +473,51 @@ final class MemoryContext {
     // MARK: - Module Loaders
 
     private func loadCapabilitiesModule() -> String? {
-        guard let capabilities = readFile("capabilities/inventory.md") else { return nil }
-        let abbreviated = abbreviate(capabilities, maxLines: 100)
-        return "## Capabilities\n\(abbreviated)"
+        loadCachedSection(
+            key: ContextCache.Key.capabilitiesSummary,
+            source: fullPath("capabilities/inventory.md"),
+            build: {
+                guard let capabilities = readFile("capabilities/inventory.md") else { return nil }
+                let abbreviated = abbreviate(capabilities, maxLines: 100)
+                return "## Capabilities\n\(abbreviated)"
+            }
+        )
     }
 
     private func loadDecisionsModule() -> String? {
-        guard let decisions = readFile("memory/decisions.md") else { return nil }
-        let truncated = lastLines(decisions, maxLines: maxLinesForLargeFiles)
-        return "## Architectural Decisions\n\(truncated)"
+        loadCachedSection(
+            key: ContextCache.Key.decisionsRecent,
+            source: fullPath("memory/decisions.md"),
+            build: {
+                guard let decisions = readFile("memory/decisions.md") else { return nil }
+                let truncated = lastLines(decisions, maxLines: maxLinesForLargeFiles)
+                return "## Architectural Decisions\n\(truncated)"
+            }
+        )
     }
 
     private func loadLearningsModule() -> String? {
-        guard let learnings = readFile("memory/learnings.md") else { return nil }
-        let truncated = lastLines(learnings, maxLines: maxLinesForLargeFiles)
-        return "## Learnings\n\(truncated)"
+        loadCachedSection(
+            key: ContextCache.Key.learningsRecent,
+            source: fullPath("memory/learnings.md"),
+            build: {
+                guard let learnings = readFile("memory/learnings.md") else { return nil }
+                let truncated = lastLines(learnings, maxLines: maxLinesForLargeFiles)
+                return "## Learnings\n\(truncated)"
+            }
+        )
     }
 
     private func loadObservationsModule() -> String? {
-        guard let observations = readFile("memory/observations.md") else { return nil }
-        let truncated = lastLines(observations, maxLines: maxLinesForLargeFiles)
-        return "## Self-Observations\n\(truncated)"
+        loadCachedSection(
+            key: ContextCache.Key.observationsRecent,
+            source: fullPath("memory/observations.md"),
+            build: {
+                guard let observations = readFile("memory/observations.md") else { return nil }
+                let truncated = lastLines(observations, maxLines: maxLinesForLargeFiles)
+                return "## Self-Observations\n\(truncated)"
+            }
+        )
     }
 
     private func loadPersonModule(name: String, isCollaboratorChat: Bool) -> String? {
@@ -384,65 +535,104 @@ final class MemoryContext {
         let peoplePath = "memory/people/\(nameLower)/profile.md"
         let legacyPath = "memory/about-\(nameLower).md"
 
-        if let profile = readFile(peoplePath) ?? readFile(legacyPath) {
-            return "## About \(name)\n\(profile)"
+        let cacheKey = ContextCache.Key.person(name)
+        if let cached = cacheGetSync(cacheKey) {
+            return cached
         }
 
-        return nil
+        let peopleFullPath = fullPath(peoplePath)
+        let legacyFullPath = fullPath(legacyPath)
+        var sourcePath = ""
+        var profile: String?
+
+        if let peopleProfile = readFile(peoplePath) {
+            profile = peopleProfile
+            sourcePath = peopleFullPath
+        } else if let legacyProfile = readFile(legacyPath) {
+            profile = legacyProfile
+            sourcePath = legacyFullPath
+        }
+
+        guard let profileContent = profile else {
+            return nil
+        }
+
+        let section = "## About \(name)\n\(profileContent)"
+        cacheSetSync(cacheKey, content: section, source: sourcePath)
+        return section
     }
 
     private func loadLocationModule() -> String? {
-        guard let locationSummary = buildLocationSummary() else { return nil }
-        return "## Location Awareness\n\(locationSummary)"
+        loadCachedSection(
+            key: ContextCache.Key.locationCurrent,
+            source: fullPath("state/location.json"),
+            maxAge: 120,
+            build: {
+                guard let locationSummary = buildLocationSummary() else { return nil }
+                return "## Location Awareness\n\(locationSummary)"
+            }
+        )
     }
 
     private func loadCalendarModule() -> String? {
-        // Use AppleScript to get today's calendar events
-        let script = """
-            tell application "Calendar"
-                set today to current date
-                set tomorrow to today + (1 * days)
-                set eventList to ""
+        loadCachedSection(
+            key: ContextCache.Key.calendarToday,
+            maxAge: 120,
+            build: {
+                // Use AppleScript to get today's calendar events
+                let script = """
+                    tell application "Calendar"
+                        set today to current date
+                        set tomorrow to today + (1 * days)
+                        set eventList to ""
 
-                repeat with cal in calendars
-                    set calEvents to (every event of cal whose start date ≥ today and start date < tomorrow)
-                    repeat with ev in calEvents
-                        set eventList to eventList & "- " & (summary of ev) & " at " & time string of (start date of ev) & "\\n"
-                    end repeat
-                end repeat
+                        repeat with cal in calendars
+                            set calEvents to (every event of cal whose start date ≥ today and start date < tomorrow)
+                            repeat with ev in calEvents
+                                set eventList to eventList & "- " & (summary of ev) & " at " & time string of (start date of ev) & "\\n"
+                            end repeat
+                        end repeat
 
-                return eventList
-            end tell
-            """
+                        return eventList
+                    end tell
+                    """
 
-        let process = Process()
-        let outputPipe = Pipe()
+                let process = Process()
+                let outputPipe = Pipe()
 
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        process.standardOutput = outputPipe
-        process.standardError = FileHandle.nullDevice
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+                process.arguments = ["-e", script]
+                process.standardOutput = outputPipe
+                process.standardError = FileHandle.nullDevice
 
-        do {
-            try process.run()
-            process.waitUntilExit()
+                do {
+                    try process.run()
+                    process.waitUntilExit()
 
-            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-            if let output = String(data: data, encoding: .utf8), !output.isEmpty {
-                return "## Today's Calendar\n\(output)"
+                    let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+                    if let output = String(data: data, encoding: .utf8), !output.isEmpty {
+                        return "## Today's Calendar\n\(output)"
+                    }
+                } catch {
+                    log("Failed to load calendar: \(error)", level: .warn, component: "MemoryContext")
+                }
+
+                return nil
             }
-        } catch {
-            log("Failed to load calendar: \(error)", level: .warn, component: "MemoryContext")
-        }
-
-        return nil
+        )
     }
 
     private func loadTodayEpisodeModule() -> String? {
         let today = todayEpisodePath()
-        guard let episode = readFile(today) else { return nil }
-        let truncated = lastLines(episode, maxLines: maxLinesForEpisode)
-        return "## Today's Activity\n\(truncated)"
+        return loadCachedSection(
+            key: ContextCache.Key.episodeToday,
+            source: fullPath(today),
+            build: {
+                guard let episode = readFile(today) else { return nil }
+                let truncated = lastLines(episode, maxLines: maxLinesForEpisode)
+                return "## Today's Activity\n\(truncated)"
+            }
+        )
     }
 
     /// Loads profiles for specified handles (phone/email) to check permissions
@@ -654,6 +844,11 @@ final class MemoryContext {
     /// Calls the find-related-context script to get semantically similar past conversations
     /// Used by ClaudeInvoker for cross-temporal context in message responses
     func findRelatedPastContext(for query: String) -> String? {
+        let cacheKey = ContextCache.Key.searchSemantic(query)
+        if let cached = cacheGetSync(cacheKey, maxAge: 300) {
+            return cached
+        }
+
         let scriptPath = (mindPath as NSString).appendingPathComponent("bin/find-related-context")
 
         guard FileManager.default.fileExists(atPath: scriptPath) else {
@@ -703,6 +898,7 @@ final class MemoryContext {
                 return nil
             }
 
+            cacheSetSync(cacheKey, content: output)
             return output
         } catch {
             log("Cross-temporal search failed: \(error)", level: .warn, component: "MemoryContext")
@@ -1004,6 +1200,11 @@ final class MemoryContext {
 
     /// Build a formatted section of related memories for context injection
     func buildRelatedMemoriesSection(for query: String) -> String? {
+        let cacheKey = ContextCache.Key.search(query)
+        if let cached = cacheGetSync(cacheKey, maxAge: 300) {
+            return cached
+        }
+
         let memories = findRelatedMemories(query: query)
         guard !memories.isEmpty else { return nil }
 
@@ -1020,6 +1221,8 @@ final class MemoryContext {
             lines.append(line)
         }
 
-        return lines.joined(separator: "\n")
+        let section = lines.joined(separator: "\n")
+        cacheSetSync(cacheKey, content: section)
+        return section
     }
 }

@@ -119,7 +119,11 @@ final class VerificationService {
     /// Run domain-specific checklist
     func runChecklist(domain: String, context: String) async -> [ChecklistResult] {
         if checklists[domain] == nil {
-            loadChecklists()
+            if let checklist = loadChecklist(domain: domain) {
+                checklists[domain] = checklist
+            } else {
+                loadChecklists()
+            }
         }
         guard let checklist = checklists[domain] else {
             return []
@@ -469,6 +473,22 @@ final class VerificationService {
         }
 
         log("Loaded \(checklists.count) checklists", level: .info, component: "VerificationService")
+    }
+
+    private func loadChecklist(domain: String) -> Checklist? {
+        let path = (checklistsDir as NSString).appendingPathComponent("\(domain).json")
+        guard FileManager.default.fileExists(atPath: path) else {
+            return nil
+        }
+
+        let decoder = JSONDecoder()
+        do {
+            let data = try Data(contentsOf: URL(fileURLWithPath: path))
+            return try decoder.decode(Checklist.self, from: data)
+        } catch {
+            log("Failed to load checklist for \(domain): \(error)", level: .warn, component: "VerificationService")
+            return nil
+        }
     }
 
     private func createDefaultChecklists() {

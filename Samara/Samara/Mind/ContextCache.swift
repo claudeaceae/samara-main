@@ -226,13 +226,18 @@ extension ContextCache {
         static let calendarToday = "calendar_today"
         static let episodeToday = "episode_today"
         static let coreContext = "core_context"
+        static let personPrefix = "person_"
 
         static func person(_ name: String) -> String {
-            return "person_\(name.lowercased())"
+            return "\(personPrefix)\(name.lowercased())"
         }
 
         static func search(_ query: String) -> String {
             return "search_\(query.lowercased().prefix(50))"
+        }
+
+        static func searchSemantic(_ query: String) -> String {
+            return "search_semantic_\(query.lowercased().prefix(50))"
         }
     }
 }

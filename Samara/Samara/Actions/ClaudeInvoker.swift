@@ -811,9 +811,24 @@ final class ClaudeInvoker {
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "HH:mm:ss"
 
+        // Timestamp for session title
+        let titleDateFormatter = DateFormatter()
+        titleDateFormatter.dateFormat = "yyyy-MM-dd-HHmm"
+        let sessionTimestamp = titleDateFormatter.string(from: Date())
+
         // Check if any message is from a group chat
         let isGroupChat = messages.first?.isGroupChat ?? false
         let chatIdentifier = messages.first?.chatIdentifier ?? ""
+
+        // Build session title for distinctive /resume picker names
+        // This helps distinguish iMessage sessions from other automated invocations
+        let sessionTitle: String
+        if isGroupChat {
+            let groupName = chatInfo?.displayName ?? "Group"
+            sessionTitle = "# iMessage Group Session \(sessionTimestamp) (\(groupName))"
+        } else {
+            sessionTitle = "# iMessage Session \(sessionTimestamp)"
+        }
 
         // Collaborator name from config
         let collaboratorName = config.collaborator.name
@@ -1032,8 +1047,11 @@ final class ClaudeInvoker {
             contextStatusSection += "\n📊 At current rate, context full in ~\(Int(timeToFull)) minutes"
         }
 
-        // Inject context status at the start of the prompt (visible to Claude)
+        // Inject session title and context status at the start of the prompt
+        // Session title helps Claude Code generate distinctive session names for /resume picker
         return """
+            \(sessionTitle)
+
             \(contextStatusSection)
 
             \(basePrompt)

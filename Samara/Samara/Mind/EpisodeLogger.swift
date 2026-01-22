@@ -157,6 +157,8 @@ final class EpisodeLogger {
             fileHandle.closeFile()
         }
 
+        MemoryContext.invalidateEpisodeCache()
+
         // Dual-write to unified event stream
         let surfaceType = surfaceForSource(source)
         writeToStream(
@@ -211,6 +213,8 @@ final class EpisodeLogger {
             fileHandle.closeFile()
         }
 
+        MemoryContext.invalidateEpisodeCache()
+
         // Dual-write to unified event stream
         writeToStream(
             surface: "system",
@@ -262,6 +266,8 @@ final class EpisodeLogger {
             }
             fileHandle.closeFile()
         }
+
+        MemoryContext.invalidateEpisodeCache()
 
         // Dual-write to unified event stream
         let surfaceType: String
@@ -323,6 +329,8 @@ final class EpisodeLogger {
             }
             fileHandle.closeFile()
         }
+
+        MemoryContext.invalidateEpisodeCache()
 
         // Dual-write to unified event stream
         let surfaceType: String

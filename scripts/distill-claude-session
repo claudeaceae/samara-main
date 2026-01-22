@@ -162,8 +162,9 @@ PROMPT_EOF
     echo "$PROMPT" > "$PROMPT_FILE"
 
     # Invoke Claude for summarization (haiku for speed, with timeout)
+    # --no-session-persistence: This is a utility task that shouldn't appear in session history
     log "Invoking Claude Haiku for summary..."
-    SUMMARY=$(timeout 60 "$CLAUDE_PATH" -p "$(cat "$PROMPT_FILE")" --output-format text --model haiku 2>/dev/null || echo "")
+    SUMMARY=$(timeout 60 "$CLAUDE_PATH" -p "$(cat "$PROMPT_FILE")" --output-format text --model haiku --no-session-persistence 2>/dev/null || echo "")
     rm -f "$PROMPT_FILE"
 
     if [ -z "$SUMMARY" ]; then
@@ -261,7 +262,8 @@ HANDOFF_PROMPT_EOF
         HANDOFF_PROMPT_FILE=$(mktemp)
         echo "$HANDOFF_PROMPT" > "$HANDOFF_PROMPT_FILE"
 
-        HANDOFF=$(timeout 60 "$CLAUDE_PATH" -p "$(cat "$HANDOFF_PROMPT_FILE")" --output-format text --model haiku 2>/dev/null || echo "")
+        # --no-session-persistence: This is a utility task that shouldn't appear in session history
+        HANDOFF=$(timeout 60 "$CLAUDE_PATH" -p "$(cat "$HANDOFF_PROMPT_FILE")" --output-format text --model haiku --no-session-persistence 2>/dev/null || echo "")
         rm -f "$HANDOFF_PROMPT_FILE"
 
         if [ -n "$HANDOFF" ] && [ "$HANDOFF" != "" ]; then

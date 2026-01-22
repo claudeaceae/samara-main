@@ -17,6 +17,7 @@ Navigation hub for all documentation.
 
 - [Memory Systems](memory-systems.md) — Session retention, semantic search, transcript archive
 - [Contiguous Memory System](contiguous-memory-system.md) — Unified event stream, hot digest, cross-surface context
+- [Smart Context Retrieval Rollout](smart-context-retrieval-rollout.md) — Config checklist and verification
 - [Dynamic Voice System](dynamic-voice-system.md) — Evolving output style based on memory and relationship patterns
 - [Scripts Reference](scripts-reference.md) — Communication, memory, and sync scripts
 - [Services Reference](services-reference.md) — Webhook, MCP, X/Twitter, wallet services

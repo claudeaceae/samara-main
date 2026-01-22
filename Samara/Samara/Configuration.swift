@@ -22,15 +22,15 @@ enum MindPaths {
     }
 
     private static func resolveMindOverride() -> String? {
-        let env = ProcessInfo.processInfo.environment
-        if let value = env["SAMARA_MIND_PATH"] ?? env["MIND_PATH"] {
-            return value
-        }
         if let raw = getenv("SAMARA_MIND_PATH") {
             return String(cString: raw)
         }
         if let raw = getenv("MIND_PATH") {
             return String(cString: raw)
+        }
+        let env = ProcessInfo.processInfo.environment
+        if let value = env["SAMARA_MIND_PATH"] ?? env["MIND_PATH"] {
+            return value
         }
         return nil
     }

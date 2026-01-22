@@ -75,4 +75,78 @@ final class MemoryContextTests: SamaraTestCase {
         XCTAssertTrue(context.contains("Follow up on memory plan"))
         XCTAssertFalse(context.contains("Closed item"))
     }
+
+    func testBuildCoreContextIncludesHotDigestWhenAvailable() throws {
+        try ensureMindFile("state/hot-digest.md", contents: "## Hot Digest\n- Recent item\n")
+
+        let contextBuilder = MemoryContext()
+        let context = contextBuilder.buildCoreContext()
+
+        XCTAssertTrue(context.contains("## Hot Digest"))
+        XCTAssertTrue(context.contains("Recent item"))
+    }
+
+    func testBuildCoreContextFallsBackToOpenThreadsWhenNoDigest() throws {
+        let statePath = TestEnvironment.mindPath.appendingPathComponent("state")
+        try FileManager.default.createDirectory(at: statePath, withIntermediateDirectories: true)
+
+        let threadsPath = statePath.appendingPathComponent("threads.json")
+        let threadsJson = """
+        {
+          "threads": [
+            { "title": "Keep smart context coherent", "status": "open" }
+          ]
+        }
+        """
+        try threadsJson.write(to: threadsPath, atomically: true, encoding: .utf8)
+
+        let cachePath = statePath.appendingPathComponent("hot-digest.md")
+        try? FileManager.default.removeItem(at: cachePath)
+
+        let contextBuilder = MemoryContext()
+        let context = contextBuilder.buildCoreContext()
+
+        XCTAssertTrue(context.contains("### Open Threads"))
+        XCTAssertTrue(context.contains("Keep smart context coherent"))
+    }
+
+    func testBuildSmartContextLoadsRequestedModules() throws {
+        try ensureMindFile("identity.md", contents: "# Identity\n\nSmart context tests.\n")
+        try ensureMindFile("goals.md", contents: "# Goals\n\n- Test smart context modules.\n")
+        try ensureMindFile("memory/decisions.md", contents: "Decision: Prefer smart context.\n")
+        try ensureMindFile("memory/learnings.md", contents: "Learning: Reduce prompt size.\n")
+        try ensureMindFile("memory/observations.md", contents: "Observation: Context was bloated.\n")
+        try ensureMindFile("memory/people/alice/profile.md", contents: "Alice profile notes.\n")
+
+        var needs = ContextRouter.ContextNeeds()
+        needs.needsDecisions = true
+        needs.needsLearnings = true
+        needs.needsObservations = true
+        needs.needsPersonProfiles = ["Alice"]
+        needs.needsTodayEpisode = false
+
+        let contextBuilder = MemoryContext()
+        let context = contextBuilder.buildSmartContext(needs: needs, isCollaboratorChat: true)
+
+        XCTAssertTrue(context.contains("## Architectural Decisions"))
+        XCTAssertTrue(context.contains("Decision: Prefer smart context."))
+        XCTAssertTrue(context.contains("## Learnings"))
+        XCTAssertTrue(context.contains("Learning: Reduce prompt size."))
+        XCTAssertTrue(context.contains("## Self-Observations"))
+        XCTAssertTrue(context.contains("Observation: Context was bloated."))
+        XCTAssertTrue(context.contains("## About Alice"))
+    }
+
+    func testBuildSmartContextOmitsCollaboratorProfileForNonCollaboratorChat() throws {
+        try ensureMindFile("memory/people/tester/profile.md", contents: "Tester profile notes.\n")
+
+        var needs = ContextRouter.ContextNeeds()
+        needs.needsPersonProfiles = ["Tester"]
+        needs.needsTodayEpisode = false
+
+        let contextBuilder = MemoryContext()
+        let context = contextBuilder.buildSmartContext(needs: needs, isCollaboratorChat: false)
+
+        XCTAssertFalse(context.contains("## About Tester"))
+    }
 }

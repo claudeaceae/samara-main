@@ -15,6 +15,7 @@ if lockFileDescriptor == -1 || flock(lockFileDescriptor, LOCK_EX | LOCK_NB) != 0
 let targetPhone = config.collaborator.phone
 let targetEmail = config.collaborator.email
 let collaboratorName = config.collaborator.name
+let features = config.featuresConfig
 
 // Logging is now handled by Logger.swift with log levels and alerting
 
@@ -52,6 +53,15 @@ let memoryContext = MemoryContext()
 let invoker = ClaudeInvoker(memoryContext: memoryContext)
 let episodeLogger = EpisodeLogger()
 let locationTracker = LocationTracker()
+let contextRouter = ContextRouter(
+    timeout: features.smartContextTimeout ?? 5.0,
+    enabled: features.smartContext ?? true
+)
+let contextSelector = ContextSelector(
+    memoryContext: memoryContext,
+    contextRouter: contextRouter,
+    features: features
+)
 
 // Unified message bus - all outbound messages go through here for logging
 let messageBus = MessageBus(sender: sender, episodeLogger: episodeLogger, collaboratorName: collaboratorName)
@@ -71,6 +81,7 @@ let locationFileWatcher = LocationFileWatcher(
     pollInterval: 5,  // Check every 5 seconds as backup to dispatch source
     onLocationChanged: { update in
         log("[Main] Location update from file: \(update.latitude), \(update.longitude) (wifi: \(update.wifi ?? "none"))")
+        MemoryContext.invalidateLocationCache()
 
         let analysis = locationTracker.processLocation(update)
 
@@ -116,6 +127,12 @@ let locationFileWatcher = LocationFileWatcher(
         }
     }
 )
+
+let personProfileWatcher: PersonProfileWatcher? = (features.smartContext ?? true)
+    ? PersonProfileWatcher(onProfilesChanged: {
+        MemoryContext.invalidatePersonCaches()
+    })
+    : nil
 
 // Track messages being processed to avoid duplicates
 var processingMessages = Set<Int64>()
@@ -215,7 +232,7 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
             } && !(messages.first?.isGroupChat ?? false)
 
             // Build context from memory (excludes collaborator profile for non-collaborator chats)
-            let context = memoryContext.buildContext(isCollaboratorChat: isCollaboratorChat)
+            let context = contextSelector.context(for: messages, isCollaboratorChat: isCollaboratorChat)
 
             // Fetch chat info for group chats (name + participants)
             var chatInfo: ChatInfo? = nil
@@ -466,7 +483,12 @@ func handleNoteChange(_ update: NoteUpdate) {
 
         DispatchQueue.global(qos: .userInitiated).async {
             do {
-                let context = memoryContext.buildContext()
+                let context = contextSelector.context(
+                    forText: update.plainTextContent,
+                    isCollaboratorChat: true,
+                    handleId: targetEmail,
+                    chatIdentifier: targetEmail
+                )
 
                 let prompt = """
                     You are Claude, running on a Mac Mini as Samara (your persistent body). \(collaboratorName) has updated the shared "Claude Scratchpad" note.
@@ -529,6 +551,8 @@ let noteWatcher = NoteWatcher(
 )
 noteWatcher.start()
 
+personProfileWatcher?.start()
+
 // Start location file watcher (monitors ~/.claude-mind/state/location.json)
 locationFileWatcher.start()
 
@@ -556,7 +580,17 @@ func handleEmail(_ email: Email) {
 
     DispatchQueue.global(qos: .userInitiated).async {
         do {
-            let context = memoryContext.buildContext()
+            let analysisText = """
+                Email from \(email.sender)
+                Subject: \(email.subject)
+                \(email.content)
+                """
+            let context = contextSelector.context(
+                forText: analysisText,
+                isCollaboratorChat: true,
+                handleId: email.sender,
+                chatIdentifier: email.sender
+            )
 
             let prompt = """
                 You received an email from \(collaboratorName). Read and respond appropriately.
