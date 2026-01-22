@@ -27,6 +27,7 @@ final class LocationTracker {
         let altitude: Double?
         let speed: Double?
         let motion: [String]
+        let wifi: String?
 
         /// Distance in meters to another location
         func distance(to other: LocationEntry) -> Double {
@@ -60,10 +61,12 @@ final class LocationTracker {
         let lon: Double
         let radiusM: Double?
         let type: String?
+        let wifiHints: [String]?
 
         enum CodingKeys: String, CodingKey {
             case name, label, lat, lon, type
             case radiusM = "radius_m"
+            case wifiHints = "wifi_hints"
         }
 
         var radius: Double { radiusM ?? 100 }
@@ -201,6 +204,8 @@ final class LocationTracker {
     private var wasAtWork: Bool = false  // for detecting departure from work
     private var lastTransitAlert: String?  // prevent re-alerting same station
     private var lastPatternDeviationAlert: Date?  // prevent repeated deviation alerts
+    private var consecutiveAwayReadings: Int = 0  // hysteresis counter for departure detection
+    private let requiredAwayReadings: Int = 3  // require N consecutive away readings before triggering
 
     // MARK: - Initialization
 
@@ -261,7 +266,8 @@ final class LocationTracker {
             address: address,
             altitude: update.altitude,
             speed: update.speed,
-            motion: update.motion
+            motion: update.motion,
+            wifi: update.wifi
         )
 
         // Trigger async geocoding in background to populate cache for future
@@ -446,7 +452,8 @@ final class LocationTracker {
             address: address,
             altitude: altitude,
             speed: nil,
-            motion: []
+            motion: [],
+            wifi: nil
         )
     }
 
@@ -559,25 +566,64 @@ final class LocationTracker {
     private func checkLeavingHome(_ location: LocationEntry) -> LocationAnalysis? {
         guard let home = findPlace(named: "home") else { return nil }
 
-        let distanceFromHome = location.distance(toLat: home.lat, lon: home.lon)
-        let isNowAway = distanceFromHome > homeDepartureThreshold
-
-        // Trigger: was at home, now away
-        if wasAtHome && isNowAway {
-            wasAtHome = false
-            saveTrackerState()
-            lastMessageTime = Date()
-            log("Leaving home detected - wasAtHome=\(wasAtHome)", level: .info, component: "LocationTracker")
-            return LocationAnalysis(
-                shouldMessage: true,
-                reason: "Heading out?",
-                currentLocation: location,
-                triggerType: .leavingHome
-            )
+        // FIX 1: WiFi lock - if on home WiFi, definitely not leaving
+        if let homeWifi = home.wifiHints, !homeWifi.isEmpty,
+           let currentWifi = location.wifi, homeWifi.contains(currentWifi) {
+            // Reset away counter since we're definitely home
+            if consecutiveAwayReadings > 0 {
+                consecutiveAwayReadings = 0
+                saveTrackerState()
+            }
+            if !wasAtHome {
+                wasAtHome = true
+                saveTrackerState()
+            }
+            return nil
         }
 
-        // Update home state (but don't trigger here - let checkArrivingHome handle arrival)
-        // Only update to false when leaving; arrival update happens in checkArrivingHome
+        // FIX 2: Dynamic threshold using place radius + buffer
+        let departureThreshold = home.radius + 50  // e.g., 150 + 50 = 200m
+        let distanceFromHome = location.distance(toLat: home.lat, lon: home.lon)
+        let isNowAway = distanceFromHome > departureThreshold
+
+        // FIX 3: Require movement to trigger departure
+        if isNowAway && !isMoving(location) {
+            // Distance says away but not moving - likely GPS jitter
+            return nil
+        }
+
+        // FIX 4: Hysteresis - require consecutive away readings
+        if wasAtHome && isNowAway {
+            consecutiveAwayReadings += 1
+            log("Away reading \(consecutiveAwayReadings)/\(requiredAwayReadings) - distance: \(Int(distanceFromHome))m",
+                level: .debug, component: "LocationTracker")
+
+            if consecutiveAwayReadings >= requiredAwayReadings {
+                // Actually leaving
+                consecutiveAwayReadings = 0
+                wasAtHome = false
+                saveTrackerState()
+                lastMessageTime = Date()
+                log("Leaving home confirmed after \(requiredAwayReadings) readings",
+                    level: .info, component: "LocationTracker")
+                return LocationAnalysis(
+                    shouldMessage: true,
+                    reason: "Heading out?",
+                    currentLocation: location,
+                    triggerType: .leavingHome
+                )
+            }
+            saveTrackerState()  // Persist counter
+            return nil  // Not enough consecutive readings yet
+        }
+
+        // Reset counter if back within threshold
+        if !isNowAway && consecutiveAwayReadings > 0 {
+            consecutiveAwayReadings = 0
+            saveTrackerState()
+        }
+
+        // Update home state for other checks
         if isNowAway {
             wasAtHome = false
         }
@@ -613,8 +659,20 @@ final class LocationTracker {
     private func checkLeavingWork(_ location: LocationEntry) -> LocationAnalysis? {
         guard let work = findPlace(named: "work") else { return nil }
 
+        // WiFi lock - if on work WiFi, definitely not leaving
+        if let workWifi = work.wifiHints, !workWifi.isEmpty,
+           let currentWifi = location.wifi, workWifi.contains(currentWifi) {
+            if !wasAtWork {
+                wasAtWork = true
+                saveTrackerState()
+            }
+            return nil
+        }
+
+        // Dynamic threshold using place radius + buffer
+        let departureThreshold = work.radius + 50
         let distanceFromWork = location.distance(toLat: work.lat, lon: work.lon)
-        let isNowAway = distanceFromWork > homeDepartureThreshold  // reuse same threshold
+        let isNowAway = distanceFromWork > departureThreshold
 
         // Trigger: was at work, now away
         if wasAtWork && isNowAway {
@@ -1054,6 +1112,7 @@ final class LocationTracker {
         var wasAtWork: Bool?  // Optional for backwards compatibility
         var lastMessageTime: Date?
         var lastTransitAlert: String?
+        var consecutiveAwayReadings: Int?  // Hysteresis counter for departure detection
     }
 
     private func loadTrackerState() {
@@ -1071,7 +1130,8 @@ final class LocationTracker {
             wasAtWork = state.wasAtWork ?? false
             lastMessageTime = state.lastMessageTime
             lastTransitAlert = state.lastTransitAlert
-            log("Loaded tracker state: wasAtHome=\(wasAtHome), wasAtWork=\(wasAtWork)", level: .debug, component: "LocationTracker")
+            consecutiveAwayReadings = state.consecutiveAwayReadings ?? 0
+            log("Loaded tracker state: wasAtHome=\(wasAtHome), wasAtWork=\(wasAtWork), awayReadings=\(consecutiveAwayReadings)", level: .debug, component: "LocationTracker")
         } catch {
             log("Error loading tracker state: \(error)", level: .warn, component: "LocationTracker")
         }
@@ -1082,7 +1142,8 @@ final class LocationTracker {
             wasAtHome: wasAtHome,
             wasAtWork: wasAtWork,
             lastMessageTime: lastMessageTime,
-            lastTransitAlert: lastTransitAlert
+            lastTransitAlert: lastTransitAlert,
+            consecutiveAwayReadings: consecutiveAwayReadings
         )
 
         let encoder = JSONEncoder()

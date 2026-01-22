@@ -60,22 +60,23 @@ final class LocationTrackerTests: SamaraTestCase {
         try data.write(to: url)
     }
 
-    private func makeUpdate(lat: Double, lon: Double, timestamp: Date = Date(), motion: [String] = []) -> LocationUpdate {
+    private func makeUpdate(lat: Double, lon: Double, timestamp: Date = Date(), speed: Double? = nil, wifi: String? = nil, motion: [String] = []) -> LocationUpdate {
         LocationUpdate(
             timestamp: timestamp,
             latitude: lat,
             longitude: lon,
             altitude: nil,
-            speed: nil,
+            speed: speed,
             battery: nil,
-            wifi: nil,
+            wifi: wifi,
             motion: motion
         )
     }
 
     func testProcessLocationTriggersLeavingHome() throws {
         let paths = try makePaths()
-        let home = LocationTracker.Place(name: "home", label: "Home Base", lat: 40.0, lon: -73.0, radiusM: 5000, type: nil)
+        // Home radius 5000m, so position at 40.002 is only ~220m away - need to be outside radius + 50m
+        let home = LocationTracker.Place(name: "home", label: "Home Base", lat: 40.0, lon: -73.0, radiusM: 100, type: nil, wifiHints: nil)
         try writePlaces([home], to: paths.placesPath)
         try writeTrackerState(wasAtHome: true, wasAtWork: false, to: paths.statePath)
 
@@ -88,16 +89,26 @@ final class LocationTrackerTests: SamaraTestCase {
             statePath: paths.statePath.path
         )
 
-        let update = makeUpdate(lat: 40.002, lon: -73.0)
-        let analysis = tracker.processLocation(update)
+        // Need 3 consecutive away readings with movement to trigger (hysteresis + motion check)
+        // Position at 40.002 is ~220m from home, outside 100m + 50m = 150m threshold
+        let awayUpdate = makeUpdate(lat: 40.002, lon: -73.0, speed: 2.0, motion: ["walking"])
 
-        XCTAssertTrue(analysis.shouldMessage)
-        XCTAssertEqual(analysis.triggerType, .leavingHome)
+        // First 2 readings accumulate hysteresis counter but don't trigger
+        let analysis1 = tracker.processLocation(awayUpdate)
+        XCTAssertFalse(analysis1.shouldMessage, "First away reading should not trigger")
+
+        let analysis2 = tracker.processLocation(awayUpdate)
+        XCTAssertFalse(analysis2.shouldMessage, "Second away reading should not trigger")
+
+        // Third reading triggers the departure
+        let analysis3 = tracker.processLocation(awayUpdate)
+        XCTAssertTrue(analysis3.shouldMessage, "Third away reading should trigger")
+        XCTAssertEqual(analysis3.triggerType, .leavingHome)
     }
 
     func testProcessLocationTriggersNearTransit() throws {
         let paths = try makePaths()
-        let place = LocationTracker.Place(name: "office", label: "Office", lat: 40.0, lon: -73.0, radiusM: 5000, type: nil)
+        let place = LocationTracker.Place(name: "office", label: "Office", lat: 40.0, lon: -73.0, radiusM: 5000, type: nil, wifiHints: nil)
         try writePlaces([place], to: paths.placesPath)
 
         let station = LocationTracker.SubwayStation(name: "Test Station", lat: 40.0, lon: -73.0, stopId: nil)
@@ -129,11 +140,12 @@ final class LocationTrackerTests: SamaraTestCase {
             address: "Home",
             altitude: nil,
             speed: nil,
-            motion: []
+            motion: [],
+            wifi: nil
         )
         try writeKnownPlaces(["Home": homeEntry], to: paths.knownPlacesPath)
 
-        let place = LocationTracker.Place(name: "home", label: "Home", lat: 40.0, lon: -73.0, radiusM: 5000, type: nil)
+        let place = LocationTracker.Place(name: "home", label: "Home", lat: 40.0, lon: -73.0, radiusM: 5000, type: nil, wifiHints: nil)
         try writePlaces([place], to: paths.placesPath)
 
         let tracker = LocationTracker(
@@ -154,7 +166,7 @@ final class LocationTrackerTests: SamaraTestCase {
 
     func testCurrentPlaceNameUsesLabel() throws {
         let paths = try makePaths()
-        let place = LocationTracker.Place(name: "office", label: "HQ", lat: 40.0, lon: -73.0, radiusM: 5000, type: nil)
+        let place = LocationTracker.Place(name: "office", label: "HQ", lat: 40.0, lon: -73.0, radiusM: 5000, type: nil, wifiHints: nil)
         try writePlaces([place], to: paths.placesPath)
 
         let tracker = LocationTracker(
@@ -173,7 +185,8 @@ final class LocationTrackerTests: SamaraTestCase {
             address: "HQ",
             altitude: nil,
             speed: nil,
-            motion: []
+            motion: [],
+            wifi: nil
         )
 
         XCTAssertEqual(tracker.currentPlaceName(for: entry), "HQ")
