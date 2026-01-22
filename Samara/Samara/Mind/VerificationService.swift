@@ -62,7 +62,7 @@ final class VerificationService {
 
     // MARK: - Initialization
 
-    init(localInvoker: LocalModelInvoker? = nil) {
+    init(localInvoker: LocalModelInvoker? = nil, checklistsDir: String? = nil) {
         // Use provided invoker or create default
         if let invoker = localInvoker {
             self.localInvoker = invoker
@@ -71,10 +71,10 @@ final class VerificationService {
             self.localInvoker = LocalModelInvoker(endpoint: endpoint, timeout: 30)
         }
 
-        self.checklistsDir = MindPaths.mindPath("state/checklists")
+        self.checklistsDir = checklistsDir ?? MindPaths.mindPath("state/checklists")
 
         // Ensure directory exists
-        try? FileManager.default.createDirectory(atPath: checklistsDir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(atPath: self.checklistsDir, withIntermediateDirectories: true)
 
         // Load checklists
         loadChecklists()

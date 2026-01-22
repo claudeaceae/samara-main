@@ -2,15 +2,22 @@ import XCTest
 
 final class VerificationServiceTests: SamaraTestCase {
 
+    private func checklistsPath() -> String {
+        TestEnvironment.installIfNeeded()
+        return TestEnvironment.mindPath
+            .appendingPathComponent("state/checklists")
+            .path
+    }
+
     private func makeService() -> VerificationService {
         TestEnvironment.installIfNeeded()
         let invoker = LocalModelInvoker(endpoint: URL(string: "http://localhost:11434")!, timeout: 0.1)
-        return VerificationService(localInvoker: invoker)
+        return VerificationService(localInvoker: invoker, checklistsDir: checklistsPath())
     }
 
     private func writeChecklist(_ checklist: VerificationService.Checklist) {
         TestEnvironment.installIfNeeded()
-        let checklistsURL = TestEnvironment.mindPath.appendingPathComponent("state/checklists")
+        let checklistsURL = URL(fileURLWithPath: checklistsPath())
         try? FileManager.default.removeItem(at: checklistsURL)
         try? FileManager.default.createDirectory(at: checklistsURL, withIntermediateDirectories: true)
 
