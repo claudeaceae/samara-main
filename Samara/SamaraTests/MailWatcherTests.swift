@@ -35,7 +35,7 @@ final class MailWatcherTests: SamaraTestCase {
         XCTAssertEqual(received.count, 1)
         XCTAssertEqual(received.first?.id, "300")
 
-        let seenPath = TestEnvironment.mindPath.appendingPathComponent("mail-seen-ids.json")
+        let seenPath = TestEnvironment.mindPath.appendingPathComponent("state/services/mail-seen-ids.json")
         let data = try Data(contentsOf: seenPath)
         let ids = try JSONDecoder().decode([String].self, from: data)
         XCTAssertTrue(ids.contains("300"))
@@ -50,7 +50,7 @@ final class MailWatcherTests: SamaraTestCase {
         watcher.markAsSeen("c")
         watcher.pruneSeenIds(keepCount: 2)
 
-        let seenPath = TestEnvironment.mindPath.appendingPathComponent("mail-seen-ids.json")
+        let seenPath = TestEnvironment.mindPath.appendingPathComponent("state/services/mail-seen-ids.json")
         let data = try Data(contentsOf: seenPath)
         let ids = try JSONDecoder().decode([String].self, from: data)
         XCTAssertLessThanOrEqual(ids.count, 2)

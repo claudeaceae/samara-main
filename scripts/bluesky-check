@@ -12,7 +12,7 @@ source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
 }
 
 LOG_FILE="$MIND_PATH/logs/bluesky.log"
-STATE_FILE="$MIND_PATH/bluesky-state.json"
+STATE_FILE="$MIND_PATH/state/services/bluesky-state.json"
 CREDS_FILE="$MIND_PATH/credentials/bluesky.json"
 LOCK_FILE="$MIND_PATH/claude.lock"
 
@@ -76,7 +76,7 @@ except ImportError:
 
 home = os.environ.get('HOME', os.path.expanduser('~'))
 creds_file = f"{home}/.claude-mind/credentials/bluesky.json"
-state_file = f"{home}/.claude-mind/bluesky-state.json"
+state_file = f"{home}/.claude-mind/state/services/bluesky-state.json"
 
 # Load credentials
 try:

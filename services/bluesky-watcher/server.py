@@ -25,7 +25,7 @@ MIND_DIR = resolve_mind_dir()
 STATE_DIR = os.path.join(MIND_DIR, 'state')
 SENSES_DIR = os.path.join(MIND_DIR, 'senses')
 CREDS_FILE = os.path.join(MIND_DIR, 'credentials', 'bluesky.json')
-STATE_FILE = os.path.join(STATE_DIR, 'bluesky-state.json')
+STATE_FILE = os.path.join(STATE_DIR, 'services', 'bluesky-state.json')
 LOG_FILE = os.path.join(MIND_DIR, 'logs', 'bluesky-watcher.log')
 
 

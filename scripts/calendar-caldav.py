@@ -21,7 +21,7 @@ try:
 except ImportError:
     print(json.dumps({
         "error": "caldav library not installed",
-        "fix": "Run: ~/.claude-mind/venv/bin/pip install caldav"
+        "fix": "Run: ~/.claude-mind/.venv/bin/pip install caldav"
     }))
     sys.exit(1)
 

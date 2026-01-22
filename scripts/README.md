@@ -245,7 +245,7 @@ Poll GitHub notifications and respond.
 1. Fetches notifications via `gh api`
 2. Filters for actionable items (mentions, PR comments, review requests)
 3. Invokes Claude to respond
-4. Tracks in `~/.claude-mind/github-seen-ids.json`
+4. Tracks in `~/.claude-mind/state/services/github-seen-ids.json`
 
 **API:**
 ```bash

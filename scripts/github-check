@@ -12,7 +12,7 @@ source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
 }
 
 LOG_FILE="$MIND_PATH/logs/github.log"
-STATE_FILE="$MIND_PATH/github-seen-ids.json"
+STATE_FILE="$MIND_PATH/state/services/github-seen-ids.json"
 LOCK_FILE="$MIND_PATH/claude.lock"
 
 log() {
@@ -75,7 +75,7 @@ import sys
 from datetime import datetime
 
 home = os.environ.get('HOME', os.path.expanduser('~'))
-state_file = f"{home}/.claude-mind/github-seen-ids.json"
+state_file = f"{home}/.claude-mind/state/services/github-seen-ids.json"
 
 # Load state
 try:

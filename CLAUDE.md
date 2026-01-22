@@ -56,41 +56,64 @@ Samara.app (message broker)
 ```
 ~/.claude-mind/
 ├── identity.md              # Who am I
-├── goals.md                 # Where am I going
+├── goals.md                 # Where am I going (north stars, active, backlog)
+├── projects.md              # What am I working on (bridges goals ↔ plans)
 ├── config.json              # Configuration
 ├── .claude/ → repo/.claude/ # Symlink for hooks, agents, skills
 ├── instructions/            # Symlinked prompt guidance files
 ├── memory/
-│   ├── episodes/            # Daily logs
+│   ├── episodes/            # Daily logs (YYYY-MM-DD.md)
 │   ├── reflections/         # Dream outputs
 │   ├── people/              # Rich person-modeling
 │   │   ├── {name}/
 │   │   │   ├── profile.md   # Accumulated observations
 │   │   │   └── artifacts/   # Images, docs, etc.
 │   │   └── README.md        # Conventions
-│   ├── about-{name}.md      # Symlink → people/{name}/profile.md (backwards compat)
 │   ├── learnings.md
 │   ├── observations.md
 │   ├── questions.md
 │   └── decisions.md
 ├── semantic/                # Searchable memory index
 │   └── memory.db            # SQLite + FTS5 database
+├── chroma/                  # Vector embeddings for semantic search
+├── stream/                  # Unified event stream
+│   ├── daily/               # Daily event shards (events-YYYY-MM-DD.jsonl)
+│   └── distilled-index.jsonl
 ├── capabilities/
 │   └── inventory.md
-├── bin/ → repo/scripts/     # Symlinked scripts (61+ scripts)
+├── bin/ → repo/scripts/     # Symlinked scripts (100+)
 ├── state/                   # Runtime state files
-│   ├── plans/               # Organism-local plans (from Claude Code)
-│   ├── ledgers/             # Session handoff documents
+│   ├── plans/               # Active implementation plans
+│   │   └── archive/         # Completed/superseded plans
+│   ├── handoffs/            # Session continuity documents
 │   ├── triggers/            # Context trigger config
-│   ├── iterations/          # Active iteration state
-│   ├── proactive-queue/     # Outgoing message queue
+│   ├── services/            # Service state tracking
+│   │   ├── bluesky-state.json
+│   │   ├── github-seen-ids.json
+│   │   └── mail-seen-ids.json
+│   ├── message-queue.json   # Pending iMessage queue
+│   ├── proactive-queue/     # Outgoing proactive messages
 │   ├── expression-state.json
 │   └── expression-seeds.json
 ├── senses/                  # Incoming sense events
+├── roundups/                # Weekly/monthly summaries (auto-generated)
+├── credentials/             # API keys, avatar images
 └── logs/
 ```
 
 For detailed memory documentation, see **[Memory Systems](docs/memory-systems.md)**.
+
+### Project Management
+
+Work is tracked across three levels:
+
+| Document | Purpose |
+|----------|---------|
+| `goals.md` | **Direction** — North stars, active goals, backlog ideas |
+| `projects.md` | **Tracking** — Active projects linking goals to implementation plans |
+| `state/plans/` | **Details** — Implementation plans with code, verification steps |
+
+**Workflow:** Goals inspire projects → projects reference plans → completed plans move to `archive/` with descriptive names.
 
 ---
 

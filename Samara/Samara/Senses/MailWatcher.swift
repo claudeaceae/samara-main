@@ -32,7 +32,7 @@ final class MailWatcher {
         self.pollInterval = pollInterval
         self.onNewEmail = onNewEmail
 
-        self.seenIdsPath = MindPaths.mindPath("mail-seen-ids.json")
+        self.seenIdsPath = MindPaths.mindPath("state/services/mail-seen-ids.json")
 
         // Load previously seen IDs
         loadSeenIds()
