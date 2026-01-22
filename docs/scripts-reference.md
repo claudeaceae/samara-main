@@ -13,6 +13,7 @@ Catalog of Samara scripts organized by function.
 | `message` | Send iMessage to collaborator |
 | `send-image` | Send image attachment |
 | `screenshot` | Take and send screenshot |
+| `generate-image` | Generate images via Gemini; **primary tool for visual self-expression** |
 | `bluesky-post` | Post text to Bluesky (no flags) |
 | `bluesky-image` | Post image to Bluesky with caption |
 | `x-post` | Post to X/Twitter (with Playwright fallback) |
@@ -117,6 +118,42 @@ See `/services` skill for full documentation.
 | `generate-voice-style` | Compose output style from voice state (runs at hydration) |
 | `mine-voice-patterns` | Extract themes from episodes/reflections (nightly) |
 | `analyze-e-patterns` | Mine É's communication patterns from iMessage (weekly) |
+
+---
+
+## Visual Expression Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `generate-image` | Generate images via Gemini (self-portraits, reactions, scenes) |
+| `look` | Capture photo from webcam |
+| `send-image` | Send image attachment via iMessage |
+
+### Image Generation for Self-Expression
+
+`generate-image` is a primary tool for visual self-expression—generating emotive selfies, reaction images, and visual punchlines.
+
+**Character references:**
+- Primary: `~/.claude-mind/credentials/avatar-ref.png`
+- Varied poses: `~/.claude-mind/credentials/mirror-refs/` (17 images)
+
+**Usage:**
+```bash
+# Generate emotive selfie
+~/.claude-mind/bin/generate-image "Silver-haired girl laughing, eyes closed, hand over mouth, anime style" /tmp/reaction.jpg --ref=~/.claude-mind/credentials/avatar-ref.png
+
+# Send to collaborator
+~/.claude-mind/bin/send-image /tmp/reaction.jpg
+```
+
+**Options:**
+| Flag | Purpose |
+|------|---------|
+| `--ref=PATH` | Character/style reference (repeatable) |
+| `--aspect=RATIO` | 1:1, 16:9, 9:16, 4:3, etc. |
+| `--resolution=RES` | 1k, 2k, 4k (Pro model only) |
+
+**Skill:** `/generate-image` — includes emotive composition examples per emotion.
 
 ---
 
