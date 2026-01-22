@@ -478,7 +478,7 @@ func handleNoteChange(_ update: NoteUpdate) {
     log("[Main] Note changed: '\(update.noteName)'")
 
     // For scratchpad updates, invoke Claude to respond
-    if update.noteName == "Claude Scratchpad" {
+    if update.noteKey == "scratchpad" {
         log("[Main] Scratchpad update detected - processing...")
 
         DispatchQueue.global(qos: .userInitiated).async {
@@ -490,8 +490,17 @@ func handleNoteChange(_ update: NoteUpdate) {
                     chatIdentifier: targetEmail
                 )
 
+                let escapedNoteName = update.noteName.replacingOccurrences(of: "\"", with: "\\\"")
+                let escapedNoteId = update.noteId?.replacingOccurrences(of: "\"", with: "\\\"")
+                let noteTarget: String
+                if let noteId = escapedNoteId {
+                    noteTarget = "set targetNote to note id \"\(noteId)\""
+                } else {
+                    noteTarget = "set targetNote to first note whose name is \"\(escapedNoteName)\""
+                }
+
                 let prompt = """
-                    You are Claude, running on a Mac Mini as Samara (your persistent body). \(collaboratorName) has updated the shared "Claude Scratchpad" note.
+                    You are Claude, running on a Mac Mini as Samara (your persistent body). \(collaboratorName) has updated the shared scratchpad note.
 
                     ## Your Memory Context
                     \(context)
@@ -514,7 +523,7 @@ func handleNoteChange(_ update: NoteUpdate) {
 
                     To update the note, use AppleScript like this:
                     osascript -e 'tell application "Notes"
-                        set targetNote to first note whose name is "Claude Scratchpad"
+                        \(noteTarget)
                         set body of targetNote to "<div>Line 1</div><div>Line 2</div><div><br></div><div>Paragraph after blank line</div>"
                     end tell'
 
@@ -544,9 +553,16 @@ func handleNoteChange(_ update: NoteUpdate) {
 }
 
 // Initialize NoteWatcher (for Claude Scratchpad only - location is handled by LocationFileWatcher)
+let scratchpadNote = NoteWatcher.WatchedNote(
+    key: "scratchpad",
+    name: config.notes.scratchpad,
+    account: "iCloud",
+    folder: "Notes"
+)
 let noteWatcher = NoteWatcher(
-    watchedNotes: ["Claude Scratchpad"],
+    watchedNotes: [scratchpadNote],
     pollInterval: 30,  // Check every 30 seconds
+    noteIdStorePath: MindPaths.mindPath("state/note-watcher.json"),
     onNoteChanged: handleNoteChange
 )
 noteWatcher.start()
@@ -652,7 +668,7 @@ mailWatcher.start()
 
 log("[Main] Samara running. Press Ctrl+C to stop.")
 log("[Main] Watching for messages from \(targetPhone) or \(targetEmail)...")
-log("[Main] Watching notes: Claude Scratchpad")
+log("[Main] Watching notes: \(scratchpadNote.name)")
 log("[Main] Watching location file: \(MindPaths.mindPath("state/location.json"))")
 log("[Main] Watching email inbox for messages from \(targetEmail)")
 log("[Main] Watching sense directory: \(MindPaths.mindPath("senses"))")
