@@ -6,24 +6,24 @@
     <string>com.claude.meeting-check</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/claude/.claude-mind/bin/meeting-check</string>
+        <string>{{HOME}}/.claude-mind/bin/meeting-check</string>
     </array>
     <key>StartInterval</key>
     <integer>900</integer>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/claude/.claude-mind/logs/meeting-check.stdout.log</string>
+    <string>{{HOME}}/.claude-mind/logs/meeting-check.stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/claude/.claude-mind/logs/meeting-check.stderr.log</string>
+    <string>{{HOME}}/.claude-mind/logs/meeting-check.stderr.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>
-        <string>/Users/claude</string>
+        <string>{{HOME}}</string>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/Users/claude/.local/bin</string>
+        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:{{HOME}}/.local/bin</string>
         <key>MIND_PATH</key>
-        <string>/Users/claude/.claude-mind</string>
+        <string>{{HOME}}/.claude-mind</string>
     </dict>
 </dict>
 </plist>

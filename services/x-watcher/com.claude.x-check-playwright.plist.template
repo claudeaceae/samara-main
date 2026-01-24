@@ -3,22 +3,21 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.claude.x-watcher</string>
+    <string>com.claude.x-check-playwright</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
-        <string>/Users/claude/Developer/samara-main/services/x-watcher/server.py</string>
+        <string>{{HOME}}/.claude-mind/bin/x-check-playwright</string>
     </array>
 
     <key>StartInterval</key>
     <integer>900</integer>
 
     <key>StandardOutPath</key>
-    <string>/Users/claude/.claude-mind/logs/x-watcher.log</string>
+    <string>{{HOME}}/.claude-mind/logs/x-playwright.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/claude/.claude-mind/logs/x-watcher.log</string>
+    <string>{{HOME}}/.claude-mind/logs/x-playwright.log</string>
 
     <key>RunAtLoad</key>
     <false/>
@@ -26,9 +25,9 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>
-        <string>/Users/claude</string>
+        <string>{{HOME}}</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/claude/.local/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{{HOME}}/.local/bin</string>
     </dict>
 </dict>
 </plist>

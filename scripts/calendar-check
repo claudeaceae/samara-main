@@ -8,7 +8,7 @@ set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 VENV_PATH="$MIND_PATH/.venv"
-LOG_FILE="$MIND_PATH/logs/calendar.log"
+LOG_FILE="$MIND_PATH/system/logs/calendar.log"
 STATE_FILE="$MIND_PATH/state/calendar-triggers.json"
 LAST_TRIGGER_FILE="$MIND_PATH/state/last-calendar-trigger.txt"
 
@@ -112,7 +112,7 @@ print(analyzer.get_calendar_summary())
 " 2>/dev/null) || CALENDAR_CONTEXT="Unable to get calendar context"
 
 # Read core identity files
-IDENTITY=$(cat "$MIND_PATH/identity.md" 2>/dev/null || echo "")
+IDENTITY=$(cat "$MIND_PATH/self/identity.md" 2>/dev/null || echo "")
 DECISIONS=$(cat "$MIND_PATH/memory/decisions.md" 2>/dev/null || echo "")
 ABOUT_E=$(cat "$MIND_PATH/memory/about-e.md" 2>/dev/null || echo "")
 
@@ -195,7 +195,7 @@ if [ -n "$MESSAGE" ]; then
     log "Sending proactive message: ${MESSAGE:0:50}..."
 
     # Send via iMessage
-    "$MIND_PATH/bin/message-e" "$MESSAGE"
+    "$MIND_PATH/system/bin/message-e" "$MESSAGE"
 
     # Update last trigger time
     date +%s > "$LAST_TRIGGER_FILE"

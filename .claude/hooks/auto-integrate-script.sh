@@ -2,7 +2,7 @@
 # PostToolUse hook: Auto-integrate new scripts
 #
 # When a script is written to the scripts/ directory:
-# 1. Create symlink in ~/.claude-mind/bin/
+# 1. Create symlink in ~/.claude-mind/system/bin/
 # 2. Run basic syntax check
 # 3. Append entry to capabilities changelog
 #
@@ -32,7 +32,7 @@ if [[ "$FILE_PATH" != "$SCRIPTS_DIR"/* ]]; then
 fi
 
 SCRIPT_NAME=$(basename "$FILE_PATH")
-SYMLINK_PATH="$MIND_PATH/bin/$SCRIPT_NAME"
+SYMLINK_PATH="$MIND_PATH/system/bin/$SCRIPT_NAME"
 MESSAGES=""
 
 # 1. Create symlink if doesn't exist

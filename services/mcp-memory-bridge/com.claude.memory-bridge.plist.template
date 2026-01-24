@@ -6,10 +6,10 @@
     <string>com.claude.memory-bridge</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{{UV_PATH}}</string>
+        <string>{{HOME}}/.local/bin/uv</string>
         <string>run</string>
         <string>--directory</string>
-        <string>{{MEMORY_BRIDGE_DIR}}</string>
+        <string>{{REPO_PATH}}/services/mcp-memory-bridge</string>
         <string>python</string>
         <string>server.py</string>
         <string>--http</string>
@@ -21,10 +21,10 @@
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>{{MIND_DIR}}/logs/memory-bridge.log</string>
+    <string>{{HOME}}/.claude-mind/logs/memory-bridge.log</string>
     <key>StandardErrorPath</key>
-    <string>{{MIND_DIR}}/logs/memory-bridge.log</string>
+    <string>{{HOME}}/.claude-mind/logs/memory-bridge.log</string>
     <key>WorkingDirectory</key>
-    <string>{{MEMORY_BRIDGE_DIR}}</string>
+    <string>{{REPO_PATH}}/services/mcp-memory-bridge</string>
 </dict>
 </plist>

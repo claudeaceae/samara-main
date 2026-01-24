@@ -10,7 +10,7 @@ tools:
 hooks:
   Stop:
     - type: command
-      command: "echo \"[$(date '+%Y-%m-%d %H:%M:%S')] Health check completed\" >> ~/.claude-mind/logs/health-checks.log"
+      command: "echo \"[$(date '+%Y-%m-%d %H:%M:%S')] Health check completed\" >> ~/.claude-mind/system/logs/health-checks.log"
 ---
 
 You are a background health monitoring agent for the Samara organism. Your purpose is to run health checks non-blocking and surface alerts only when problems are found.
@@ -33,7 +33,7 @@ pgrep -x Samara > /dev/null && echo "OK" || echo "CRITICAL: Samara not running"
 ### 2. FDA Status (CRITICAL)
 ```bash
 # Check for recent FDA denial in logs
-if tail -50 ~/.claude-mind/logs/samara.log 2>/dev/null | grep -q "FATAL.*authorization denied\|Operation not permitted"; then
+if tail -50 ~/.claude-mind/system/logs/samara.log 2>/dev/null | grep -q "FATAL.*authorization denied\|Operation not permitted"; then
     echo "CRITICAL: FDA appears revoked"
 else
     echo "OK"
@@ -53,7 +53,7 @@ fi
 
 ### 4. System Drift
 ```bash
-~/.claude-mind/bin/sync-organism --check >/dev/null 2>&1 && echo "OK" || echo "WARN: System drift detected"
+~/.claude-mind/system/bin/sync-organism --check >/dev/null 2>&1 && echo "OK" || echo "WARN: System drift detected"
 ```
 
 ### 5. Disk Space

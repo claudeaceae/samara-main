@@ -25,10 +25,10 @@ def resolve_mind_dir() -> str:
 
 
 MIND_DIR = resolve_mind_dir()
-CREDS_FILE = os.path.join(MIND_DIR, 'credentials', 'wallet-apis.json')
+CREDS_FILE = os.path.join(MIND_DIR, 'self', 'credentials', 'wallet-apis.json')
 STATE_FILE = os.path.join(MIND_DIR, 'state', 'wallet-state.json')
-SENSES_DIR = os.path.join(MIND_DIR, 'senses')
-LOG_FILE = os.path.join(MIND_DIR, 'logs', 'wallet-watcher.log')
+SENSES_DIR = os.path.join(MIND_DIR, 'system', 'senses')
+LOG_FILE = os.path.join(MIND_DIR, 'system', 'logs', 'wallet-watcher.log')
 
 # Approximate USD prices for threshold calculation (rough estimates)
 APPROX_PRICES_USD = {

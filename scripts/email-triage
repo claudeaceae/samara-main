@@ -11,7 +11,7 @@
 set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-LOG_FILE="$MIND_PATH/logs/email-triage.log"
+LOG_FILE="$MIND_PATH/system/logs/email-triage.log"
 STATE_FILE="$MIND_PATH/state/email-seen-ids.json"
 
 log() {
@@ -36,7 +36,7 @@ from html import unescape
 
 home = os.environ.get('HOME', os.path.expanduser('~'))
 state_file = f"{home}/.claude-mind/state/email-seen-ids.json"
-log_file = f"{home}/.claude-mind/logs/email-triage.log"
+log_file = f"{home}/.claude-mind/system/logs/email-triage.log"
 
 def log(msg):
     with open(log_file, 'a') as f:

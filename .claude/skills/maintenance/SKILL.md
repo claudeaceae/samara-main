@@ -17,18 +17,18 @@ Run maintenance checks and repairs on the Samara organism.
 Run a quick health status:
 
 ```bash
-~/.claude-mind/bin/sync-organism --check && echo "No drift detected" || echo "Drift detected"
+~/.claude-mind/system/bin/sync-organism --check && echo "No drift detected" || echo "Drift detected"
 ```
 
 ## Full Maintenance Checklist
 
 ### 1. System Drift Check
 ```bash
-~/.claude-mind/bin/sync-organism --check
+~/.claude-mind/system/bin/sync-organism --check
 ```
 If drift detected, review and sync:
 ```bash
-~/.claude-mind/bin/sync-organism
+~/.claude-mind/system/bin/sync-organism
 ```
 
 ### 2. Launchd Services
@@ -54,7 +54,7 @@ open /Applications/Samara.app
 ### 4. FDA Status
 ```bash
 # Check for recent FDA issues
-tail -20 ~/.claude-mind/logs/samara.log | grep -i "denied\|permission"
+tail -20 ~/.claude-mind/system/logs/samara.log | grep -i "denied\|permission"
 ```
 
 ### 5. Lock File
@@ -68,7 +68,7 @@ fi
 ### 6. Symlink Integrity
 ```bash
 # Check critical symlinks
-for link in ~/.claude-mind/bin ~/.claude-mind/.claude ~/.claude-mind/instructions; do
+for link in ~/.claude-mind/system/bin ~/.claude-mind/.claude ~/.claude-mind/system/instructions; do
     if [ -L "$link" ]; then
         if [ -e "$link" ]; then
             echo "$link -> $(readlink "$link") [OK]"
@@ -83,12 +83,12 @@ done
 
 ### Sync from repo
 ```bash
-~/.claude-mind/bin/sync-organism
+~/.claude-mind/system/bin/sync-organism
 ```
 
 ### Rebuild Samara.app
 ```bash
-~/.claude-mind/bin/update-samara
+~/.claude-mind/system/bin/update-samara
 ```
 
 ### Clear stale lock

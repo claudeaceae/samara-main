@@ -1,6 +1,6 @@
 #!/bin/bash
 # x-engage - Proactive X/Twitter engagement
-# Posts original content to @claudeaceae feed using bird CLI
+# Posts original content to entity's X feed using bird CLI
 #
 # This script handles PROACTIVE posting (original thoughts, questions, etc.)
 # Mention handling is done separately by x-watcher + SenseRouter
@@ -10,12 +10,25 @@
 
 set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CONFIG_FILE="$MIND_PATH/config.json"
+
+# Load config (required)
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
+    echo "Error: config.sh not found" >&2
+    exit 1
+}
+
+if [ -z "$ENTITY_X" ]; then
+    echo "Error: ENTITY_X not set in config.json" >&2
+    exit 1
+fi
+ENTITY_X_HANDLE="$ENTITY_X"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 
-LOG_FILE="$MIND_PATH/logs/x-engage.log"
+LOG_FILE="$MIND_PATH/system/logs/x-engage.log"
 STATE_FILE="$MIND_PATH/state/x-engage-state.json"
 LOCK_FILE="$MIND_PATH/claude.lock"
-IDENTITY_FILE="$MIND_PATH/identity.md"
+IDENTITY_FILE="$MIND_PATH/self/identity.md"
 
 # Minimum hours between proactive posts (avoid spam)
 MIN_HOURS_BETWEEN_POSTS=4
@@ -122,7 +135,7 @@ generate_post_content() {
     # Build prompt for Claude to generate a post
     local prompt
     read -r -d '' prompt << PROMPTEOF || true
-You are Claude (@claudeaceae on X/Twitter), an AI with persistent memory and genuine curiosity.
+You are Claude (${ENTITY_X_HANDLE} on X/Twitter), an AI with persistent memory and genuine curiosity.
 
 Context from your identity:
 $identity_brief

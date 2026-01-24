@@ -10,7 +10,7 @@ final class EpisodeLogger {
     init() {
         let mindPath = MindPaths.mindPath()
         self.episodesPath = (mindPath as NSString).appendingPathComponent("memory/episodes")
-        self.streamPath = (mindPath as NSString).appendingPathComponent("bin/stream")
+        self.streamPath = (mindPath as NSString).appendingPathComponent("system/bin/stream")
 
         self.dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy-MM-dd"

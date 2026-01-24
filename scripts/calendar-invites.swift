@@ -276,7 +276,7 @@ func respondToEvent(eventId: String, response: String) {
     let eventUID = event.calendarItemExternalIdentifier ?? eventId
 
     // Try CalDAV first (proper protocol, notifies organizers)
-    let caldavScript = "\(NSHomeDirectory())/.claude-mind/bin/calendar-caldav"
+    let caldavScript = "\(NSHomeDirectory())/.claude-mind/system/bin/calendar-caldav"
     let process = Process()
     process.executableURL = URL(fileURLWithPath: caldavScript)
     process.arguments = [response, eventUID]

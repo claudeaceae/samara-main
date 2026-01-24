@@ -31,7 +31,7 @@ pgrep -x Samara > /dev/null && echo "running" || echo "stopped"
 
 ### 2. FDA Status (check for denial errors)
 ```bash
-tail -50 ~/.claude-mind/logs/samara.log 2>/dev/null | grep -c "authorization denied\|Operation not permitted" || echo "0"
+tail -50 ~/.claude-mind/system/logs/samara.log 2>/dev/null | grep -c "authorization denied\|Operation not permitted" || echo "0"
 ```
 
 ### 3. Launchd Jobs Count

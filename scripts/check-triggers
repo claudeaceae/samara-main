@@ -7,7 +7,7 @@ set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 VENV_PATH="$MIND_PATH/.venv"
-LOG_FILE="$MIND_PATH/logs/triggers.log"
+LOG_FILE="$MIND_PATH/system/logs/triggers.log"
 STATE_FILE="$MIND_PATH/state/last-evaluation.json"
 
 log() {
@@ -71,8 +71,8 @@ case "$ESCALATION" in
     "engage")
         log "High confidence, initiating proactive engagement"
         # Call proactive-engage script
-        if [ -f "$MIND_PATH/bin/proactive-engage" ]; then
-            "$MIND_PATH/bin/proactive-engage" "$TRIGGER_TYPE" "$REASON" >> "$LOG_FILE" 2>&1 && \
+        if [ -f "$MIND_PATH/system/bin/proactive-engage" ]; then
+            "$MIND_PATH/system/bin/proactive-engage" "$TRIGGER_TYPE" "$REASON" >> "$LOG_FILE" 2>&1 && \
                 log "Proactive engagement completed" || \
                 log "Proactive engagement failed"
         else

@@ -56,7 +56,7 @@ final class Logger {
 
     private init() {
         mindPath = MindPaths.mindPath()
-        let logsDir = MindPaths.mindURL("logs")
+        let logsDir = MindPaths.mindURL("system/logs")
 
         // Ensure logs directory exists
         try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)

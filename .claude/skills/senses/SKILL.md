@@ -37,7 +37,7 @@ pgrep -fl "bluesky-watcher\|github-watcher\|location.*server\|memory-bridge" || 
 lsof -i :8081 -i :8765 2>/dev/null | grep LISTEN || echo "No satellites listening on ports"
 
 # Check for pending sense events (should be empty if Samara is processing)
-ls ~/.claude-mind/senses/*.event.json 2>/dev/null || echo "No pending events"
+ls ~/.claude-mind/system/senses/*.event.json 2>/dev/null || echo "No pending events"
 ```
 
 ## Service Status Details
@@ -48,10 +48,10 @@ ls ~/.claude-mind/senses/*.event.json 2>/dev/null || echo "No pending events"
 launchctl list com.claude.bluesky-watcher 2>/dev/null || echo "Not loaded"
 
 # View recent logs
-tail -20 ~/.claude-mind/logs/bluesky-watcher.log 2>/dev/null || echo "No log file"
+tail -20 ~/.claude-mind/system/logs/bluesky-watcher.log 2>/dev/null || echo "No log file"
 
 # Check last run time
-grep "Bluesky watcher complete" ~/.claude-mind/logs/bluesky-watcher.log | tail -1
+grep "Bluesky watcher complete" ~/.claude-mind/system/logs/bluesky-watcher.log | tail -1
 ```
 
 ### GitHub Watcher
@@ -60,10 +60,10 @@ grep "Bluesky watcher complete" ~/.claude-mind/logs/bluesky-watcher.log | tail -
 launchctl list com.claude.github-watcher 2>/dev/null || echo "Not loaded"
 
 # View recent logs
-tail -20 ~/.claude-mind/logs/github-watcher.log 2>/dev/null || echo "No log file"
+tail -20 ~/.claude-mind/system/logs/github-watcher.log 2>/dev/null || echo "No log file"
 
 # Check last run time
-grep "GitHub watcher complete" ~/.claude-mind/logs/github-watcher.log | tail -1
+grep "GitHub watcher complete" ~/.claude-mind/system/logs/github-watcher.log | tail -1
 ```
 
 ### Location Receiver
@@ -72,7 +72,7 @@ grep "GitHub watcher complete" ~/.claude-mind/logs/github-watcher.log | tail -1
 lsof -i :8081 2>/dev/null | grep LISTEN && echo "Running" || echo "Not running"
 
 # View recent logs
-tail -20 ~/.claude-mind/logs/location-receiver.log 2>/dev/null || echo "No log file"
+tail -20 ~/.claude-mind/system/logs/location-receiver.log 2>/dev/null || echo "No log file"
 ```
 
 ### MCP Memory Bridge
@@ -81,7 +81,7 @@ tail -20 ~/.claude-mind/logs/location-receiver.log 2>/dev/null || echo "No log f
 lsof -i :8765 2>/dev/null | grep LISTEN && echo "Running" || echo "Not running"
 
 # View recent logs
-tail -20 ~/.claude-mind/logs/memory-bridge.log 2>/dev/null || echo "No log file"
+tail -20 ~/.claude-mind/system/logs/memory-bridge.log 2>/dev/null || echo "No log file"
 ```
 
 ## Manual Trigger
@@ -105,10 +105,10 @@ View events recently processed by Samara:
 
 ```bash
 # Events processed today
-grep -i "SenseRouter\|sense event" ~/.claude-mind/logs/samara.log | grep "$(date +%Y-%m-%d)" | tail -20
+grep -i "SenseRouter\|sense event" ~/.claude-mind/system/logs/samara.log | grep "$(date +%Y-%m-%d)" | tail -20
 
 # Any errors in sense processing
-grep -i "error.*sense\|sense.*error" ~/.claude-mind/logs/samara.log | tail -10
+grep -i "error.*sense\|sense.*error" ~/.claude-mind/system/logs/samara.log | tail -10
 ```
 
 ## Troubleshooting
@@ -134,10 +134,10 @@ python3 /Users/claude/Developer/samara-main/services/github-watcher/server.py
 pgrep -fl Samara || echo "Samara not running - start it: open /Applications/Samara.app"
 
 # Check SenseDirectoryWatcher status
-grep "SenseDirectoryWatcher" ~/.claude-mind/logs/samara.log | tail -5
+grep "SenseDirectoryWatcher" ~/.claude-mind/system/logs/samara.log | tail -5
 
 # Verify senses directory exists
-ls -la ~/.claude-mind/senses/
+ls -la ~/.claude-mind/system/senses/
 ```
 
 ### Missing Dependencies
@@ -168,5 +168,5 @@ When reporting status, use this format:
 - Satellites are optional extensions — degraded mode is OK
 - Polling watchers (bluesky, github) run every 15 minutes via launchd
 - HTTP services (location, memory-bridge) run continuously
-- Event files in `~/.claude-mind/senses/` are deleted after processing
+- Event files in `~/.claude-mind/system/senses/` are deleted after processing
 - Check Samara logs for sense routing issues, service logs for fetch issues

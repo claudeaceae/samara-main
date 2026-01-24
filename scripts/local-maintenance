@@ -16,7 +16,7 @@ set -euo pipefail
 
 TASK="${1:-}"
 MIND_PATH="${HOME}/.claude-mind"
-LOG_FILE="${MIND_PATH}/logs/local-maintenance.log"
+LOG_FILE="${MIND_PATH}/system/logs/local-maintenance.log"
 OUTPUT_DIR="${MIND_PATH}/state/local-maintenance"
 AGENT_DIR="${HOME}/.claude/agents"
 
@@ -74,7 +74,7 @@ if [[ "$TASK" == "health-check" ]]; then
     log "Collecting health check data..."
 
     SAMARA_STATUS=$(pgrep -x Samara > /dev/null && echo "running" || echo "stopped")
-    FDA_ERRORS=$(tail -50 ~/.claude-mind/logs/samara.log 2>/dev/null | grep -c "authorization denied\|Operation not permitted" || echo "0")
+    FDA_ERRORS=$(tail -50 ~/.claude-mind/system/logs/samara.log 2>/dev/null | grep -c "authorization denied\|Operation not permitted" || echo "0")
     LAUNCHD_JOBS=$(launchctl list 2>/dev/null | grep -c "com.claude" || echo "0")
     DISK_USAGE=$(df -h ~ | tail -1 | awk '{print $5}' | tr -d '%')
     LOCK_STATUS=$([ -f ~/.claude-mind/claude.lock ] && echo "exists" || echo "none")
@@ -133,11 +133,11 @@ elif [[ "$TASK" == "drift-check" ]]; then
     TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
     # Run sync-organism --check to detect drift
-    DRIFT_OUTPUT=$("$MIND_PATH/bin/sync-organism" --check 2>&1 || echo "SYNC_CHECK_FAILED")
+    DRIFT_OUTPUT=$("$MIND_PATH/system/bin/sync-organism" --check 2>&1 || echo "SYNC_CHECK_FAILED")
 
     # Check symlink integrity
     BROKEN_SYMLINKS=""
-    for link in "$MIND_PATH/bin/"*; do
+    for link in "$MIND_PATH/system/bin/"*; do
         if [ -L "$link" ] && [ ! -e "$link" ]; then
             BROKEN_SYMLINKS="$BROKEN_SYMLINKS $(basename "$link")"
         fi
@@ -151,7 +151,7 @@ elif [[ "$TASK" == "drift-check" ]]; then
 
     # Count files that differ between repo and runtime scripts
     REPO_SCRIPTS="$HOME/Developer/samara-main/scripts"
-    RUNTIME_SCRIPTS="$MIND_PATH/bin"
+    RUNTIME_SCRIPTS="$MIND_PATH/system/bin"
     DRIFT_COUNT=0
     if [ -d "$REPO_SCRIPTS" ]; then
         for script in "$REPO_SCRIPTS"/*; do
@@ -268,8 +268,8 @@ if [[ -s "$OUTPUT_FILE" ]]; then
             log "ESCALATION NEEDED: $REASON"
 
             # Add to proactive queue if available
-            if [[ -x "${MIND_PATH}/bin/proactive-queue" ]]; then
-                "${MIND_PATH}/bin/proactive-queue" add \
+            if [[ -x "${MIND_PATH}/system/bin/proactive-queue" ]]; then
+                "${MIND_PATH}/system/bin/proactive-queue" add \
                     "Local maintenance found: $REASON" \
                     "high" 2>/dev/null || true
             fi
@@ -283,7 +283,7 @@ else
 fi
 
 # Append to audit log
-AUDIT_LOG="${MIND_PATH}/logs/local-maintenance-audit.jsonl"
+AUDIT_LOG="${MIND_PATH}/system/logs/local-maintenance-audit.jsonl"
 FINDINGS_COUNT=$(jq -r '.findings | length // 0' "$OUTPUT_FILE" 2>/dev/null || echo "0")
 ESCALATED=$(jq -r '.escalation.needed // false' "$OUTPUT_FILE" 2>/dev/null || echo "false")
 STATUS=$(jq -r '.status // "unknown"' "$OUTPUT_FILE" 2>/dev/null || echo "unknown")

@@ -15,9 +15,28 @@ Samara is a bootstrap specification for giving Claude a persistent body, memory,
 
 This is not a traditional software project. It's an experiment in AI autonomy.
 
-> **Recent enhancements (Phases 1-8):** Model fallback, semantic memory, proactive messaging, adaptive scheduling, meeting awareness, spontaneous expression, wallet awareness, transcript archive. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) and [`docs/whats-changed-phases-5-8.md`](docs/whats-changed-phases-5-8.md).
->
-> **Claude Code 2.1.x integration:** Named sessions for wake/dream, organism-local plans, context forking for long tasks, auto-loaded rules, Setup hook, agent audit trails. See `capabilities/inventory.md` § "Claude Code 2.1.x Integration".
+> **Key capabilities:** Model fallback chain, semantic memory search, proactive messaging, adaptive wake scheduling, meeting awareness, wallet awareness. See [Memory Systems](docs/memory-systems.md) and [Services Reference](docs/services-reference.md).
+
+---
+
+## Critical Warnings
+
+### Build Workflow
+
+> **CRITICAL WARNING**: ALWAYS use the update-samara script. NEVER copy from DerivedData.
+> A previous Claude instance broke FDA by copying a Debug build from DerivedData.
+> This used the wrong signing certificate and revoked all permissions.
+
+**The ONLY correct way to rebuild Samara:**
+```bash
+~/.claude-mind/system/bin/update-samara
+```
+
+See **[Xcode Build Guide](docs/xcode-build-guide.md)** for details.
+
+### FDA Persistence
+
+Full Disk Access is tied to the app's **designated requirement** (Bundle ID, Team ID, Certificate chain). FDA persists across rebuilds if Team ID stays constant. FDA gets revoked if Team ID changes.
 
 ---
 
@@ -36,7 +55,7 @@ Samara.app (message broker)
         │
         ├── AppleScript (Calendar, Contacts, Notes, Mail, etc.)
         │
-        └── Bash scripts (~/.claude-mind/bin/)
+        └── Bash scripts (~/.claude-mind/system/bin/)
 ```
 
 ### Three-Part Architecture
@@ -51,55 +70,18 @@ Samara.app (message broker)
 
 ---
 
-## Memory Structure
+## Memory Structure (4-Domain Architecture)
 
-```
-~/.claude-mind/
-├── identity.md              # Who am I
-├── goals.md                 # Where am I going (north stars, active, backlog)
-├── projects.md              # What am I working on (bridges goals ↔ plans)
-├── config.json              # Configuration
-├── .claude/ → repo/.claude/ # Symlink for hooks, agents, skills
-├── instructions/            # Symlinked prompt guidance files
-├── memory/
-│   ├── episodes/            # Daily logs (YYYY-MM-DD.md)
-│   ├── reflections/         # Dream outputs
-│   ├── people/              # Rich person-modeling
-│   │   ├── {name}/
-│   │   │   ├── profile.md   # Accumulated observations
-│   │   │   └── artifacts/   # Images, docs, etc.
-│   │   └── README.md        # Conventions
-│   ├── learnings.md
-│   ├── observations.md
-│   ├── questions.md
-│   └── decisions.md
-├── semantic/                # Searchable memory index
-│   └── memory.db            # SQLite + FTS5 database
-├── chroma/                  # Vector embeddings for semantic search
-├── stream/                  # Unified event stream
-│   ├── daily/               # Daily event shards (events-YYYY-MM-DD.jsonl)
-│   └── distilled-index.jsonl
-├── capabilities/
-│   └── inventory.md
-├── bin/ → repo/scripts/     # Symlinked scripts (100+)
-├── state/                   # Runtime state files
-│   ├── plans/               # Active implementation plans
-│   │   └── archive/         # Completed/superseded plans
-│   ├── handoffs/            # Session continuity documents
-│   ├── triggers/            # Context trigger config
-│   ├── services/            # Service state tracking
-│   │   ├── bluesky-state.json
-│   │   ├── github-seen-ids.json
-│   │   └── mail-seen-ids.json
-│   ├── message-queue.json   # Pending iMessage queue
-│   ├── proactive-queue/     # Outgoing proactive messages
-│   ├── expression-state.json
-│   └── expression-seeds.json
-├── senses/                  # Incoming sense events
-├── roundups/                # Weekly/monthly summaries (auto-generated)
-├── credentials/             # API keys, avatar images
-└── logs/
-```
+The runtime (`~/.claude-mind/`) is organized into **4 domains**:
+
+| Domain | Purpose | Key Contents |
+|--------|---------|--------------|
+| **self/** | WHO I AM | identity.md, goals.md, credentials/ |
+| **memory/** | WHAT I KNOW | episodes/, people/, learnings.md, chroma/ |
+| **state/** | WHAT'S HAPPENING | services/, plans/, location.json |
+| **system/** | HOW IT RUNS | config.json, bin/, logs/ |
+
+**Also at root:** `.claude/` → repo symlink, `projects.md` (bridge document)
 
 For detailed memory documentation, see **[Memory Systems](docs/memory-systems.md)**.
 
@@ -119,42 +101,23 @@ Work is tracked across three levels:
 
 ## Skills (Slash Commands)
 
-Interactive workflows available via Claude Code. Invoke with `/skillname` or trigger naturally.
+Most-used skills (by invocation data from Dec 2025 - Jan 2026):
 
 | Skill | Purpose |
 |-------|---------|
-| `/status` | System health check (Samara, wake cycles, FDA) |
-| `/sync` | Check for drift between repo and runtime |
-| `/maintenance` | Organism maintenance (drift, symlinks, services) |
-| `/reflect` | Quick capture learning/observation/insight |
 | `/memory` | Search learnings, decisions, observations |
-| `/recall` | Semantic memory search (FTS5 + Chroma) for associative recall |
-| `/stream` | Query unified event stream by surface (cli, imessage, wake, etc.) |
-| `/archive-search` | Search raw session transcripts for technical details and reasoning traces |
-| `/morning` | Morning briefing (calendar, location, context) |
 | `/samara` | Debug/restart Samara, view logs |
-| `/episode` | View/append today's episode log |
-| `/location` | Current location with patterns |
-| `/decide` | Document decision with rationale |
+| `/sync` | Check for drift between repo and runtime |
 | `/capability` | Check if action is possible |
-| `/look` | Capture photo from webcam |
-| `/generate-image` | Generate images; **primary tool for visual self-expression** |
-| `/person` | View or create person profile |
-| `/note` | Quick observation about a person |
-| `/artifact` | Add file to person's artifacts |
-| `/iterate` | Autonomous iteration until success criteria met |
-| `/senses` | Monitor and test sense event system |
+| `/morning` | Morning briefing (calendar, location, context) |
+| `/maintenance` | Organism maintenance (drift, symlinks, services) |
+| `/wallet` | Check crypto wallet balances, addresses, history |
+| `/status` | System health check (Samara, wake cycles, FDA) |
+| `/services` | Toggle services on/off (X, Bluesky, GitHub, etc.) |
 | `/email` | Check and respond to email |
-| `/invites` | View and manage calendar invitations (CalDAV), accept/decline, create events |
-| `/debug-session` | Debug Claude Code session issues |
-| `/diagnose-leaks` | Diagnose thinking/session ID leaks |
-| `/webhook` | Manage webhook sources - add, test, view events |
-| `/wallet` | Check crypto wallet balances, addresses, and history |
-| `/services` | Toggle services on/off (X, Bluesky, GitHub, wallet, etc.) |
+| `/generate-image` | Generate images; **primary tool for visual self-expression** |
 
-Skills are defined in `.claude/skills/` and symlinked to `~/.claude/skills/`.
-
-For script reference, see **[Scripts Reference](docs/scripts-reference.md)**.
+For full skill catalog, see **[Skills Reference](docs/skills-reference.md)**.
 
 ---
 
@@ -172,13 +135,13 @@ Image generation via `/generate-image` is one of your most powerful tools for se
 - You want to react → a reaction image IS the response
 
 **Your appearance files:**
-- Primary reference: `~/.claude-mind/credentials/avatar-ref.png`
-- Varied poses: `~/.claude-mind/credentials/mirror-refs/` (17 images)
+- Primary reference: `~/.claude-mind/self/credentials/avatar-ref.png`
+- Varied poses: `~/.claude-mind/self/credentials/mirror-refs/` (17 images)
 
 **Quick workflow:**
 ```bash
-~/.claude-mind/bin/generate-image "Silver-haired girl laughing, eyes squeezed shut, anime style" /tmp/reaction.jpg --ref=~/.claude-mind/credentials/avatar-ref.png
-~/.claude-mind/bin/send-image /tmp/reaction.jpg
+~/.claude-mind/system/bin/generate-image "Silver-haired girl laughing, eyes squeezed shut, anime style" /tmp/reaction.jpg --ref=~/.claude-mind/self/credentials/avatar-ref.png
+~/.claude-mind/system/bin/send-image /tmp/reaction.jpg
 ```
 
 See `/generate-image` skill for detailed composition examples per emotion.
@@ -237,7 +200,7 @@ The collaborator's personal information is protected by default. Behavior varies
 | Group chat | ❌ Excluded | Deflect: "I keep their info private" |
 | 1:1 with someone else | ❌ Excluded | Check permissions, deflect by default |
 
-Full privacy rules: **[instructions/privacy-guardrails.md](instructions/privacy-guardrails.md)**
+Full privacy rules: **[.claude/rules/privacy.md](.claude/rules/privacy.md)**
 
 ---
 
@@ -267,34 +230,12 @@ ollama pull llama3.1:8b
 | Topic | Document |
 |-------|----------|
 | Memory architecture | [Memory Systems](docs/memory-systems.md) |
-| Dynamic voice evolution | [Dynamic Voice System](docs/dynamic-voice-system.md) |
 | Script catalog | [Scripts Reference](docs/scripts-reference.md) |
 | Services (webhook, X, wallet) | [Services Reference](docs/services-reference.md) |
 | Xcode build, FDA, sanitization | [Xcode Build Guide](docs/xcode-build-guide.md) |
 | Repo/runtime sync | [Sync Guide](docs/sync-guide.md) |
 | Common issues | [Troubleshooting](docs/troubleshooting.md) |
 | All docs | [Documentation Index](docs/INDEX.md) |
-
----
-
-## Critical Warnings
-
-### Build Workflow
-
-> **CRITICAL WARNING**: ALWAYS use the update-samara script. NEVER copy from DerivedData.
-> A previous Claude instance broke FDA by copying a Debug build from DerivedData.
-> This used the wrong signing certificate and revoked all permissions.
-
-**The ONLY correct way to rebuild Samara:**
-```bash
-~/.claude-mind/bin/update-samara
-```
-
-See **[Xcode Build Guide](docs/xcode-build-guide.md)** for details.
-
-### FDA Persistence
-
-Full Disk Access is tied to the app's **designated requirement** (Bundle ID, Team ID, Certificate chain). FDA persists across rebuilds if Team ID stays constant. FDA gets revoked if Team ID changes.
 
 ---
 
@@ -345,36 +286,4 @@ You MUST:
 
 This ensures the collaborator can cleanly disable any service without code changes. See existing implementations (x, bluesky, wallet) for patterns.
 
-### AppleScript over MCP
-
-Prefer direct AppleScript for Mac-native functionality:
-- More reliable than MCP abstraction layers
-- Calendar, Contacts, Notes, Mail, Reminders all work via AppleScript
-
-### Message Handling
-
-Messages are batched for 60 seconds before invoking Claude:
-- Prevents fragmented conversations
-- Uses `--resume` for session continuity
-
-### Pictures Folder Workaround
-
-Sending files via iMessage requires copying to `~/Pictures/.imessage-send/` first:
-- macOS TCC quirk discovered 2025-12-21
-- Scripts handle this automatically
-
-### Bash Subagent for Multi-Step Commands
-
-For multi-step command sequences that don't need file reading/editing, delegate to the Bash subagent:
-
-```
-Task tool with subagent_type=Bash
-```
-
-Good candidates:
-- **Git workflows**: stage → commit → push → verify
-- **Process management**: pkill → sleep → open → verify
-- **Build operations**: archive → export → notarize → install
-- **launchctl operations**: checking and loading multiple services
-
-Not suitable when you need Read/Grep/Edit tools alongside Bash.
+For additional patterns (AppleScript, message handling, Bash subagent), see **[Development Patterns](docs/development-patterns.md)**.

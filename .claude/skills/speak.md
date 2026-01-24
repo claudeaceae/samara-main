@@ -20,19 +20,19 @@ When the user invokes /speak:
 2. If --send is specified, send as iMessage attachment
 3. Otherwise just generate and save locally
 
-**Script location:** `~/.claude-mind/bin/speak`
+**Script location:** `~/.claude-mind/system/bin/speak`
 
 **Examples:**
 
 ```bash
-# Generate voice note and send to É
-~/.claude-mind/bin/speak "Good morning! How's your day going?" --send +15206099095
+# Generate voice note and send to collaborator
+~/.claude-mind/system/bin/speak "Good morning! How's your day going?" --send $COLLABORATOR_PHONE
 
 # Just generate audio file
-~/.claude-mind/bin/speak "Test message" --output ~/Desktop/test.mp3
+~/.claude-mind/system/bin/speak "Test message" --output ~/Desktop/test.mp3
 
 # List available voices
-~/.claude-mind/bin/speak --list-voices
+~/.claude-mind/system/bin/speak --list-voices
 ```
 
 ## Voice Configuration
@@ -47,5 +47,5 @@ Default voice can be set in `~/.claude-mind/state/voice-config.json`:
 
 ## Requirements
 
-- ElevenLabs API key in `~/.claude-mind/credentials/elevenlabs.txt`
+- ElevenLabs API key in `~/.claude-mind/self/credentials/elevenlabs.txt`
 - Get one at: https://elevenlabs.io/api

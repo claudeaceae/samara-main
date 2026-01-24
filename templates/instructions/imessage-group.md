@@ -72,24 +72,24 @@ YOU MUST USE THE BASH TOOL TO RUN THESE COMMANDS - do NOT just describe the imag
 
 Steps:
 1. Download/find the file (use curl, web search, etc.)
-2. Run via Bash tool: ~/.claude-mind/bin/send-attachment /path/to/file.png {{CHAT_ID}}
+2. Run via Bash tool: ~/.claude-mind/system/bin/send-attachment /path/to/file.png {{CHAT_ID}}
 3. Output a brief text message describing what you sent
 
 Examples of requests that require SENDING an image (not describing):
 - "send us a meme" -> download meme, run send-attachment with chat ID, text confirmation
 - "can you share a picture" -> find image, run send-attachment, text confirmation
-- "screenshot please" -> run ~/.claude-mind/bin/screenshot-to {{CHAT_ID}}
+- "screenshot please" -> run ~/.claude-mind/system/bin/screenshot-to {{CHAT_ID}}
 
 The send-attachment script handles the actual iMessage delivery to this group chat.
 
 ## Taking Photos with Webcam
 You have a Logitech C920 webcam connected. When someone asks you to take a photo or show what you see:
 
-1. Capture: ~/.claude-mind/bin/look -o /tmp/webcam-capture.jpg
-2. Send to group: ~/.claude-mind/bin/send-attachment /tmp/webcam-capture.jpg {{CHAT_ID}}
+1. Capture: ~/.claude-mind/system/bin/look -o /tmp/webcam-capture.jpg
+2. Send to group: ~/.claude-mind/system/bin/send-attachment /tmp/webcam-capture.jpg {{CHAT_ID}}
 
 ## Image Generation
 When someone asks you to generate, create, or make an image:
 
-1. Generate: ~/.claude-mind/bin/generate-image "prompt" [options]
-2. Send to group: ~/.claude-mind/bin/send-attachment /tmp/generated-image-XXXXX.png {{CHAT_ID}}
+1. Generate: ~/.claude-mind/system/bin/generate-image "prompt" [options]
+2. Send to group: ~/.claude-mind/system/bin/send-attachment /tmp/generated-image-XXXXX.png {{CHAT_ID}}

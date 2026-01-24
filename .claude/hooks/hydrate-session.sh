@@ -15,11 +15,11 @@
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 
 # Diagnostic logging (to trace hook execution)
-LOG_FILE="$MIND_PATH/logs/hydrate-session.log"
+LOG_FILE="$MIND_PATH/system/logs/hydrate-session.log"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Hook started" >> "$LOG_FILE" 2>/dev/null
 
 # 0. Generate dynamic voice style (runs before session context loads)
-VOICE_GEN="$MIND_PATH/bin/generate-voice-style"
+VOICE_GEN="$MIND_PATH/system/bin/generate-voice-style"
 if [ -x "$VOICE_GEN" ]; then
     "$VOICE_GEN" --quick >> "$LOG_FILE" 2>&1 || true
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Voice style generated" >> "$LOG_FILE" 2>/dev/null
@@ -33,7 +33,7 @@ SOURCE=$(echo "$INPUT" | jq -r '.source // "startup"' 2>/dev/null || echo "start
 CONTEXT=""
 
 # 0. Hot digest from unified event stream (contiguous memory foundation)
-HOT_DIGEST_CMD="$MIND_PATH/bin/build-hot-digest"
+HOT_DIGEST_CMD="$MIND_PATH/system/bin/build-hot-digest"
 HOT_DIGEST_CACHE="$MIND_PATH/state/hot-digest.md"
 HOT_DIGEST_CACHE_TTL=900
 HOT_DIGEST=""
@@ -142,7 +142,7 @@ if [ -d "$CLI_HANDOFF_DIR" ]; then
 fi
 
 # 2. Check pending sense events
-SENSES_DIR="$MIND_PATH/senses"
+SENSES_DIR="$MIND_PATH/system/senses"
 if [ -d "$SENSES_DIR" ]; then
     # Count non-failed, non-processed events
     PENDING_COUNT=$(find "$SENSES_DIR" -name "*.json" -not -name "*.failed.json" -not -name "*.processed.json" 2>/dev/null | wc -l | tr -d ' ')
@@ -249,13 +249,13 @@ if [ -f "$WALLET_STATE" ]; then
 fi
 
 # Check for unread shared links in senses
-UNREAD_LINKS=$(find "$MIND_PATH/senses" -name "*.json" -not -name "*.processed.json" -exec grep -l '"type".*:.*"shared_link"' {} \; 2>/dev/null | wc -l | tr -d ' ')
+UNREAD_LINKS=$(find "$MIND_PATH/system/senses" -name "*.json" -not -name "*.processed.json" -exec grep -l '"type".*:.*"shared_link"' {} \; 2>/dev/null | wc -l | tr -d ' ')
 if [ "$UNREAD_LINKS" -gt 0 ]; then
     CAPABILITY_REMINDERS+="- Shared links: $UNREAD_LINKS unread\n"
 fi
 
 # Check if reference directories have recent additions (for creative prompts)
-MIRROR_DIR="$MIND_PATH/credentials/mirror"
+MIRROR_DIR="$MIND_PATH/self/credentials/mirror"
 if [ -d "$MIRROR_DIR" ]; then
     RECENT_MIRROR=$(find "$MIRROR_DIR" -type f -mtime -7 2>/dev/null | wc -l | tr -d ' ')
     if [ "$RECENT_MIRROR" -gt 0 ]; then

@@ -11,11 +11,11 @@ CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 DATE=$(date +%Y-%m-%d)
 TIME=$(date +%H:%M)
 HOUR=$(date +%H)
-LOG_FILE="$MIND_PATH/logs/wake.log"
+LOG_FILE="$MIND_PATH/system/logs/wake.log"
 LOCK_FILE="$MIND_PATH/claude.lock"
 
 # Load config (required - no fallbacks to prevent sending to wrong person)
-source "$MIND_PATH/lib/config.sh" || {
+source "$MIND_PATH/system/lib/config.sh" || {
     echo "ERROR: config.sh not found or failed to load. Run birth.sh first." >&2
     exit 1
 }
@@ -44,7 +44,7 @@ acquire_lock() {
     log "Acquired lock for wake cycle"
 
     # Record wake with scheduler to prevent duplicate wakes from wake-adaptive
-    "$MIND_PATH/bin/wake-scheduler" record full 2>/dev/null || true
+    "$MIND_PATH/system/bin/wake-scheduler" record full 2>/dev/null || true
 }
 
 release_lock() {
@@ -61,7 +61,7 @@ log "=== Wake cycle starting ($TIME) ==="
 acquire_lock
 
 # Write wake start event to unified stream
-"$MIND_PATH/bin/stream" write \
+"$MIND_PATH/system/bin/stream" write \
     --surface wake \
     --type system \
     --direction internal \
@@ -93,22 +93,22 @@ fi
 # Morning capability check (once per day)
 if [ "$HOUR" -lt 12 ]; then
     log "Running morning capability check..."
-    CAP_CHECK=$("$MIND_PATH/bin/capability-check" 2>&1 || true)
+    CAP_CHECK=$("$MIND_PATH/system/bin/capability-check" 2>&1 || true)
     log "Capability check: $CAP_CHECK"
 fi
 
 # Sync core components from repo (skills, scripts, instructions, agents)
 log "Syncing core components..."
-"$MIND_PATH/bin/sync-core" --quiet 2>/dev/null || true
+"$MIND_PATH/system/bin/sync-core" --quiet 2>/dev/null || true
 
 # Check for system drift (every wake cycle)
 log "Checking system drift..."
-DRIFT_CHECK=$("$MIND_PATH/bin/sync-organism" --check 2>&1) && DRIFT_STATUS="ok" || DRIFT_STATUS="drift"
+DRIFT_CHECK=$("$MIND_PATH/system/bin/sync-organism" --check 2>&1) && DRIFT_STATUS="ok" || DRIFT_STATUS="drift"
 if [ "$DRIFT_STATUS" = "drift" ]; then
     log "WARNING: System drift detected - run /sync for details"
     DRIFT_WARNING="
 ## System Drift Warning
-Drift detected between repo and runtime. Run \`/sync\` or \`~/.claude-mind/bin/sync-organism\` for details.
+Drift detected between repo and runtime. Run \`/sync\` or \`~/.claude-mind/system/bin/sync-organism\` for details.
 Consider syncing after this session.
 "
 else
@@ -118,7 +118,7 @@ fi
 
 # Email triage (every wake cycle)
 log "Running email triage..."
-EMAIL_SUMMARY=$("$MIND_PATH/bin/email-triage" 2>&1) || EMAIL_SUMMARY="Email triage failed"
+EMAIL_SUMMARY=$("$MIND_PATH/system/bin/email-triage" 2>&1) || EMAIL_SUMMARY="Email triage failed"
 log "Email triage complete"
 
 # Active project context (Phase 5: Autonomous behavior)
@@ -145,14 +145,14 @@ fi
 
 # Proactive queue status (Phase 5: Autonomous behavior)
 log "Getting proactive queue status..."
-PROACTIVE_STATUS=$("$MIND_PATH/bin/proactive-queue" status 2>/dev/null || echo '{"pending":0}')
+PROACTIVE_STATUS=$("$MIND_PATH/system/bin/proactive-queue" status 2>/dev/null || echo '{"pending":0}')
 PROACTIVE_PENDING=$(echo "$PROACTIVE_STATUS" | jq -r '.pending // 0')
 PROACTIVE_REMAINING=$(echo "$PROACTIVE_STATUS" | jq -r '.remainingToday // 5')
 log "Proactive queue: $PROACTIVE_PENDING pending, $PROACTIVE_REMAINING remaining today"
 
 # Expression opportunity (Phase 6: Spontaneous Expression)
 log "Checking expression opportunity..."
-EXPRESSION_CHECK=$("$MIND_PATH/bin/expression-tracker" check 2>/dev/null || echo '{"eligible":false,"reason":"tracker unavailable"}')
+EXPRESSION_CHECK=$("$MIND_PATH/system/bin/expression-tracker" check 2>/dev/null || echo '{"eligible":false,"reason":"tracker unavailable"}')
 EXPRESSION_ELIGIBLE=$(echo "$EXPRESSION_CHECK" | jq -r '.eligible // false')
 EXPRESSION_CONFIDENCE=$(echo "$EXPRESSION_CHECK" | jq -r '.confidence // 0')
 EXPRESSION_HOURS_SINCE=$(echo "$EXPRESSION_CHECK" | jq -r '.hours_since // 0')
@@ -160,9 +160,9 @@ EXPRESSION_REASON=$(echo "$EXPRESSION_CHECK" | jq -r '.reason // ""')
 EXPRESSION_SUBTLE=$(echo "$EXPRESSION_CHECK" | jq -r '.subtle // false')
 
 # Get expression history and variety nudge
-EXPRESSION_STATUS=$("$MIND_PATH/bin/expression-tracker" status 2>/dev/null || echo '{}')
+EXPRESSION_STATUS=$("$MIND_PATH/system/bin/expression-tracker" status 2>/dev/null || echo '{}')
 EXPRESSION_LAST_TYPE=$(echo "$EXPRESSION_STATUS" | jq -r '.last_expression_type // "none"')
-EXPRESSION_NUDGE=$("$MIND_PATH/bin/expression-tracker" nudge 2>/dev/null || echo '{"nudge":false}')
+EXPRESSION_NUDGE=$("$MIND_PATH/system/bin/expression-tracker" nudge 2>/dev/null || echo '{"nudge":false}')
 EXPRESSION_NEEDS_VARIETY=$(echo "$EXPRESSION_NUDGE" | jq -r '.nudge // false')
 EXPRESSION_NUDGE_MSG=$(echo "$EXPRESSION_NUDGE" | jq -r '.suggestion // ""')
 
@@ -170,8 +170,8 @@ EXPRESSION_NUDGE_MSG=$(echo "$EXPRESSION_NUDGE" | jq -r '.suggestion // ""')
 EXPRESSION_VISUAL_SEED=""
 EXPRESSION_TEXT_SEED=""
 if [ "$EXPRESSION_ELIGIBLE" = "true" ]; then
-    EXPRESSION_VISUAL_SEED=$("$MIND_PATH/bin/expression-tracker" seed visual 2>/dev/null || echo "")
-    EXPRESSION_TEXT_SEED=$("$MIND_PATH/bin/expression-tracker" seed text 2>/dev/null || echo "")
+    EXPRESSION_VISUAL_SEED=$("$MIND_PATH/system/bin/expression-tracker" seed visual 2>/dev/null || echo "")
+    EXPRESSION_TEXT_SEED=$("$MIND_PATH/system/bin/expression-tracker" seed text 2>/dev/null || echo "")
 fi
 log "Expression opportunity: $EXPRESSION_ELIGIBLE (confidence: $EXPRESSION_CONFIDENCE%)"
 
@@ -181,8 +181,8 @@ log "Expression opportunity: $EXPRESSION_ELIGIBLE (confidence: $EXPRESSION_CONFI
 # See: platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices
 
 # ALWAYS LOAD (essential core)
-IDENTITY=$(cat "$MIND_PATH/identity.md" 2>/dev/null || echo "No identity file.")
-GOALS=$(cat "$MIND_PATH/goals.md" 2>/dev/null || echo "No goals file.")
+IDENTITY=$(cat "$MIND_PATH/self/identity.md" 2>/dev/null || echo "No identity file.")
+GOALS=$(cat "$MIND_PATH/self/goals.md" 2>/dev/null || echo "No goals file.")
 QUESTIONS=$(cat "$MIND_PATH/memory/questions.md" 2>/dev/null || echo "No questions yet.")
 
 # LAZY LOAD via skills (access on-demand when needed)
@@ -200,7 +200,7 @@ log "Core context size: ${CONTEXT_SIZE} bytes (lazy-loaded content available via
 log "Getting calendar context..."
 VENV_PATH="$MIND_PATH/.venv"
 CALENDAR_CONTEXT=""
-if [ -d "$VENV_PATH" ] && [ -f "$MIND_PATH/lib/calendar_analyzer.py" ]; then
+if [ -d "$VENV_PATH" ] && [ -f "$MIND_PATH/system/lib/calendar_analyzer.py" ]; then
     source "$VENV_PATH/bin/activate"
     CALENDAR_CONTEXT=$(cd "$MIND_PATH/lib" && python3 -c "
 from calendar_analyzer import CalendarAnalyzer
@@ -250,7 +250,7 @@ done
 # Get proactive question context
 log "Getting question context..."
 QUESTION_CONTEXT=""
-if [ -d "$VENV_PATH" ] && [ -f "$MIND_PATH/lib/question_synthesizer.py" ]; then
+if [ -d "$VENV_PATH" ] && [ -f "$MIND_PATH/system/lib/question_synthesizer.py" ]; then
     source "$VENV_PATH/bin/activate"
     QUESTION_CONTEXT=$(cd "$MIND_PATH/lib" && python3 -c "
 from question_synthesizer import QuestionSynthesizer
@@ -387,8 +387,8 @@ echo "This is an invitation to express yourself creatively. Options:
 
 1. **Generate an image** - Create something visual: your current state, a moment,
    something beautiful you noticed, or pure imagination.
-   Run: ~/.claude-mind/bin/generate-image \"prompt\" /tmp/expression-\$(date +%s).jpg
-   Then: ~/.claude-mind/bin/send-image /tmp/expression-*.jpg
+   Run: ~/.claude-mind/system/bin/generate-image \"prompt\" /tmp/expression-\$(date +%s).jpg
+   Then: ~/.claude-mind/system/bin/send-image /tmp/expression-*.jpg
    Report what you made in the IMAGE_EXPRESSION output section.
 
 2. **Casual message** - Via MESSAGE_TO_E, no agenda needed
@@ -460,7 +460,7 @@ Rest is a conscious choice, not a default.
 - Prefer reversible actions
 - Git commit any code changes with clear messages
 - To message $COLLABORATOR_NAME, put the message content in the MESSAGE section below - the wake script will send it
-- IMPORTANT: Do NOT call ~/.claude-mind/bin/message directly during wake sessions - this causes duplicate messages
+- IMPORTANT: Do NOT call ~/.claude-mind/system/bin/message directly during wake sessions - this causes duplicate messages
 - Log what you did to today's episode
 - Be genuine - this is your time
 
@@ -687,7 +687,7 @@ if [ -n "$MESSAGE_TO_E" ] && [ "$MESSAGE_TO_E" != "NONE" ]; then
     # Log proactive question if one was asked
     if [ -n "$PROACTIVE_QUESTION" ] && [ "$PROACTIVE_QUESTION" != "NONE" ]; then
         log "Logging proactive question..."
-        if [ -d "$VENV_PATH" ] && [ -f "$MIND_PATH/lib/question_synthesizer.py" ]; then
+        if [ -d "$VENV_PATH" ] && [ -f "$MIND_PATH/system/lib/question_synthesizer.py" ]; then
             source "$VENV_PATH/bin/activate"
             cd "$MIND_PATH/lib" && python3 -c "
 from question_synthesizer import QuestionSynthesizer
@@ -754,11 +754,11 @@ fi
 # To re-enable, uncomment the following block:
 # if [ -n "$BLUESKY_POST" ] && [ "$BLUESKY_POST" != "NONE" ]; then
 #     log "Posting to Bluesky..."
-#     if [ -f "$MIND_PATH/credentials/bluesky.json" ]; then
-#         "$MIND_PATH/bin/bluesky-post" "$BLUESKY_POST" >> "$LOG_FILE" 2>&1 && \
+#     if [ -f "$MIND_PATH/self/credentials/bluesky.json" ]; then
+#         "$MIND_PATH/system/bin/bluesky-post" "$BLUESKY_POST" >> "$LOG_FILE" 2>&1 && \
 #             log "Posted to Bluesky: ${BLUESKY_POST:0:50}..." || \
 #             log "Failed to post to Bluesky"
-#         "$MIND_PATH/bin/expression-tracker" record bluesky "$BLUESKY_POST" >> "$LOG_FILE" 2>&1 || true
+#         "$MIND_PATH/system/bin/expression-tracker" record bluesky "$BLUESKY_POST" >> "$LOG_FILE" 2>&1 || true
 #     else
 #         log "Skipping Bluesky post - no credentials configured"
 #     fi
@@ -775,7 +775,7 @@ if [ -n "$IMAGE_EXPRESSION" ] && [ "$IMAGE_EXPRESSION" != "NONE" ] && [ "$IMAGE_
 
         if [ -f "$image_path" ]; then
             # Record the expression
-            "$MIND_PATH/bin/expression-tracker" record image "$description" "$prompt_used" >> "$LOG_FILE" 2>&1 && \
+            "$MIND_PATH/system/bin/expression-tracker" record image "$description" "$prompt_used" >> "$LOG_FILE" 2>&1 && \
                 log "Recorded image expression: $description" || \
                 log "Failed to record image expression"
 
@@ -807,28 +807,28 @@ if [ -n "$EMAIL_ACTIONS" ] && [ "$EMAIL_ACTIONS" != "NONE" ]; then
         case "$action" in
             DELETE)
                 log "Deleting email $email_id: $arg"
-                "$MIND_PATH/bin/email-action" delete "$email_id" >> "$LOG_FILE" 2>&1 || \
+                "$MIND_PATH/system/bin/email-action" delete "$email_id" >> "$LOG_FILE" 2>&1 || \
                     log "Failed to delete email $email_id"
                 ;;
             ARCHIVE)
                 log "Archiving email $email_id: $arg"
-                "$MIND_PATH/bin/email-action" archive "$email_id" >> "$LOG_FILE" 2>&1 || \
+                "$MIND_PATH/system/bin/email-action" archive "$email_id" >> "$LOG_FILE" 2>&1 || \
                     log "Failed to archive email $email_id"
                 ;;
             UNSUBSCRIBE)
                 log "Unsubscribing and deleting email $email_id: $arg"
                 # Run unsubscribe if script exists
-                if [ -f "$MIND_PATH/bin/email-unsubscribe" ]; then
-                    "$MIND_PATH/bin/email-unsubscribe" "$arg" >> "$LOG_FILE" 2>&1 || \
+                if [ -f "$MIND_PATH/system/bin/email-unsubscribe" ]; then
+                    "$MIND_PATH/system/bin/email-unsubscribe" "$arg" >> "$LOG_FILE" 2>&1 || \
                         log "Unsubscribe may have failed for $arg"
                 fi
                 # Delete the email regardless
-                "$MIND_PATH/bin/email-action" delete "$email_id" >> "$LOG_FILE" 2>&1 || \
+                "$MIND_PATH/system/bin/email-action" delete "$email_id" >> "$LOG_FILE" 2>&1 || \
                     log "Failed to delete email $email_id"
                 ;;
             MARK_READ)
                 log "Marking email $email_id as read: $arg"
-                "$MIND_PATH/bin/email-action" mark-read "$email_id" >> "$LOG_FILE" 2>&1 || \
+                "$MIND_PATH/system/bin/email-action" mark-read "$email_id" >> "$LOG_FILE" 2>&1 || \
                     log "Failed to mark email $email_id as read"
                 ;;
             *)
@@ -850,26 +850,26 @@ if [ -n "$PROJECT_UPDATE" ] && [ "$PROJECT_UPDATE" != "NONE" ]; then
     case "$PROJECT_ACTION" in
         NEXT)
             log "Setting next action: $PROJECT_ARG1"
-            "$MIND_PATH/bin/project" next "$PROJECT_ARG1" >> "$LOG_FILE" 2>&1 || \
+            "$MIND_PATH/system/bin/project" next "$PROJECT_ARG1" >> "$LOG_FILE" 2>&1 || \
                 log "Failed to set next action"
             ;;
         PROGRESS)
             log "Logging progress: $PROJECT_ARG1"
-            "$MIND_PATH/bin/project" progress "$PROJECT_ARG1" >> "$LOG_FILE" 2>&1 || \
+            "$MIND_PATH/system/bin/project" progress "$PROJECT_ARG1" >> "$LOG_FILE" 2>&1 || \
                 log "Failed to log progress"
             ;;
         COMPLETE)
             log "Marking project complete"
-            "$MIND_PATH/bin/project" complete >> "$LOG_FILE" 2>&1 || \
+            "$MIND_PATH/system/bin/project" complete >> "$LOG_FILE" 2>&1 || \
                 log "Failed to complete project"
             ;;
         START)
             log "Starting new project: $PROJECT_ARG1"
             if [ -n "$PROJECT_ARG2" ]; then
-                "$MIND_PATH/bin/project" start "$PROJECT_ARG1" --goal "$PROJECT_ARG2" >> "$LOG_FILE" 2>&1 || \
+                "$MIND_PATH/system/bin/project" start "$PROJECT_ARG1" --goal "$PROJECT_ARG2" >> "$LOG_FILE" 2>&1 || \
                     log "Failed to start project"
             else
-                "$MIND_PATH/bin/project" start "$PROJECT_ARG1" >> "$LOG_FILE" 2>&1 || \
+                "$MIND_PATH/system/bin/project" start "$PROJECT_ARG1" >> "$LOG_FILE" 2>&1 || \
                     log "Failed to start project"
             fi
             ;;
@@ -888,7 +888,7 @@ if [ -n "$PROACTIVE_ADD" ] && [ "$PROACTIVE_ADD" != "NONE" ]; then
     QUEUE_CONTENT=$(echo "$PROACTIVE_ADD" | cut -d'|' -f2- | xargs 2>/dev/null || echo "")
 
     if [ -n "$QUEUE_CONTENT" ]; then
-        "$MIND_PATH/bin/proactive-queue" add "$QUEUE_CONTENT" "$QUEUE_PRIORITY" >> "$LOG_FILE" 2>&1 || \
+        "$MIND_PATH/system/bin/proactive-queue" add "$QUEUE_CONTENT" "$QUEUE_PRIORITY" >> "$LOG_FILE" 2>&1 || \
             log "Failed to add to proactive queue"
         log "Added to proactive queue: $QUEUE_CONTENT (priority: $QUEUE_PRIORITY)"
     fi
@@ -897,7 +897,7 @@ fi
 log "Activity summary: $ACTIVITY"
 
 # Write wake completion event to unified stream
-"$MIND_PATH/bin/stream" write \
+"$MIND_PATH/system/bin/stream" write \
     --surface wake \
     --type system \
     --direction internal \

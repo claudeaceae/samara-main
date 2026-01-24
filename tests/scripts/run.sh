@@ -57,7 +57,7 @@ run_command_capture() {
 run_message_test() {
   local message="Hello from test"
   OSASCRIPT_BIN=osascript "$REPO_ROOT/scripts/message" "$message"
-  assert_file_contains "$SAMARA_MIND_PATH/logs/messages-sent.log" "Sent: $message"
+  assert_file_contains "$SAMARA_MIND_PATH/system/logs/messages-sent.log" "Sent: $message"
 }
 
 run_send_attachment_test() {
@@ -66,7 +66,7 @@ run_send_attachment_test() {
 
   "$REPO_ROOT/scripts/send-attachment" "$temp_file" "+15555550123"
 
-  assert_file_contains "$SAMARA_MIND_PATH/logs/messages-sent.log" "Sent attachment to +15555550123"
+  assert_file_contains "$SAMARA_MIND_PATH/system/logs/messages-sent.log" "Sent attachment to +15555550123"
 
   local attachment_dir="$HOME/Pictures/.imessage-send"
   if [[ -d "$attachment_dir" ]]; then
@@ -85,7 +85,7 @@ run_send_image_test() {
 
   "$REPO_ROOT/scripts/send-image" "$temp_file"
 
-  assert_file_contains "$SAMARA_MIND_PATH/logs/messages-sent.log" "Sent attachment to +15555550123"
+  assert_file_contains "$SAMARA_MIND_PATH/system/logs/messages-sent.log" "Sent attachment to +15555550123"
 }
 
 run_scratchpad_first_run_test() {
@@ -170,7 +170,7 @@ EOF
   fi
 
   assert_file_contains "$SAMARA_MIND_PATH/state/last-evaluation.json" "\"escalation_level\""
-  assert_file_contains "$SAMARA_MIND_PATH/logs/triggers.log" "Engagement blocked by safeguards"
+  assert_file_contains "$SAMARA_MIND_PATH/system/logs/triggers.log" "Engagement blocked by safeguards"
 }
 
 run_proactive_engage_test() {
@@ -180,15 +180,15 @@ run_proactive_engage_test() {
 EOF
   chmod +x "$SAMARA_MIND_PATH/.venv/bin/activate"
 
-  local message_bin="$SAMARA_MIND_PATH/bin/message-e"
+  local message_bin="$SAMARA_MIND_PATH/system/bin/message-e"
   local temp_bin="$SAMARA_TEST_ROOT/claude-bin"
-  mkdir -p "$SAMARA_MIND_PATH/bin" "$temp_bin"
+  mkdir -p "$SAMARA_MIND_PATH/system/bin" "$temp_bin"
   cat > "$message_bin" <<'EOF'
 #!/bin/bash
 set -euo pipefail
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-mkdir -p "$MIND_PATH/logs"
-echo "Sent: $*" >> "$MIND_PATH/logs/messages-sent.log"
+mkdir -p "$MIND_PATH/system/logs"
+echo "Sent: $*" >> "$MIND_PATH/system/logs/messages-sent.log"
 EOF
   chmod +x "$message_bin"
   cat > "$temp_bin/claude" <<'EOF'
@@ -208,8 +208,8 @@ EOF
     return 1
   fi
 
-  assert_file_contains "$SAMARA_MIND_PATH/logs/messages-sent.log" "Sent: Hello from proactive"
-  assert_file_contains "$SAMARA_MIND_PATH/logs/proactive.log" "Message sent successfully"
+  assert_file_contains "$SAMARA_MIND_PATH/system/logs/messages-sent.log" "Sent: Hello from proactive"
+  assert_file_contains "$SAMARA_MIND_PATH/system/logs/proactive.log" "Message sent successfully"
 
   local episode_file
   episode_file="$SAMARA_MIND_PATH/memory/episodes/$(date +%Y-%m-%d).md"

@@ -55,7 +55,7 @@ Autonomous wake cycle - self-directed sessions.
 
 **API:**
 ```bash
-~/.claude-mind/bin/wake
+~/.claude-mind/system/bin/wake
 # No arguments - runs full wake cycle
 ```
 
@@ -80,7 +80,7 @@ Nightly memory consolidation and reflection.
 
 **API:**
 ```bash
-~/.claude-mind/bin/dream
+~/.claude-mind/system/bin/dream
 # No arguments - runs full dream cycle
 ```
 
@@ -100,7 +100,7 @@ Send an iMessage to the collaborator.
 
 **API:**
 ```bash
-~/.claude-mind/bin/message "Hello from Claude!"
+~/.claude-mind/system/bin/message "Hello from Claude!"
 ```
 
 **Notes:**
@@ -123,7 +123,7 @@ Send an image or file attachment to the collaborator.
 
 **API:**
 ```bash
-~/.claude-mind/bin/send-image /path/to/image.png
+~/.claude-mind/system/bin/send-image /path/to/image.png
 ```
 
 **Notes:**
@@ -143,10 +143,10 @@ Send a file to any iMessage chat (1:1 or group).
 **API:**
 ```bash
 # To phone number
-~/.claude-mind/bin/send-attachment /path/to/file.pdf +15551234567
+~/.claude-mind/system/bin/send-attachment /path/to/file.pdf +15551234567
 
 # To group chat (32-char GUID)
-~/.claude-mind/bin/send-attachment /path/to/file.pdf 7409d77007664ff7b1eeb4683f49cadf
+~/.claude-mind/system/bin/send-attachment /path/to/file.pdf 7409d77007664ff7b1eeb4683f49cadf
 ```
 
 ---
@@ -166,10 +166,10 @@ Take a screenshot and send via iMessage.
 **API:**
 ```bash
 # Screenshot to collaborator
-~/.claude-mind/bin/screenshot
+~/.claude-mind/system/bin/screenshot
 
 # Screenshot to specific chat
-~/.claude-mind/bin/screenshot-to +15551234567
+~/.claude-mind/system/bin/screenshot-to +15551234567
 ```
 
 ---
@@ -181,7 +181,7 @@ Post text to Bluesky.
 **Dependencies:**
 - `uvx` (uv package runner)
 - `atproto` Python SDK (installed via uvx)
-- Credentials at `~/.claude-mind/credentials/bluesky.json`
+- Credentials at `~/.claude-mind/self/credentials/bluesky.json`
 
 **Credentials format:**
 ```json
@@ -193,15 +193,15 @@ Post text to Bluesky.
 
 **API:**
 ```bash
-~/.claude-mind/bin/bluesky-post "Your thought here"
+~/.claude-mind/system/bin/bluesky-post "Your thought here"
 
 # Or via stdin
-echo "Your thought" | ~/.claude-mind/bin/bluesky-post
+echo "Your thought" | ~/.claude-mind/system/bin/bluesky-post
 ```
 
 **Notes:**
 - Truncates to 300 characters (Bluesky limit)
-- Logs to `~/.claude-mind/logs/bluesky.log`
+- Logs to `~/.claude-mind/system/logs/bluesky.log`
 
 ---
 
@@ -214,7 +214,7 @@ Poll Bluesky notifications and respond.
 **Dependencies:**
 - `uvx` with `atproto`
 - Claude Code CLI
-- Credentials at `~/.claude-mind/credentials/bluesky.json`
+- Credentials at `~/.claude-mind/self/credentials/bluesky.json`
 
 **What it does:**
 1. Fetches notifications (follows, replies, mentions, DMs)
@@ -224,7 +224,7 @@ Poll Bluesky notifications and respond.
 
 **API:**
 ```bash
-~/.claude-mind/bin/bluesky-check
+~/.claude-mind/system/bin/bluesky-check
 # No arguments - polls and responds
 ```
 
@@ -239,7 +239,7 @@ Poll GitHub notifications and respond.
 **Dependencies:**
 - `gh` CLI (GitHub CLI, authenticated)
 - Claude Code CLI
-- Token at `~/.claude-mind/credentials/github.txt` (optional if gh is authed)
+- Token at `~/.claude-mind/self/credentials/github.txt` (optional if gh is authed)
 
 **What it does:**
 1. Fetches notifications via `gh api`
@@ -249,7 +249,7 @@ Poll GitHub notifications and respond.
 
 **API:**
 ```bash
-~/.claude-mind/bin/github-check
+~/.claude-mind/system/bin/github-check
 ```
 
 ---
@@ -268,7 +268,7 @@ Get current geographic location.
 
 **API:**
 ```bash
-~/.claude-mind/bin/get-location
+~/.claude-mind/system/bin/get-location
 # Output: City, region, country, lat/lon
 ```
 
@@ -298,7 +298,7 @@ Daily non-destructive test of all capabilities.
 
 **API:**
 ```bash
-~/.claude-mind/bin/capability-check
+~/.claude-mind/system/bin/capability-check
 # Outputs pass/fail for each capability
 ```
 
@@ -325,7 +325,7 @@ Rebuild and deploy Samara.app using proper Xcode workflow.
 
 **API:**
 ```bash
-~/.claude-mind/bin/update-samara
+~/.claude-mind/system/bin/update-samara
 ```
 
 ---
@@ -338,7 +338,7 @@ Log session summaries to episode files.
 
 **API:**
 ```bash
-~/.claude-mind/bin/log-session "Summary of what happened"
+~/.claude-mind/system/bin/log-session "Summary of what happened"
 ```
 
 ---
@@ -356,7 +356,7 @@ Export iMessage conversation history.
 
 **API:**
 ```bash
-~/.claude-mind/bin/export-messages [days]
+~/.claude-mind/system/bin/export-messages [days]
 # Default: 7 days
 ```
 
@@ -364,13 +364,13 @@ Export iMessage conversation history.
 
 ## Configuration
 
-All scripts source `~/.claude-mind/lib/config.sh` which loads from `~/.claude-mind/config.json`.
+All scripts source `~/.claude-mind/system/lib/config.sh` which loads from `~/.claude-mind/system/config.json`.
 
 If config is missing, scripts fall back to hardcoded defaults (for backwards compatibility during migration).
 
 **Available variables after sourcing:**
 ```bash
-source ~/.claude-mind/lib/config.sh
+source ~/.claude-mind/system/lib/config.sh
 
 $ENTITY_NAME          # "Claude"
 $ENTITY_ICLOUD        # Claude's iCloud
@@ -410,9 +410,9 @@ Scripts check for stale locks (dead PIDs) and clean them up automatically.
 
 ## Adding New Scripts
 
-1. Create script in `~/.claude-mind/bin/`
+1. Create script in `~/.claude-mind/system/bin/`
 2. Make executable: `chmod +x script-name`
-3. Source config if needed: `source "$HOME/.claude-mind/lib/config.sh"`
+3. Source config if needed: `source "$HOME/.claude-mind/system/lib/config.sh"`
 4. Use lock if invoking Claude Code
 5. Add to this README
 

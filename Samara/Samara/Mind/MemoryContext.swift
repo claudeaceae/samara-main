@@ -31,7 +31,7 @@ final class MemoryContext {
 
     /// Initialize the native memory database
     private func initializeMemoryDatabase() {
-        let semanticDbPath = (mindPath as NSString).appendingPathComponent("semantic/memory.db")
+        let semanticDbPath = (mindPath as NSString).appendingPathComponent("memory/semantic/memory.db")
         memoryDB = MemoryDatabase(dbPath: semanticDbPath)
 
         do {
@@ -76,7 +76,7 @@ final class MemoryContext {
         }
 
         // Identity - full, essential context
-        if let identity = readFile("identity.md") {
+        if let identity = readFile("self/identity.md") {
             sections.append("### Identity\n\(identity)")
         }
 
@@ -99,13 +99,13 @@ final class MemoryContext {
         }
 
         // Goals - full (usually small)
-        if let goals = readFile("goals.md") {
+        if let goals = readFile("self/goals.md") {
             sections.append("### Goals\n\(goals)")
         }
 
         // Capabilities - abbreviated (file can be 800KB+, only load summary)
         // Full capabilities can be referenced on-demand via /capability skill
-        if let capabilities = readFile("capabilities/inventory.md") {
+        if let capabilities = readFile("self/capabilities/inventory.md") {
             let abbreviated = abbreviate(capabilities, maxLines: 100)
             sections.append("### Capabilities (summary)\n\(abbreviated)")
         }
@@ -161,19 +161,19 @@ final class MemoryContext {
         var sections: [String] = []
 
         // Identity - always essential
-        if let identity = readFile("identity.md") {
+        if let identity = readFile("self/identity.md") {
             sections.append("### Identity\n\(identity)")
         }
 
         // Goals - brief, helps with voice/priorities
-        if let goals = readFile("goals.md") {
+        if let goals = readFile("self/goals.md") {
             // Just first 50 lines for quick context
             let abbreviated = abbreviate(goals, maxLines: 50)
             sections.append("### Goals\n\(abbreviated)")
         }
 
         // Capabilities - optional, useful for knowing what actions are possible
-        if includeCapabilities, let capabilities = readFile("capabilities/inventory.md") {
+        if includeCapabilities, let capabilities = readFile("self/capabilities/inventory.md") {
             // Abbreviated - just the key sections
             let abbreviated = abbreviate(capabilities, maxLines: 100)
             sections.append("### Capabilities\n\(abbreviated)")
@@ -337,9 +337,9 @@ final class MemoryContext {
         // Identity summary (first 50 lines for essence)
         if let identitySection = loadCachedSection(
             key: ContextCache.Key.identitySummary,
-            source: fullPath("identity.md"),
+            source: fullPath("self/identity.md"),
             build: {
-                guard let identity = readFile("identity.md") else { return nil }
+                guard let identity = readFile("self/identity.md") else { return nil }
                 let summary = abbreviate(identity, maxLines: 50)
                 return "## Identity\n\(summary)"
             }
@@ -350,9 +350,9 @@ final class MemoryContext {
         // Active goals only (abbreviated)
         if let goalsSection = loadCachedSection(
             key: ContextCache.Key.goalsActive,
-            source: fullPath("goals.md"),
+            source: fullPath("self/goals.md"),
             build: {
-                guard let goals = readFile("goals.md") else { return nil }
+                guard let goals = readFile("self/goals.md") else { return nil }
                 let abbreviated = abbreviate(goals, maxLines: 30)
                 return "## Goals\n\(abbreviated)"
             }
@@ -475,9 +475,9 @@ final class MemoryContext {
     private func loadCapabilitiesModule() -> String? {
         loadCachedSection(
             key: ContextCache.Key.capabilitiesSummary,
-            source: fullPath("capabilities/inventory.md"),
+            source: fullPath("self/capabilities/inventory.md"),
             build: {
-                guard let capabilities = readFile("capabilities/inventory.md") else { return nil }
+                guard let capabilities = readFile("self/capabilities/inventory.md") else { return nil }
                 let abbreviated = abbreviate(capabilities, maxLines: 100)
                 return "## Capabilities\n\(abbreviated)"
             }
@@ -787,7 +787,7 @@ final class MemoryContext {
             return cached
         }
 
-        let scriptPath = (mindPath as NSString).appendingPathComponent("bin/build-hot-digest")
+        let scriptPath = (mindPath as NSString).appendingPathComponent("system/bin/build-hot-digest")
 
         guard FileManager.default.isExecutableFile(atPath: scriptPath) else {
             log("Hot digest script not found at \(scriptPath)", level: .debug, component: "MemoryContext")
@@ -849,7 +849,7 @@ final class MemoryContext {
             return cached
         }
 
-        let scriptPath = (mindPath as NSString).appendingPathComponent("bin/find-related-context")
+        let scriptPath = (mindPath as NSString).appendingPathComponent("system/bin/find-related-context")
 
         guard FileManager.default.fileExists(atPath: scriptPath) else {
             return nil
@@ -928,7 +928,7 @@ final class MemoryContext {
     ///   - substitutions: Dictionary of placeholder -> value pairs (e.g., ["COLLABORATOR": "É"])
     /// - Returns: File content with placeholders substituted, or nil if file not found
     func readInstructionFile(_ filename: String, substitutions: [String: String] = [:]) -> String? {
-        guard var content = readFile("instructions/\(filename)") else {
+        guard var content = readFile("system/instructions/\(filename)") else {
             return nil
         }
 
@@ -942,8 +942,8 @@ final class MemoryContext {
 
     /// Default iMessage instructions as fallback if file loading fails
     static var defaultIMessageInstructions: String {
-        let sendImagePath = MindPaths.mindPath("bin/send-image")
-        let lookPath = MindPaths.mindPath("bin/look")
+        let sendImagePath = MindPaths.systemPath("bin/send-image")
+        let lookPath = MindPaths.systemPath("bin/look")
         return """
         ## Response Instructions
         Your entire output will be sent as an iMessage. Respond naturally and concisely.

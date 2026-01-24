@@ -7,16 +7,15 @@
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/python3</string>
-        <!-- UPDATE THIS PATH to where you cloned samara-main -->
-        <string>/Users/YOUR_USERNAME/Developer/samara-main/services/location-receiver/server.py</string>
+        <string>{{REPO_PATH}}/services/location-receiver/server.py</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Users/YOUR_USERNAME/.claude-mind/logs/location-receiver.log</string>
+    <string>{{HOME}}/.claude-mind/logs/location-receiver.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/YOUR_USERNAME/.claude-mind/logs/location-receiver.log</string>
+    <string>{{HOME}}/.claude-mind/logs/location-receiver.log</string>
 </dict>
 </plist>

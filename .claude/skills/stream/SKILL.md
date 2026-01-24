@@ -23,42 +23,42 @@ This skill provides on-demand access to the unified event stream - all interacti
 
 ### Quick Overview (last N hours)
 ```bash
-~/.claude-mind/bin/stream query --hours 6
+~/.claude-mind/system/bin/stream query --hours 6
 ```
 
 ### Filter by Surface
 ```bash
 # iMessage only
-~/.claude-mind/bin/stream query --hours 12 --surface imessage
+~/.claude-mind/system/bin/stream query --hours 12 --surface imessage
 
 # CLI only
-~/.claude-mind/bin/stream query --hours 12 --surface cli
+~/.claude-mind/system/bin/stream query --hours 12 --surface cli
 
 # Wake cycles
-~/.claude-mind/bin/stream query --hours 24 --surface wake
+~/.claude-mind/system/bin/stream query --hours 24 --surface wake
 
 # Dream cycles
-~/.claude-mind/bin/stream query --hours 48 --surface dream
+~/.claude-mind/system/bin/stream query --hours 48 --surface dream
 
 # Webhooks/social
-~/.claude-mind/bin/stream query --hours 24 --surface webhook
-~/.claude-mind/bin/stream query --hours 24 --surface x
-~/.claude-mind/bin/stream query --hours 24 --surface bluesky
+~/.claude-mind/system/bin/stream query --hours 24 --surface webhook
+~/.claude-mind/system/bin/stream query --hours 24 --surface x
+~/.claude-mind/system/bin/stream query --hours 24 --surface bluesky
 ```
 
 ### Statistics
 ```bash
-~/.claude-mind/bin/stream stats
+~/.claude-mind/system/bin/stream stats
 ```
 
 ### Detailed JSON Output
 ```bash
-~/.claude-mind/bin/stream query --hours 6 --format json
+~/.claude-mind/system/bin/stream query --hours 6 --format json
 ```
 
 ### Include Already-Processed Events
 ```bash
-~/.claude-mind/bin/stream query --hours 24 --include-distilled
+~/.claude-mind/system/bin/stream query --hours 24 --include-distilled
 ```
 
 ## Surface Types
@@ -90,22 +90,22 @@ Each event shows:
 
 **"What did we talk about in iMessage today?"**
 ```bash
-~/.claude-mind/bin/stream query --hours 12 --surface imessage
+~/.claude-mind/system/bin/stream query --hours 12 --surface imessage
 ```
 
 **"Show me all recent activity"**
 ```bash
-~/.claude-mind/bin/stream query --hours 6
+~/.claude-mind/system/bin/stream query --hours 6
 ```
 
 **"What happened in CLI sessions today?"**
 ```bash
-~/.claude-mind/bin/stream query --hours 24 --surface cli
+~/.claude-mind/system/bin/stream query --hours 24 --surface cli
 ```
 
 **"Show me the raw event data"**
 ```bash
-~/.claude-mind/bin/stream query --hours 3 --format json | head -100
+~/.claude-mind/system/bin/stream query --hours 3 --format json | head -100
 ```
 
 ## Presenting Results

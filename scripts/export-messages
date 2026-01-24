@@ -16,7 +16,32 @@ let dbPath = FileManager.default.homeDirectoryForCurrentUser
     .appendingPathComponent("Library/Messages/chat.db")
     .path
 
-let handles = ["+15206099095", "edouard@urcad.es"]
+// Read handles from config.json
+func loadHandlesFromConfig() -> [String] {
+    let configPath = URL(fileURLWithPath: mindPath).appendingPathComponent("config.json")
+    guard let data = try? Data(contentsOf: configPath),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let collaborator = json["collaborator"] as? [String: Any] else {
+        print("Error: Could not load handles from config.json")
+        exit(1)
+    }
+
+    var handles: [String] = []
+    if let phone = collaborator["phone"] as? String, !phone.isEmpty {
+        handles.append(phone)
+    }
+    if let email = collaborator["email"] as? String, !email.isEmpty {
+        handles.append(email)
+    }
+
+    if handles.isEmpty {
+        print("Error: No phone or email found in config.json collaborator section")
+        exit(1)
+    }
+    return handles
+}
+
+let handles = loadHandlesFromConfig()
 let mindPath = resolveMindPath()
 let outputPath = URL(fileURLWithPath: "memory/backfill/imessage-history.md", relativeTo: URL(fileURLWithPath: mindPath))
     .standardizedFileURL

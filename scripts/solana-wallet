@@ -5,7 +5,7 @@ const { getAssociatedTokenAddressSync, getAccount, TOKEN_PROGRAM_ID } = require(
 const fs = require('fs');
 const path = require('path');
 
-const KEYPAIR_PATH = path.join(process.env.HOME, '.claude-mind/credentials/solana-wallet.json');
+const KEYPAIR_PATH = path.join(process.env.HOME, '.claude-mind/self/credentials/solana-wallet.json');
 const RPC_URL = 'https://api.mainnet-beta.solana.com';
 
 function loadKeypair() {

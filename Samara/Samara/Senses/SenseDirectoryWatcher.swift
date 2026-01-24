@@ -38,7 +38,7 @@ final class SenseDirectoryWatcher {
     // MARK: - Initialization
 
     init(
-        sensesDirectory: String = MindPaths.mindPath("senses"),
+        sensesDirectory: String = MindPaths.systemPath("senses"),
         pollInterval: TimeInterval = 5,
         onSenseEvent: @escaping (SenseEvent) -> Void
     ) {

@@ -2,7 +2,7 @@ import Foundation
 import AppKit
 
 // Single instance lock - prevent multiple Samara processes
-let lockFilePath = MindPaths.mindPath("samara.lock")
+let lockFilePath = MindPaths.statePath("samara.lock")
 let lockFileDescriptor = open(lockFilePath, O_WRONLY | O_CREAT, 0o600)
 if lockFileDescriptor == -1 || flock(lockFileDescriptor, LOCK_EX | LOCK_NB) != 0 {
     // Can't use log() here since Logger may not be initialized yet
@@ -139,7 +139,7 @@ var processingMessages = Set<Int64>()
 let processingLock = NSLock()
 
 // Path to distill-session script
-let distillSessionPath = MindPaths.mindPath("bin/distill-session")
+let distillSessionPath = MindPaths.systemPath("bin/distill-session")
 
 // Session manager for batching and continuity
 var sessionManager: SessionManager!
@@ -725,7 +725,7 @@ func handleEmail(_ email: Email) {
                 end tell'
 
                 To also text \(collaboratorName):
-                ~/.claude-mind/bin/message "Your message here"
+                ~/.claude-mind/system/bin/message "Your message here"
                 """
 
             let result = try invoker.invoke(prompt: prompt, context: context, attachmentPaths: [])
@@ -759,9 +759,9 @@ mailWatcher.start()
 log("[Main] Samara running. Press Ctrl+C to stop.")
 log("[Main] Watching for messages from \(targetPhone) or \(targetEmail)...")
 log("[Main] Watching notes: \(scratchpadNote.name)")
-log("[Main] Watching location file: \(MindPaths.mindPath("state/location.json"))")
+log("[Main] Watching location file: \(MindPaths.statePath("location.json"))")
 log("[Main] Watching email inbox for messages from \(targetEmail)")
-log("[Main] Watching sense directory: \(MindPaths.mindPath("senses"))")
+log("[Main] Watching sense directory: \(MindPaths.systemPath("senses"))")
 
 // Keep the app running - use NSApp.run() to properly handle GCD main queue
 app.run()

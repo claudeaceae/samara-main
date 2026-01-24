@@ -6,12 +6,18 @@ set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 
-# Load config (with fallbacks)
-source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
-    ENTITY_GITHUB="claudeaceae"
+# Load config (required)
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
+    echo "Error: config.sh not found" >&2
+    exit 1
 }
 
-LOG_FILE="$MIND_PATH/logs/github.log"
+if [ -z "$ENTITY_GITHUB" ]; then
+    echo "Error: ENTITY_GITHUB not set in config.json" >&2
+    exit 1
+fi
+
+LOG_FILE="$MIND_PATH/system/logs/github.log"
 STATE_FILE="$MIND_PATH/state/services/github-seen-ids.json"
 LOCK_FILE="$MIND_PATH/claude.lock"
 
@@ -212,7 +218,7 @@ log "Found GitHub interactions: $INTERACTIONS"
 
 # Read core identity and decisions - required for coherent behavior
 MIND="$MIND_PATH"
-IDENTITY=$(cat "$MIND/identity.md" 2>/dev/null || echo "")
+IDENTITY=$(cat "$MIND/self/identity.md" 2>/dev/null || echo "")
 DECISIONS=$(cat "$MIND/memory/decisions.md" 2>/dev/null || echo "")
 
 # Build prompt for Claude

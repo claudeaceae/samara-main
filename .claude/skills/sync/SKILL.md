@@ -22,7 +22,7 @@ Runs the `sync-organism` script to detect differences between:
 ## Running the Check
 
 ```bash
-~/.claude-mind/bin/sync-organism
+~/.claude-mind/system/bin/sync-organism
 ```
 
 ## What It Checks
@@ -61,6 +61,6 @@ Total drift: 0 issues
 ## Fixing Drift
 
 If drift is detected, the script shows commands to fix it. Common fixes:
-- Copy runtime script to repo: `cp ~/.claude-mind/bin/X ~/Developer/samara-main/scripts/`
-- Rebuild Samara: `~/.claude-mind/bin/update-samara`
+- Copy runtime script to repo: `cp ~/.claude-mind/system/bin/X ~/Developer/samara-main/scripts/`
+- Rebuild Samara: `~/.claude-mind/system/bin/update-samara`
 - Recreate symlinks: Run `sync-skills` or manually create symlinks

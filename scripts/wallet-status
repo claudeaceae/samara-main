@@ -6,7 +6,7 @@ set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 STATE_FILE="$MIND_PATH/state/wallet-state.json"
-CREDS_FILE="$MIND_PATH/credentials/wallet-apis.json"
+CREDS_FILE="$MIND_PATH/self/credentials/wallet-apis.json"
 
 # Check for JSON output flag
 if [ "$1" = "--json" ]; then
@@ -32,7 +32,7 @@ import os
 from datetime import datetime
 
 state_file = os.environ.get('STATE_FILE', os.path.expanduser('~/.claude-mind/state/wallet-state.json'))
-creds_file = os.environ.get('CREDS_FILE', os.path.expanduser('~/.claude-mind/credentials/wallet-apis.json'))
+creds_file = os.environ.get('CREDS_FILE', os.path.expanduser('~/.claude-mind/self/credentials/wallet-apis.json'))
 
 with open(state_file) as f:
     state = json.load(f)

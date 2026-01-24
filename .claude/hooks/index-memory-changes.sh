@@ -35,9 +35,9 @@ INDEX_TRIGGERED=""
 # Check if file is in memory directory
 if [[ "$REAL_FILE_PATH" == "$REAL_MEMORY_DIR"/* ]]; then
     # Trigger FTS5 incremental update (background, non-blocking)
-    if [ -x "$MIND_PATH/bin/memory-index" ]; then
+    if [ -x "$MIND_PATH/system/bin/memory-index" ]; then
         # memory-index sync just updates the index for changed files
-        nohup "$MIND_PATH/bin/memory-index" sync "$FILE_PATH" >> "$MIND_PATH/logs/memory-index.log" 2>&1 &
+        nohup "$MIND_PATH/system/bin/memory-index" sync "$FILE_PATH" >> "$MIND_PATH/system/logs/memory-index.log" 2>&1 &
         INDEX_TRIGGERED+="FTS5 "
     fi
 
@@ -46,7 +46,7 @@ if [[ "$REAL_FILE_PATH" == "$REAL_MEMORY_DIR"/* ]]; then
         # Use chroma helper's incremental indexing
         CHROMA_HELPER="$HOME/Developer/samara-main/lib/chroma_helper.py"
         if [ -f "$CHROMA_HELPER" ]; then
-            nohup python3 "$CHROMA_HELPER" index-single "$FILE_PATH" >> "$MIND_PATH/logs/chroma-index.log" 2>&1 &
+            nohup python3 "$CHROMA_HELPER" index-single "$FILE_PATH" >> "$MIND_PATH/system/logs/chroma-index.log" 2>&1 &
             INDEX_TRIGGERED+="Chroma "
         fi
     fi

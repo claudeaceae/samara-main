@@ -24,7 +24,7 @@ pgrep -fl Samara
 ### 2. Recent Message Detection
 ```bash
 # Check if Samara has logged recent message detection
-tail -20 ~/.claude-mind/logs/samara.log 2>/dev/null || echo "No Samara log found"
+tail -20 ~/.claude-mind/system/logs/samara.log 2>/dev/null || echo "No Samara log found"
 ```
 
 ### 3. Wake Cycle Schedule
@@ -37,15 +37,15 @@ Check that these are loaded:
 
 ### 4. Recent Wake/Dream Logs
 ```bash
-tail -10 ~/.claude-mind/logs/wake-adaptive.log 2>/dev/null
-tail -10 ~/.claude-mind/logs/wake.log 2>/dev/null
-tail -10 ~/.claude-mind/logs/dream.log 2>/dev/null
+tail -10 ~/.claude-mind/system/logs/wake-adaptive.log 2>/dev/null
+tail -10 ~/.claude-mind/system/logs/wake.log 2>/dev/null
+tail -10 ~/.claude-mind/system/logs/dream.log 2>/dev/null
 ```
 
 ### 4b. Scheduler State
 ```bash
 cat ~/.claude-mind/state/scheduler-state.json 2>/dev/null || echo "No scheduler state"
-~/.claude-mind/bin/wake-scheduler status 2>/dev/null || echo "Scheduler not available"
+~/.claude-mind/system/bin/wake-scheduler status 2>/dev/null || echo "Scheduler not available"
 ```
 
 ### 5. Lock File Status

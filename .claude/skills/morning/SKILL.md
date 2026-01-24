@@ -16,12 +16,12 @@ date "+%A, %B %d, %Y - %I:%M %p"
 
 ### Location
 ```bash
-~/.claude-mind/bin/get-location 2>/dev/null || echo "Location unavailable"
+~/.claude-mind/system/bin/get-location 2>/dev/null || echo "Location unavailable"
 ```
 
 ### Today's Calendar
 ```bash
-~/.claude-mind/bin/calendar-check 2>/dev/null || osascript -e '
+~/.claude-mind/system/bin/calendar-check 2>/dev/null || osascript -e '
 tell application "Calendar"
     set today to current date
     set tomorrow to today + 1 * days

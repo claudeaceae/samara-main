@@ -10,7 +10,7 @@
 # This makes /exit instant while still capturing session memory.
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-LOG_FILE="$MIND_PATH/logs/claude-sessions.log"
+LOG_FILE="$MIND_PATH/system/logs/claude-sessions.log"
 CLAUDE_PATH="${CLAUDE_PATH:-$HOME/.local/bin/claude}"
 
 # Resolve repo root (follow symlinks)
@@ -100,7 +100,7 @@ echo '{"ok": true}'
 (
     # Re-source variables for the subshell
     MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-    LOG_FILE="$MIND_PATH/logs/claude-sessions.log"
+    LOG_FILE="$MIND_PATH/system/logs/claude-sessions.log"
     CLAUDE_PATH="${CLAUDE_PATH:-$HOME/.local/bin/claude}"
 
     log() {
@@ -205,7 +205,7 @@ EOF
     # PHASE 2: Write to unified event stream
     # ============================================
 
-    STREAM_CMD="$MIND_PATH/bin/stream"
+    STREAM_CMD="$MIND_PATH/system/bin/stream"
     if [ -x "$STREAM_CMD" ]; then
         ONE_LINE_SUMMARY=$(echo "$SUMMARY" | head -3 | tr '\n' ' ' | sed 's/^- //' | head -c 200)
 

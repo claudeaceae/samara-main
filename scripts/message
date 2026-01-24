@@ -8,11 +8,16 @@
 set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 
-# Load config (with fallbacks)
-source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
-    # Fallback if config.sh doesn't exist
-    COLLABORATOR_PHONE="+15206099095"
+# Load config (required)
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
+    echo "Error: config.sh not found" >&2
+    exit 1
 }
+
+if [ -z "$COLLABORATOR_PHONE" ]; then
+    echo "Error: COLLABORATOR_PHONE not set in config.json" >&2
+    exit 1
+fi
 
 if [ -z "$1" ]; then
     echo "Usage: message \"Your message here\""
@@ -35,5 +40,5 @@ OSASCRIPT_BIN="${OSASCRIPT_BIN:-osascript}"
 "
 
 # Log it
-LOG_FILE="$MIND_PATH/logs/messages-sent.log"
+LOG_FILE="$MIND_PATH/system/logs/messages-sent.log"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sent: $MESSAGE" >> "$LOG_FILE"

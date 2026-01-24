@@ -6,12 +6,18 @@
 #
 # Usage: screenshot
 
-# Load config (with fallbacks)
+# Load config (required)
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 
-source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
-    COLLABORATOR_PHONE="+15206099095"
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
+    echo "Error: config.sh not found" >&2
+    exit 1
 }
+
+if [ -z "$COLLABORATOR_PHONE" ]; then
+    echo "Error: COLLABORATOR_PHONE not set in config.json" >&2
+    exit 1
+fi
 
 TEMP_FILE="/tmp/screenshot-$(date +%s).png"
 
@@ -24,7 +30,7 @@ if [ ! -f "$TEMP_FILE" ]; then
 fi
 
 # Send it
-"$MIND_PATH/bin/send-attachment" "$TEMP_FILE" "$COLLABORATOR_PHONE"
+"$MIND_PATH/system/bin/send-attachment" "$TEMP_FILE" "$COLLABORATOR_PHONE"
 
 # Clean up
 rm -f "$TEMP_FILE"

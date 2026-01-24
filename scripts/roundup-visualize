@@ -89,7 +89,7 @@ echo "Generating $PERIOD_TYPE visualization for $PERIOD..."
 echo "Aspect ratio: $ASPECT"
 
 # Generate the image
-"$MIND_PATH/bin/generate-image" "$PROMPT" "$OUTPUT_FILE" --aspect="$ASPECT"
+"$MIND_PATH/system/bin/generate-image" "$PROMPT" "$OUTPUT_FILE" --aspect="$ASPECT"
 
 if [ -f "$OUTPUT_FILE" ]; then
     echo "Visualization saved: $OUTPUT_FILE"

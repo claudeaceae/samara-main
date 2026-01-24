@@ -30,8 +30,8 @@ if [[ -d "$FIXTURE_DIR" ]]; then
   cp -R "$FIXTURE_DIR/." "$SAMARA_MIND_PATH/"
 fi
 
-if [[ ! -e "$SAMARA_MIND_PATH/bin" ]]; then
-  ln -s "$SCRIPT_DIR/../../scripts" "$SAMARA_MIND_PATH/bin"
+if [[ ! -e "$SAMARA_MIND_PATH/system/bin" ]]; then
+  ln -s "$SCRIPT_DIR/../../scripts" "$SAMARA_MIND_PATH/system/bin"
 fi
 
 if [[ ! -e "$SAMARA_MIND_PATH/lib" ]]; then

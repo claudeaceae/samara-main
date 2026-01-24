@@ -85,7 +85,7 @@ sleep 0.3
 rm -f "$TEMP_PATH"
 
 # Log it
-LOG_FILE="$MIND_PATH/logs/messages-sent.log"
+LOG_FILE="$MIND_PATH/system/logs/messages-sent.log"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sent attachment to $CHAT_ID: $ABSOLUTE_PATH" >> "$LOG_FILE"
 
 if [ $RESULT -eq 0 ]; then

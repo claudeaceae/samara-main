@@ -48,9 +48,9 @@ if [ -f "$ITERATION_STATE" ]; then
 fi
 
 # === 2. CHECK SYSTEM DRIFT (Important) ===
-if [ -x "$MIND_PATH/bin/sync-organism" ]; then
-    if ! "$MIND_PATH/bin/sync-organism" --check >/dev/null 2>&1; then
-        DRIFT_SUMMARY=$("$MIND_PATH/bin/sync-organism" 2>&1 | grep -E "^(Repo scripts|Runtime scripts|Only in|Differ|Total drift)" | head -5)
+if [ -x "$MIND_PATH/system/bin/sync-organism" ]; then
+    if ! "$MIND_PATH/system/bin/sync-organism" --check >/dev/null 2>&1; then
+        DRIFT_SUMMARY=$("$MIND_PATH/system/bin/sync-organism" 2>&1 | grep -E "^(Repo scripts|Runtime scripts|Only in|Differ|Total drift)" | head -5)
         if [ -n "$DRIFT_SUMMARY" ]; then
             MESSAGES+="[WARN] System drift detected:\n$DRIFT_SUMMARY\n\nConsider running /sync before next session.\n\n"
         fi

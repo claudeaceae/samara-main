@@ -15,7 +15,7 @@ set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
-LOG_FILE="$MIND_PATH/logs/dream.log"
+LOG_FILE="$MIND_PATH/system/logs/dream.log"
 
 # Calculate most recent Sunday if no date provided
 if [ -n "$1" ]; then

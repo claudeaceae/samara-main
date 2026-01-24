@@ -16,7 +16,7 @@
 set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-LOG_FILE="${MIND_PATH}/logs/wake-adaptive.log"
+LOG_FILE="${MIND_PATH}/system/logs/wake-adaptive.log"
 
 # Ensure log directory exists
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -42,7 +42,7 @@ done
 log "Adaptive wake check starting..."
 
 # Check scheduler
-SCHEDULER_RESULT=$("$MIND_PATH/bin/wake-scheduler" check 2>/dev/null || echo '{"should_wake": false, "type": "none", "reason": "scheduler unavailable"}')
+SCHEDULER_RESULT=$("$MIND_PATH/system/bin/wake-scheduler" check 2>/dev/null || echo '{"should_wake": false, "type": "none", "reason": "scheduler unavailable"}')
 
 SHOULD_WAKE=$(echo "$SCHEDULER_RESULT" | jq -r '.should_wake // false')
 WAKE_TYPE=$(echo "$SCHEDULER_RESULT" | jq -r '.type // "none"')
@@ -61,19 +61,19 @@ if [ "$SHOULD_WAKE" = "true" ]; then
     case "$WAKE_TYPE" in
         full)
             log "Dispatching to full wake cycle"
-            exec "$MIND_PATH/bin/wake"
+            exec "$MIND_PATH/system/bin/wake"
             ;;
         light)
             log "Dispatching to light wake cycle"
-            exec "$MIND_PATH/bin/wake-light" --reason "$REASON"
+            exec "$MIND_PATH/system/bin/wake-light" --reason "$REASON"
             ;;
         emergency)
             log "Dispatching to emergency wake (using light with urgency)"
-            exec "$MIND_PATH/bin/wake-light" --reason "EMERGENCY: $REASON"
+            exec "$MIND_PATH/system/bin/wake-light" --reason "EMERGENCY: $REASON"
             ;;
         *)
             log "Unknown wake type: $WAKE_TYPE, using light"
-            exec "$MIND_PATH/bin/wake-light" --reason "$REASON"
+            exec "$MIND_PATH/system/bin/wake-light" --reason "$REASON"
             ;;
     esac
 else

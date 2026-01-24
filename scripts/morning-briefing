@@ -12,14 +12,19 @@ DATE=$(date +%Y-%m-%d)
 DAY_OF_WEEK=$(date +%A)  # Full day name (e.g., "Monday")
 YESTERDAY=$(date -v-1d +%Y-%m-%d)
 TIME=$(date +%H:%M)
-LOG_FILE="$MIND_PATH/logs/morning-briefing.log"
+LOG_FILE="$MIND_PATH/system/logs/morning-briefing.log"
 LOCK_FILE="$MIND_PATH/claude.lock"
 
-# Load config (with fallbacks)
-source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
-    COLLABORATOR_PHONE="+15206099095"
-    COLLABORATOR_NAME="É"
+# Load config (required)
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
+    echo "Error: config.sh not found" >&2
+    exit 1
 }
+
+if [ -z "$COLLABORATOR_PHONE" ] || [ -z "$COLLABORATOR_NAME" ]; then
+    echo "Error: COLLABORATOR_PHONE or COLLABORATOR_NAME not set in config.json" >&2
+    exit 1
+fi
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
@@ -171,18 +176,18 @@ log "Parsed image prompt ($(echo "$IMAGE_PROMPT" | wc -c | tr -d ' ') chars)"
 
 # Generate the accompanying image
 IMAGE_FILE="/tmp/morning-briefing-$(date +%s).jpg"
-AVATAR_REF="$MIND_PATH/credentials/avatar-ref.png"
+AVATAR_REF="$MIND_PATH/self/credentials/avatar-ref.png"
 
 if [ -n "$IMAGE_PROMPT" ]; then
     log "Generating morning briefing image..."
 
     # Generate image with avatar reference for consistency
-    if "$MIND_PATH/bin/generate-image" "$IMAGE_PROMPT" "$IMAGE_FILE" --ref="$AVATAR_REF" --aspect=4:3 >> "$LOG_FILE" 2>&1; then
+    if "$MIND_PATH/system/bin/generate-image" "$IMAGE_PROMPT" "$IMAGE_FILE" --ref="$AVATAR_REF" --aspect=4:3 >> "$LOG_FILE" 2>&1; then
         log "Image generated: $IMAGE_FILE"
 
         # Send the image first
         log "Sending image to $COLLABORATOR_NAME..."
-        "$MIND_PATH/bin/send-image" "$IMAGE_FILE" >> "$LOG_FILE" 2>&1 || log "Failed to send image"
+        "$MIND_PATH/system/bin/send-image" "$IMAGE_FILE" >> "$LOG_FILE" 2>&1 || log "Failed to send image"
         log "Image sent"
     else
         log "Image generation failed, continuing with text only"
@@ -209,7 +214,7 @@ if [ -n "$MESSAGE" ]; then
     log "Morning briefing sent to $COLLABORATOR_NAME"
 
     # Also log to messages-sent.log for tracking
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sent (morning briefing): ${MESSAGE:0:100}..." >> "$MIND_PATH/logs/messages-sent.log"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Sent (morning briefing): ${MESSAGE:0:100}..." >> "$MIND_PATH/system/logs/messages-sent.log"
 
     # Log to episode file for memory continuity
     # This ensures Samara-invoked Claude sees the briefing when É responds

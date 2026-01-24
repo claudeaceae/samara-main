@@ -8,7 +8,7 @@
 set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-LOG_FILE="$MIND_PATH/logs/unsubscribe.log"
+LOG_FILE="$MIND_PATH/system/logs/unsubscribe.log"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 
 log() {
@@ -42,7 +42,7 @@ if [[ "$URL" == mailto:* ]]; then
     log "Sending unsubscribe email to: $EMAIL (subject: $SUBJECT)"
 
     # Send unsubscribe email
-    "$MIND_PATH/bin/send-email" "$SUBJECT" "Please unsubscribe this email address from your mailing list." "$EMAIL"
+    "$MIND_PATH/system/bin/send-email" "$SUBJECT" "Please unsubscribe this email address from your mailing list." "$EMAIL"
 
     if [ $? -eq 0 ]; then
         log "Unsubscribe email sent successfully"

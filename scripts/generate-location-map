@@ -7,13 +7,13 @@ Usage:
   generate-location-map --type today --output /tmp/today-map.png
   generate-location-map --type trip <trip_id> --output /tmp/trip-map.png
 
-Requires: Mapbox API token in ~/.claude-mind/credentials/mapbox.txt
+Requires: Mapbox API token in ~/.claude-mind/self/credentials/mapbox.txt
 
 To get a token:
 1. Sign up at https://account.mapbox.com/auth/signup/
 2. Go to https://account.mapbox.com/access-tokens/
 3. Copy your default public token
-4. Save it to ~/.claude-mind/credentials/mapbox.txt
+4. Save it to ~/.claude-mind/self/credentials/mapbox.txt
 """
 
 import argparse
@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 
 STATE_DIR = os.path.expanduser("~/.claude-mind/state")
-CREDENTIALS_DIR = os.path.expanduser("~/.claude-mind/credentials")
+CREDENTIALS_DIR = os.path.expanduser("~/.claude-mind/self/credentials")
 TRIPS_FILE = os.path.join(STATE_DIR, "trips.jsonl")
 HISTORY_FILE = os.path.join(STATE_DIR, "location-history.jsonl")
 PLACES_FILE = os.path.join(STATE_DIR, "places.json")

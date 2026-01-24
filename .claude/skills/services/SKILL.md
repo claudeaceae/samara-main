@@ -6,10 +6,10 @@ Manage which services are active in the Samara organism. Services can be toggled
 
 ```bash
 # List all services with current status
-~/.claude-mind/bin/service-toggle list
+~/.claude-mind/system/bin/service-toggle list
 
 # Toggle a service
-~/.claude-mind/bin/service-toggle <service> on|off|status
+~/.claude-mind/system/bin/service-toggle <service> on|off|status
 ```
 
 ## Available Services
@@ -28,7 +28,7 @@ Manage which services are active in the Samara organism. Services can be toggled
 
 The service toggle system has three layers:
 
-### 1. Config (`~/.claude-mind/config.json`)
+### 1. Config (`~/.claude-mind/system/config.json`)
 
 ```json
 {
@@ -56,7 +56,7 @@ The `service-toggle` script also manages launchd agents - when you disable a ser
 
 ### Check current status
 ```bash
-~/.claude-mind/bin/service-toggle list
+~/.claude-mind/system/bin/service-toggle list
 ```
 
 Output:
@@ -71,7 +71,7 @@ github       config: true   launchd: loaded
 
 ### Disable a service
 ```bash
-~/.claude-mind/bin/service-toggle x off
+~/.claude-mind/system/bin/service-toggle x off
 ```
 
 This will:
@@ -81,7 +81,7 @@ This will:
 
 ### Re-enable a service
 ```bash
-~/.claude-mind/bin/service-toggle bluesky on
+~/.claude-mind/system/bin/service-toggle bluesky on
 ```
 
 This will:
@@ -107,7 +107,7 @@ Or use the update-samara script if you also have code changes.
 
 | File | Purpose |
 |------|---------|
-| `~/.claude-mind/config.json` | Runtime config with `services` section |
+| `~/.claude-mind/system/config.json` | Runtime config with `services` section |
 | `Samara/Samara/Configuration.swift` | `ServicesConfig` struct and `isEnabled()` method |
 | `Samara/Samara/Mind/SenseRouter.swift` | Checks config before registering handlers |
 | `scripts/service-toggle` | CLI for toggling services |

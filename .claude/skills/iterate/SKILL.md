@@ -108,25 +108,25 @@ When complete, update state:
 ### Start Iteration
 ```bash
 # Initialize new iteration
-~/.claude-mind/bin/iterate-start "goal description" --max-attempts 5 --criteria "tests pass" --criteria "builds clean"
+~/.claude-mind/system/bin/iterate-start "goal description" --max-attempts 5 --criteria "tests pass" --criteria "builds clean"
 ```
 
 ### Check Status
 ```bash
 # View current iteration state
-~/.claude-mind/bin/iterate-status
+~/.claude-mind/system/bin/iterate-status
 ```
 
 ### Record Attempt
 ```bash
 # Record an attempt outcome
-~/.claude-mind/bin/iterate-record --success | --failure --action "what was done" --learning "what was learned"
+~/.claude-mind/system/bin/iterate-record --success | --failure --action "what was done" --learning "what was learned"
 ```
 
 ### Complete Iteration
 ```bash
 # Mark iteration complete
-~/.claude-mind/bin/iterate-complete --success | --failed "summary"
+~/.claude-mind/system/bin/iterate-complete --success | --failed "summary"
 ```
 
 ## Guidelines

@@ -40,8 +40,9 @@ node_modules/
 # Logs (keep structure, ignore contents)
 *.log
 
-# Local config (contains secrets)
+# Local config (contains secrets or organism-specific permissions)
 *.local.md
+.claude/settings.local.json
 # Build artifacts
 .coverage
 .coverage-node/

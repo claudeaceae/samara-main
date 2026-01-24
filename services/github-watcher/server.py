@@ -25,9 +25,9 @@ def resolve_mind_dir() -> str:
 # Paths
 MIND_DIR = resolve_mind_dir()
 STATE_DIR = os.path.join(MIND_DIR, 'state')
-SENSES_DIR = os.path.join(MIND_DIR, 'senses')
+SENSES_DIR = os.path.join(MIND_DIR, 'system', 'senses')
 STATE_FILE = os.path.join(STATE_DIR, 'services', 'github-seen-ids.json')
-LOG_FILE = os.path.join(MIND_DIR, 'logs', 'github-watcher.log')
+LOG_FILE = os.path.join(MIND_DIR, 'system', 'logs', 'github-watcher.log')
 
 
 def log(message: str):

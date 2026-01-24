@@ -27,8 +27,8 @@ Manage the webhook receiver system. Use this skill to add new webhook sources, t
 ### Webhook Receiver
 
 - **Public URL**: `https://webhooks.organelle.co`
-- **Config file**: `~/.claude-mind/credentials/webhook-secrets.json`
-- **Events directory**: `~/.claude-mind/senses/`
+- **Config file**: `~/.claude-mind/self/credentials/webhook-secrets.json`
+- **Events directory**: `~/.claude-mind/system/senses/`
 
 ### Endpoints
 
@@ -45,7 +45,7 @@ Manage the webhook receiver system. Use this skill to add new webhook sources, t
 Read and display the webhook configuration:
 
 ```bash
-cat ~/.claude-mind/credentials/webhook-secrets.json | jq .
+cat ~/.claude-mind/self/credentials/webhook-secrets.json | jq .
 ```
 
 Also check service status:
@@ -84,7 +84,7 @@ Generate and send a signed test webhook:
 
 ```bash
 SOURCE="<source-name>"
-SECRET=$(cat ~/.claude-mind/credentials/webhook-secrets.json | jq -r ".sources.\"$SOURCE\".secret")
+SECRET=$(cat ~/.claude-mind/self/credentials/webhook-secrets.json | jq -r ".sources.\"$SOURCE\".secret")
 PAYLOAD='{"event":"test","message":"Test webhook from skill","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}'
 SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET" | cut -d' ' -f2)
 
@@ -96,17 +96,17 @@ curl -s -X POST "https://webhooks.organelle.co/webhook/$SOURCE" \
 
 Then check the created event:
 ```bash
-ls -lt ~/.claude-mind/senses/webhook-*.json | head -3
+ls -lt ~/.claude-mind/system/senses/webhook-*.json | head -3
 ```
 
 ### When user wants to view recent events
 
 ```bash
 # List recent webhook events
-ls -lt ~/.claude-mind/senses/webhook-*.json 2>/dev/null | head -10
+ls -lt ~/.claude-mind/system/senses/webhook-*.json 2>/dev/null | head -10
 
 # Show content of most recent
-cat $(ls -t ~/.claude-mind/senses/webhook-*.json 2>/dev/null | head -1) | jq .
+cat $(ls -t ~/.claude-mind/system/senses/webhook-*.json 2>/dev/null | head -1) | jq .
 ```
 
 ## Setup Guides
@@ -221,7 +221,7 @@ X-Webhook-Secret: <your-secret>
 
 ## Event Processing
 
-Incoming webhooks become "sense events" in `~/.claude-mind/senses/`. The SenseRouter picks these up and can:
+Incoming webhooks become "sense events" in `~/.claude-mind/system/senses/`. The SenseRouter picks these up and can:
 
 - Trigger immediate attention for high-priority events
 - Queue for next wake cycle
@@ -253,7 +253,7 @@ curl -s https://webhooks.organelle.co/status | jq .
 
 3. Check logs:
 ```bash
-tail -50 ~/.claude-mind/logs/webhook-receiver.log
+tail -50 ~/.claude-mind/system/logs/webhook-receiver.log
 ```
 
 ### Authentication failing

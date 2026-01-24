@@ -23,10 +23,10 @@ def resolve_mind_dir() -> str:
 # Paths
 MIND_DIR = resolve_mind_dir()
 STATE_DIR = os.path.join(MIND_DIR, 'state')
-SENSES_DIR = os.path.join(MIND_DIR, 'senses')
-CREDS_FILE = os.path.join(MIND_DIR, 'credentials', 'bluesky.json')
+SENSES_DIR = os.path.join(MIND_DIR, 'system', 'senses')
+CREDS_FILE = os.path.join(MIND_DIR, 'self', 'credentials', 'bluesky.json')
 STATE_FILE = os.path.join(STATE_DIR, 'services', 'bluesky-state.json')
-LOG_FILE = os.path.join(MIND_DIR, 'logs', 'bluesky-watcher.log')
+LOG_FILE = os.path.join(MIND_DIR, 'system', 'logs', 'bluesky-watcher.log')
 
 
 def log(message: str):

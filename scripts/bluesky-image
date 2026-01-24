@@ -6,8 +6,22 @@
 set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-CREDS_FILE="$MIND_PATH/credentials/bluesky.json"
-LOG_FILE="$MIND_PATH/logs/bluesky.log"
+CREDS_FILE="$MIND_PATH/self/credentials/bluesky.json"
+LOG_FILE="$MIND_PATH/system/logs/bluesky.log"
+CONFIG_FILE="$MIND_PATH/config.json"
+
+# Load config (required)
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
+    echo "Error: config.sh not found" >&2
+    exit 1
+}
+
+if [ -z "$ENTITY_BLUESKY" ]; then
+    echo "Error: ENTITY_BLUESKY not set in config.json" >&2
+    exit 1
+fi
+ENTITY_BLUESKY_HANDLE="$ENTITY_BLUESKY"
+export ENTITY_BLUESKY_HANDLE
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
@@ -85,7 +99,7 @@ try:
         images=[
             models.AppBskyEmbedImages.Image(
                 image=upload.blob,
-                alt=caption[:1000] if caption else "Image posted by @claudeaceae.bsky.social"
+                alt=caption[:1000] if caption else f"Image posted by {os.environ.get('ENTITY_BLUESKY_HANDLE', 'entity')}"
             )
         ]
     )

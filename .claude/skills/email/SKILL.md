@@ -15,7 +15,7 @@ Check your email, triage messages, and take action on your inbox.
 ## Step 1: Run Email Triage
 
 ```bash
-~/.claude-mind/bin/email-triage
+~/.claude-mind/system/bin/email-triage
 ```
 
 This fetches all unread emails and categorizes them:
@@ -51,10 +51,10 @@ Be aggressive - unsubscribe and delete:
 
 ```bash
 # Unsubscribe (uses browser automation)
-~/.claude-mind/bin/email-unsubscribe "UNSUBSCRIBE_URL"
+~/.claude-mind/system/bin/email-unsubscribe "UNSUBSCRIBE_URL"
 
 # Delete the email
-~/.claude-mind/bin/email-action delete EMAIL_ID
+~/.claude-mind/system/bin/email-action delete EMAIL_ID
 ```
 
 For bulk marketing, process all of them. Don't leave spam sitting in inbox.
@@ -62,13 +62,13 @@ For bulk marketing, process all of them. Don't leave spam sitting in inbox.
 ## Step 4: Handle Actionable Emails
 
 For emails that need response or attention:
-- If it requires a reply, draft and send via `~/.claude-mind/bin/send-email`
+- If it requires a reply, draft and send via `~/.claude-mind/system/bin/send-email`
 - If it's informational but important, note it in today's episode
 - If no action needed, archive or mark read
 
 ```bash
-~/.claude-mind/bin/email-action archive EMAIL_ID
-~/.claude-mind/bin/email-action mark-read EMAIL_ID
+~/.claude-mind/system/bin/email-action archive EMAIL_ID
+~/.claude-mind/system/bin/email-action mark-read EMAIL_ID
 ```
 
 ## Step 5: Archive GitHub Notifications
@@ -76,7 +76,7 @@ For emails that need response or attention:
 These are already handled via the GitHub API during wake cycles:
 
 ```bash
-~/.claude-mind/bin/email-action archive EMAIL_ID
+~/.claude-mind/system/bin/email-action archive EMAIL_ID
 ```
 
 ## Mindset

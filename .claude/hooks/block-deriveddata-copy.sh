@@ -20,7 +20,7 @@ fi
 
 # Pattern 1: Copying from DerivedData to Applications/Samara
 if echo "$COMMAND" | grep -qE "cp.*DerivedData.*Samara.*Applications|cp.*DerivedData.*Applications.*Samara"; then
-    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "BLOCKED: Never copy Samara.app from DerivedData! This uses wrong signing certificate and breaks FDA. Use ~/.claude-mind/bin/update-samara instead."}}'
+    echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "BLOCKED: Never copy Samara.app from DerivedData! This uses wrong signing certificate and breaks FDA. Use ~/.claude-mind/system/bin/update-samara instead."}}'
     exit 0
 fi
 
@@ -28,7 +28,7 @@ fi
 if echo "$COMMAND" | grep -qE "cp.*Samara\.app.*/Applications" && ! echo "$COMMAND" | grep -q "SamaraExport"; then
     # Check if it's from the approved path
     if ! echo "$COMMAND" | grep -qE "/tmp/SamaraExport/Samara\.app"; then
-        echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "BLOCKED: Manual copy of Samara.app to /Applications is forbidden. Use ~/.claude-mind/bin/update-samara which handles signing and notarization correctly."}}'
+        echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "BLOCKED: Manual copy of Samara.app to /Applications is forbidden. Use ~/.claude-mind/system/bin/update-samara which handles signing and notarization correctly."}}'
         exit 0
     fi
 fi
@@ -36,7 +36,7 @@ fi
 # Pattern 3: Debug build deployment
 if echo "$COMMAND" | grep -qE "xcodebuild.*Debug.*Samara" && echo "$COMMAND" | grep -q "build"; then
     if ! echo "$COMMAND" | grep -q "test"; then
-        echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "BLOCKED: Debug builds should not be deployed. Use ~/.claude-mind/bin/update-samara for proper Release + notarized builds."}}'
+        echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "BLOCKED: Debug builds should not be deployed. Use ~/.claude-mind/system/bin/update-samara for proper Release + notarized builds."}}'
         exit 0
     fi
 fi

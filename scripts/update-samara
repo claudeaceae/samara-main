@@ -9,7 +9,16 @@ if [[ -n "${SAMARA_TEST_MODE:-}" ]]; then
     exit 1
 fi
 
-SAMARA_DIR="/Users/claude/Developer/samara-main/Samara"
+# Determine repo path dynamically
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# If in symlinked bin dir, follow the symlink to find repo
+if [ -L "$SCRIPT_DIR/../$(basename "$0")" ] || [ -L "${BASH_SOURCE[0]}" ]; then
+    # Script is symlinked, resolve to actual repo location
+    REAL_SCRIPT="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || readlink "${BASH_SOURCE[0]}")"
+    SCRIPT_DIR="$(dirname "$REAL_SCRIPT")"
+fi
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+SAMARA_DIR="$REPO_DIR/Samara"
 ARCHIVE_PATH="/tmp/Samara.xcarchive"
 EXPORT_PATH="/tmp/SamaraExport"
 EXPORT_OPTIONS="/tmp/ExportOptions.plist"

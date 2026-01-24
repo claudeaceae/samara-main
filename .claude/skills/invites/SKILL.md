@@ -14,7 +14,7 @@ Check pending calendar invitations, respond to meeting requests, and create new 
 ## Quick Status
 
 ```bash
-~/.claude-mind/bin/calendar-invites list --text
+~/.claude-mind/system/bin/calendar-invites list --text
 ```
 
 ## Commands
@@ -23,70 +23,70 @@ Check pending calendar invitations, respond to meeting requests, and create new 
 
 ```bash
 # Human-readable format
-~/.claude-mind/bin/calendar-invites list --text
+~/.claude-mind/system/bin/calendar-invites list --text
 
 # JSON format (default)
-~/.claude-mind/bin/calendar-invites list --json
+~/.claude-mind/system/bin/calendar-invites list --json
 
 # Custom date range
-~/.claude-mind/bin/calendar-invites list --days 7
+~/.claude-mind/system/bin/calendar-invites list --days 7
 
 # Specific calendar
-~/.claude-mind/bin/calendar-invites list --calendar "Work"
+~/.claude-mind/system/bin/calendar-invites list --calendar "Work"
 ```
 
 ### Show Event Details
 
 ```bash
-~/.claude-mind/bin/calendar-invites show "EVENT_ID"
+~/.claude-mind/system/bin/calendar-invites show "EVENT_ID"
 ```
 
 ### Respond to Invitations
 
 ```bash
 # Accept an invitation (via AppleScript)
-~/.claude-mind/bin/calendar-invites accept "EVENT_ID"
+~/.claude-mind/system/bin/calendar-invites accept "EVENT_ID"
 
 # Decline an invitation
-~/.claude-mind/bin/calendar-invites decline "EVENT_ID"
+~/.claude-mind/system/bin/calendar-invites decline "EVENT_ID"
 
 # Mark as tentative/maybe
-~/.claude-mind/bin/calendar-invites maybe "EVENT_ID"
+~/.claude-mind/system/bin/calendar-invites maybe "EVENT_ID"
 
 # Accept all pending invitations (via AppleScript)
-~/.claude-mind/bin/calendar-invites accept-all
+~/.claude-mind/system/bin/calendar-invites accept-all
 
 # Accept all via UI automation (more reliable)
-~/.claude-mind/bin/calendar-invites accept-all-ui
+~/.claude-mind/system/bin/calendar-invites accept-all-ui
 ```
 
 ### Sync/Refresh Calendars
 
 ```bash
 # Force calendar sync with server
-~/.claude-mind/bin/calendar-invites sync
+~/.claude-mind/system/bin/calendar-invites sync
 ```
 
 ### Create Events
 
 ```bash
 # Basic event (1 hour duration)
-~/.claude-mind/bin/calendar-invites create --title "Team Meeting" --start "2026-01-20T14:00"
+~/.claude-mind/system/bin/calendar-invites create --title "Team Meeting" --start "2026-01-20T14:00"
 
 # Event with duration
-~/.claude-mind/bin/calendar-invites create --title "Lunch" --start "2026-01-20 12:00" --duration 90
+~/.claude-mind/system/bin/calendar-invites create --title "Lunch" --start "2026-01-20 12:00" --duration 90
 
 # Event with specific end time
-~/.claude-mind/bin/calendar-invites create --title "Workshop" --start "2026-01-20 09:00" --end "2026-01-20 12:00"
+~/.claude-mind/system/bin/calendar-invites create --title "Workshop" --start "2026-01-20 09:00" --end "2026-01-20 12:00"
 
 # All-day event
-~/.claude-mind/bin/calendar-invites create --title "Vacation" --start "2026-01-25" --all-day
+~/.claude-mind/system/bin/calendar-invites create --title "Vacation" --start "2026-01-25" --all-day
 
 # Multi-day all-day event
-~/.claude-mind/bin/calendar-invites create --title "Conference" --start "2026-01-25" --end "2026-01-27" --all-day
+~/.claude-mind/system/bin/calendar-invites create --title "Conference" --start "2026-01-25" --end "2026-01-27" --all-day
 
 # Event with location and notes
-~/.claude-mind/bin/calendar-invites create --title "Client Call" --start "2026-01-20 15:00" \
+~/.claude-mind/system/bin/calendar-invites create --title "Client Call" --start "2026-01-20 15:00" \
     --location "Zoom" --notes "Discuss Q1 planning" --calendar "Work"
 ```
 
@@ -104,13 +104,13 @@ Check pending calendar invitations, respond to meeting requests, and create new 
 ### List Available Calendars
 
 ```bash
-~/.claude-mind/bin/calendar-invites calendars
+~/.claude-mind/system/bin/calendar-invites calendars
 ```
 
 ### Open in Calendar.app
 
 ```bash
-~/.claude-mind/bin/calendar-invites open "EVENT_ID"
+~/.claude-mind/system/bin/calendar-invites open "EVENT_ID"
 ```
 
 ## JSON Output Format
@@ -165,16 +165,16 @@ The `list --json` command returns:
 
 ```bash
 # List pending invitations via CalDAV inbox
-~/.claude-mind/bin/calendar-caldav inbox
+~/.claude-mind/system/bin/calendar-caldav inbox
 
 # Accept via CalDAV (proper protocol)
-~/.claude-mind/bin/calendar-caldav accept "EVENT_UID"
+~/.claude-mind/system/bin/calendar-caldav accept "EVENT_UID"
 
 # Accept all pending via CalDAV
-~/.claude-mind/bin/calendar-caldav accept-all
+~/.claude-mind/system/bin/calendar-caldav accept-all
 
 # Decline via CalDAV
-~/.claude-mind/bin/calendar-caldav decline "EVENT_UID"
+~/.claude-mind/system/bin/calendar-caldav decline "EVENT_UID"
 ```
 
 ## Troubleshooting
@@ -188,7 +188,7 @@ The `list --json` command returns:
 2. Check that calendar is syncing in Calendar.app preferences
 
 **If responses don't work:**
-1. Check CalDAV credentials: `~/.claude-mind/bin/calendar-caldav test`
+1. Check CalDAV credentials: `~/.claude-mind/system/bin/calendar-caldav test`
 2. Try `accept-all-ui` instead of `accept-all` (uses UI automation)
 3. The script falls back to opening Calendar.app
 

@@ -8,7 +8,7 @@ set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 VENV_PATH="$MIND_PATH/.venv"
-LOG_FILE="$MIND_PATH/logs/proactive.log"
+LOG_FILE="$MIND_PATH/system/logs/proactive.log"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 
 TRIGGER_TYPE="${1:-unknown}"
@@ -62,7 +62,7 @@ for t in triggers:
 esac
 
 # Read core identity files
-IDENTITY=$(cat "$MIND_PATH/identity.md" 2>/dev/null || echo "")
+IDENTITY=$(cat "$MIND_PATH/self/identity.md" 2>/dev/null || echo "")
 DECISIONS=$(cat "$MIND_PATH/memory/decisions.md" 2>/dev/null || echo "")
 ABOUT_E=$(cat "$MIND_PATH/memory/about-e.md" 2>/dev/null || echo "")
 RECENT_EPISODE=$(tail -50 "$MIND_PATH/memory/episodes/$(date +%Y-%m-%d).md" 2>/dev/null || echo "No recent activity")
@@ -147,7 +147,7 @@ fi
 log "Generated message: $MESSAGE"
 
 # Send via iMessage
-"$MIND_PATH/bin/message-e" "$MESSAGE" >> "$LOG_FILE" 2>&1 || {
+"$MIND_PATH/system/bin/message-e" "$MESSAGE" >> "$LOG_FILE" 2>&1 || {
     log "ERROR: Failed to send message"
     exit 1
 }

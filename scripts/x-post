@@ -10,8 +10,8 @@ set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CREDS_FILE="$MIND_PATH/credentials/x-cookies.json"
-LOG_FILE="$MIND_PATH/logs/x.log"
+CREDS_FILE="$MIND_PATH/self/credentials/x-cookies.json"
+LOG_FILE="$MIND_PATH/system/logs/x.log"
 
 # Ensure log directory exists
 mkdir -p "$(dirname "$LOG_FILE")"

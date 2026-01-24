@@ -3,7 +3,7 @@
 
 # Try native location first (if GetLocation.app has permission)
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-NATIVE_LOC=$("$MIND_PATH/bin/GetLocation.app/Contents/MacOS/GetLocation" 2>/dev/null)
+NATIVE_LOC=$("$MIND_PATH/system/bin/GetLocation.app/Contents/MacOS/GetLocation" 2>/dev/null)
 if [ $? -eq 0 ] && [ -n "$NATIVE_LOC" ]; then
     echo "Source: Native CoreLocation (GPS/WiFi)"
     echo "$NATIVE_LOC"

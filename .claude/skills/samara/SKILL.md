@@ -32,7 +32,7 @@ ps aux | grep -i [S]amara
 ### View Recent Logs
 ```bash
 # Samara's own logs
-tail -50 ~/.claude-mind/logs/samara.log 2>/dev/null
+tail -50 ~/.claude-mind/system/logs/samara.log 2>/dev/null
 
 # System logs for Samara
 log show --predicate 'process == "Samara"' --last 5m 2>/dev/null | tail -30
@@ -94,7 +94,7 @@ codesign -d -r- /Applications/Samara.app 2>&1 | grep "subject.OU"
 
 **The ONLY correct way to rebuild:**
 ```bash
-~/.claude-mind/bin/update-samara
+~/.claude-mind/system/bin/update-samara
 ```
 
 **FORBIDDEN (will break FDA):**

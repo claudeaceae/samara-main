@@ -157,7 +157,7 @@ Once you invoke this skill with `/archive-search <query>`, you can:
 
 When a user invokes `/archive-search <query>`, you should:
 
-1. Run: `~/.claude-mind/bin/archive-index search "<query>"`
+1. Run: `~/.claude-mind/system/bin/archive-index search "<query>"`
 2. Parse and present results clearly
 3. Include session IDs for reference
 4. Explain what the user is seeing (thinking blocks vs user messages)
@@ -167,13 +167,13 @@ When a user invokes `/archive-search <query>`, you should:
 If the archive hasn't been built yet:
 ```bash
 # Build initial index (takes 5-10 minutes for 90 days)
-~/.claude-mind/bin/archive-index rebuild
+~/.claude-mind/system/bin/archive-index rebuild
 
 # Check stats
-~/.claude-mind/bin/archive-index stats
+~/.claude-mind/system/bin/archive-index stats
 
 # Test search
-~/.claude-mind/bin/archive-index search "model fallback"
+~/.claude-mind/system/bin/archive-index search "model fallback"
 ```
 
 After initial build, dream cycles handle incremental sync automatically.

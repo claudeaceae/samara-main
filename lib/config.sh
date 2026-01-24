@@ -43,6 +43,7 @@ config_get() {
 ENTITY_NAME=$(config_get '.entity.name' 'Claude')
 ENTITY_ICLOUD=$(config_get '.entity.icloud' '')
 ENTITY_BLUESKY=$(config_get '.entity.bluesky' '')
+ENTITY_X=$(config_get '.entity.x' '')
 ENTITY_GITHUB=$(config_get '.entity.github' '')
 
 # Collaborator (human) configuration
@@ -50,6 +51,7 @@ COLLABORATOR_NAME=$(config_get '.collaborator.name' '')
 COLLABORATOR_PHONE=$(config_get '.collaborator.phone' '')
 COLLABORATOR_EMAIL=$(config_get '.collaborator.email' '')
 COLLABORATOR_BLUESKY=$(config_get '.collaborator.bluesky' '')
+COLLABORATOR_X=$(config_get '.collaborator.x' '')
 
 # Derived values for convenience
 COLLABORATOR_NAME_LOWER=$(echo "$COLLABORATOR_NAME" | tr '[:upper:]' '[:lower:]')
@@ -62,8 +64,8 @@ NOTE_SCRATCHPAD=$(config_get '.notes.scratchpad' 'Claude Scratchpad')
 MAIL_ACCOUNT=$(config_get '.mail.account' 'iCloud')
 
 # Export all variables
-export ENTITY_NAME ENTITY_ICLOUD ENTITY_BLUESKY ENTITY_GITHUB
-export COLLABORATOR_NAME COLLABORATOR_PHONE COLLABORATOR_EMAIL COLLABORATOR_BLUESKY COLLABORATOR_NAME_LOWER
+export ENTITY_NAME ENTITY_ICLOUD ENTITY_BLUESKY ENTITY_X ENTITY_GITHUB
+export COLLABORATOR_NAME COLLABORATOR_PHONE COLLABORATOR_EMAIL COLLABORATOR_BLUESKY COLLABORATOR_X COLLABORATOR_NAME_LOWER
 export NOTE_LOCATION NOTE_SCRATCHPAD
 export MAIL_ACCOUNT
 export MIND_PATH CONFIG_FILE CONFIG_AVAILABLE

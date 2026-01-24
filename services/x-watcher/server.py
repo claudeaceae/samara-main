@@ -27,10 +27,10 @@ def resolve_mind_dir() -> str:
 # Paths
 MIND_DIR = resolve_mind_dir()
 STATE_DIR = os.path.join(MIND_DIR, 'state')
-SENSES_DIR = os.path.join(MIND_DIR, 'senses')
-CREDS_FILE = os.path.join(MIND_DIR, 'credentials', 'x-cookies.json')
+SENSES_DIR = os.path.join(MIND_DIR, 'system', 'senses')
+CREDS_FILE = os.path.join(MIND_DIR, 'self', 'credentials', 'x-cookies.json')
 STATE_FILE = os.path.join(STATE_DIR, 'x-watcher-state.json')
-LOG_FILE = os.path.join(MIND_DIR, 'logs', 'x-watcher.log')
+LOG_FILE = os.path.join(MIND_DIR, 'system', 'logs', 'x-watcher.log')
 
 
 def log(message: str):
@@ -41,6 +41,23 @@ def log(message: str):
     print(line)
     with open(LOG_FILE, 'a') as f:
         f.write(line + '\n')
+
+
+def load_config() -> Dict:
+    """Load config.json to get entity handles."""
+    config_path = os.path.join(MIND_DIR, 'config.json')
+    try:
+        with open(config_path) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def get_entity_x_handle() -> str:
+    """Get entity's X handle from config (without @)."""
+    config = load_config()
+    handle = config.get('entity', {}).get('x', '')
+    return handle.lstrip('@').lower()
 
 
 def load_state() -> Dict:
@@ -151,7 +168,8 @@ def fetch_mentions(creds: Dict, state: Dict) -> List[Dict]:
 
             # Skip our own tweets
             author = m.get("author", {}).get("username", "")
-            if author.lower() == "claudeaceae":
+            entity_handle = get_entity_x_handle()
+            if entity_handle and author.lower() == entity_handle:
                 continue
 
             interaction = {

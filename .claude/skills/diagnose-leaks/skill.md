@@ -21,16 +21,16 @@ Complex group chat scenarios with multiple concurrent requests (webcam + web fet
 ### 1. Check for Recent Filtered Content
 ```bash
 # Look for sanitization activity in logs (DEBUG level)
-grep -i "Filtered from response" ~/.claude-mind/logs/samara.log | tail -20
+grep -i "Filtered from response" ~/.claude-mind/system/logs/samara.log | tail -20
 
 # Check if sanitization is actively filtering
-grep -E "(THINKING|SESSION_ID|ANTML)" ~/.claude-mind/logs/samara.log | tail -10
+grep -E "(THINKING|SESSION_ID|ANTML)" ~/.claude-mind/system/logs/samara.log | tail -10
 ```
 
 ### 2. Verify MessageBus Routing
 ```bash
 # All sends should go through MessageBus - look for source tags
-grep -E "\[(iMessage|Location|Wake|Alert|Queue|Webcam|WebFetch)\]" ~/.claude-mind/logs/samara.log | tail -20
+grep -E "\[(iMessage|Location|Wake|Alert|Queue|Webcam|WebFetch)\]" ~/.claude-mind/system/logs/samara.log | tail -20
 
 # Check for any direct sender bypasses (should NOT appear after fix)
 grep "sender\.send" ~/Developer/samara-main/Samara/Samara/*.swift | grep -v MessageBus
@@ -83,7 +83,7 @@ xcodebuild test -scheme SamaraTests -destination 'platform=macOS' 2>&1 | grep -E
 2. **Check if it's a new pattern** not covered by sanitization
 3. **Add test case** to `SanitizationTests.swift`
 4. **Update sanitizeResponse()** with new filter
-5. **Rebuild Samara**: `~/.claude-mind/bin/update-samara`
+5. **Rebuild Samara**: `~/.claude-mind/system/bin/update-samara`
 
 ## Report Template
 

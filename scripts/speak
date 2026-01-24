@@ -12,7 +12,7 @@
 #
 # Examples:
 #   speak "Hello, world!"
-#   speak "Good morning!" --send +15206099095
+#   speak "Good morning!" --send $COLLABORATOR_PHONE
 #   speak "Testing" --output ~/Desktop/test.mp3
 #   speak --list-voices
 
@@ -20,7 +20,7 @@ set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 
 # Configuration
-CREDS_FILE="$MIND_PATH/credentials/elevenlabs.txt"
+CREDS_FILE="$MIND_PATH/self/credentials/elevenlabs.txt"
 VOICE_CONFIG="$MIND_PATH/state/voice-config.json"
 DEFAULT_MODEL="eleven_multilingual_v2"
 DEFAULT_VOICE_ID="21m00Tcm4TlvDq8ikWAM"  # Rachel (ElevenLabs default)
@@ -147,11 +147,11 @@ echo "Generated: $OUTPUT_FILE ($(echo "scale=1; $FILE_SIZE/1024" | bc)KB)"
 
 # Send via iMessage if requested
 if [ -n "$SEND_TO" ]; then
-    "$MIND_PATH/bin/send-attachment" "$OUTPUT_FILE" "$SEND_TO"
+    "$MIND_PATH/system/bin/send-attachment" "$OUTPUT_FILE" "$SEND_TO"
     echo "Sent voice note to $SEND_TO"
 fi
 
 # Log it
-LOG_FILE="$MIND_PATH/logs/voice.log"
+LOG_FILE="$MIND_PATH/system/logs/voice.log"
 mkdir -p "$(dirname "$LOG_FILE")"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] speak: \"${TEXT:0:50}...\" -> $OUTPUT_FILE${SEND_TO:+ -> $SEND_TO}" >> "$LOG_FILE"

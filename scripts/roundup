@@ -14,7 +14,7 @@ set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 VENV_PATH="$MIND_PATH/.venv"
-LOG_FILE="$MIND_PATH/logs/roundup.log"
+LOG_FILE="$MIND_PATH/system/logs/roundup.log"
 LOCK_FILE="$MIND_PATH/claude.lock"
 
 log() {
@@ -82,9 +82,9 @@ source "$VENV_PATH/bin/activate"
 # Step 1: Aggregate data
 log "Step 1: Aggregating data..."
 if [ -n "$PERIOD" ]; then
-    python3 "$MIND_PATH/lib/roundup_aggregator.py" "$PERIOD_TYPE" "$PERIOD"
+    python3 "$MIND_PATH/system/lib/roundup_aggregator.py" "$PERIOD_TYPE" "$PERIOD"
 else
-    python3 "$MIND_PATH/lib/roundup_aggregator.py" "$PERIOD_TYPE"
+    python3 "$MIND_PATH/system/lib/roundup_aggregator.py" "$PERIOD_TYPE"
 fi
 
 # Determine the period that was generated
@@ -96,7 +96,7 @@ if [ -z "$PERIOD" ]; then
     esac
 fi
 
-ROUNDUP_DIR="$MIND_PATH/roundups/$PERIOD_TYPE"
+ROUNDUP_DIR="$MIND_PATH/memory/roundups/$PERIOD_TYPE"
 JSON_FILE="$ROUNDUP_DIR/$PERIOD.json"
 MD_FILE="$ROUNDUP_DIR/$PERIOD.md"
 
@@ -109,7 +109,7 @@ log "Aggregation complete: $JSON_FILE"
 
 # Step 2: Generate visualization
 log "Step 2: Generating visualization..."
-"$MIND_PATH/bin/roundup-visualize" "$PERIOD_TYPE" "$PERIOD"
+"$MIND_PATH/system/bin/roundup-visualize" "$PERIOD_TYPE" "$PERIOD"
 
 # Step 3: Deliver
 log "Step 3: Delivering roundup..."
@@ -154,15 +154,15 @@ print('\\n'.join(lines))
 # Send via iMessage
 IMAGE_FILE="$ROUNDUP_DIR/$PERIOD-visual.jpg"
 if [ -f "$IMAGE_FILE" ]; then
-    "$MIND_PATH/bin/send-image-e" "$IMAGE_FILE"
+    "$MIND_PATH/system/bin/send-image-e" "$IMAGE_FILE"
     log "Sent visualization image"
 fi
 
-"$MIND_PATH/bin/message-e" "$SUMMARY"
+"$MIND_PATH/system/bin/message-e" "$SUMMARY"
 log "Sent summary message"
 
 # Write roundup event to unified stream
-STREAM_CMD="$MIND_PATH/bin/stream"
+STREAM_CMD="$MIND_PATH/system/bin/stream"
 if [ -x "$STREAM_CMD" ]; then
     "$STREAM_CMD" write \
         --surface system \
@@ -180,9 +180,9 @@ if [[ "$PERIOD_TYPE" =~ ^(monthly|yearly)$ ]]; then
     EMAIL_BODY=$(cat "$MD_FILE")
 
     if [ -f "$IMAGE_FILE" ]; then
-        "$MIND_PATH/bin/send-email" "$EMAIL_SUBJECT" "$EMAIL_BODY" "" "$IMAGE_FILE"
+        "$MIND_PATH/system/bin/send-email" "$EMAIL_SUBJECT" "$EMAIL_BODY" "" "$IMAGE_FILE"
     else
-        "$MIND_PATH/bin/send-email" "$EMAIL_SUBJECT" "$EMAIL_BODY"
+        "$MIND_PATH/system/bin/send-email" "$EMAIL_SUBJECT" "$EMAIL_BODY"
     fi
     log "Email sent"
 fi
@@ -193,7 +193,7 @@ if [ "$PERIOD_TYPE" = "yearly" ]; then
 
     # Generate privacy-filtered blog post
     BLOG_FILE="$HOME/www/src/content/blog/roundup-$PERIOD.md"
-    python3 "$MIND_PATH/lib/privacy_filter.py" "$JSON_FILE" --markdown "$BLOG_FILE"
+    python3 "$MIND_PATH/system/lib/privacy_filter.py" "$JSON_FILE" --markdown "$BLOG_FILE"
 
     # Rebuild website
     cd "$HOME/www" && npm run build

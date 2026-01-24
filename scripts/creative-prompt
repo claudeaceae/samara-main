@@ -19,10 +19,10 @@ set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 DATE=$(date +%Y-%m-%d)
-LOG_FILE="$MIND_PATH/logs/creative.log"
+LOG_FILE="$MIND_PATH/system/logs/creative.log"
 
 # Load config
-source "$MIND_PATH/lib/config.sh" 2>/dev/null || true
+source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || true
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
@@ -120,8 +120,8 @@ if echo "$RESPONSE" | grep -q "^POST|"; then
 
     if [ "$DO_POST" = true ]; then
         log "Posting to Bluesky..."
-        if [ -f "$MIND_PATH/bin/bluesky-post" ]; then
-            "$MIND_PATH/bin/bluesky-post" "$CONTENT" >> "$LOG_FILE" 2>&1 && \
+        if [ -f "$MIND_PATH/system/bin/bluesky-post" ]; then
+            "$MIND_PATH/system/bin/bluesky-post" "$CONTENT" >> "$LOG_FILE" 2>&1 && \
                 log "Posted to Bluesky successfully" || \
                 log "Failed to post to Bluesky"
         else

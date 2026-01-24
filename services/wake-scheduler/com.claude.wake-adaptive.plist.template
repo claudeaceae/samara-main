@@ -3,21 +3,21 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.claude.x-check-playwright</string>
+    <string>com.claude.wake-adaptive</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/claude/.claude-mind/bin/x-check-playwright</string>
+        <string>{{HOME}}/.claude-mind/bin/wake-adaptive</string>
     </array>
 
     <key>StartInterval</key>
     <integer>900</integer>
 
     <key>StandardOutPath</key>
-    <string>/Users/claude/.claude-mind/logs/x-playwright.log</string>
+    <string>{{HOME}}/.claude-mind/logs/wake-adaptive.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/claude/.claude-mind/logs/x-playwright.log</string>
+    <string>{{HOME}}/.claude-mind/logs/wake-adaptive.log</string>
 
     <key>RunAtLoad</key>
     <false/>
@@ -25,9 +25,9 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>
-        <string>/Users/claude</string>
+        <string>{{HOME}}</string>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/claude/.local/bin</string>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:{{HOME}}/.local/bin</string>
     </dict>
 </dict>
 </plist>

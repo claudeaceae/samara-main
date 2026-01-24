@@ -47,25 +47,25 @@ ls -la ~/.claude-mind/claude.lock
 ### 2. Check Message Batching
 ```bash
 # Look for batch processing in logs
-grep -E "(Buffering|batch|BatchReady)" ~/.claude-mind/logs/samara.log | tail -20
+grep -E "(Buffering|batch|BatchReady)" ~/.claude-mind/system/logs/samara.log | tail -20
 
 # Check batch sizes
-grep "Processing batch of" ~/.claude-mind/logs/samara.log | tail -10
+grep "Processing batch of" ~/.claude-mind/system/logs/samara.log | tail -10
 ```
 
 ### 3. Check Task Classification
 ```bash
 # Look for isolated vs session-based invocations
-grep -E "(Isolated invocation|Resuming session|Starting new session)" ~/.claude-mind/logs/samara.log | tail -20
+grep -E "(Isolated invocation|Resuming session|Starting new session)" ~/.claude-mind/system/logs/samara.log | tail -20
 ```
 
 ### 4. Check Group Chat Handling
 ```bash
 # Group chat routing decisions
-grep -E "(group chat|chatIdentifier|isGroupChat)" ~/.claude-mind/logs/samara.log | tail -20
+grep -E "(group chat|chatIdentifier|isGroupChat)" ~/.claude-mind/system/logs/samara.log | tail -20
 
 # Look for routing warnings
-grep -E "(WARNING.*group|looks like group)" ~/.claude-mind/logs/samara.log | tail -10
+grep -E "(WARNING.*group|looks like group)" ~/.claude-mind/system/logs/samara.log | tail -10
 ```
 
 ## Common Issues
@@ -76,7 +76,7 @@ grep -E "(WARNING.*group|looks like group)" ~/.claude-mind/logs/samara.log | tai
 **Check:**
 ```bash
 # Look for multiple task types in same batch
-grep -B5 -A5 "Processing batch" ~/.claude-mind/logs/samara.log | tail -30
+grep -B5 -A5 "Processing batch" ~/.claude-mind/system/logs/samara.log | tail -30
 ```
 **Fix:** TaskRouter should classify and isolate parallel tasks
 
@@ -86,10 +86,10 @@ grep -B5 -A5 "Processing batch" ~/.claude-mind/logs/samara.log | tail -30
 **Check:**
 ```bash
 # Check session recording
-grep "Recorded session" ~/.claude-mind/logs/samara.log | tail -10
+grep "Recorded session" ~/.claude-mind/system/logs/samara.log | tail -10
 
 # Check session retrieval
-grep "Retrieved session" ~/.claude-mind/logs/samara.log | tail -10
+grep "Retrieved session" ~/.claude-mind/system/logs/samara.log | tail -10
 ```
 
 ### Group Chat Messages Going to Wrong Chat
@@ -98,7 +98,7 @@ grep "Retrieved session" ~/.claude-mind/logs/samara.log | tail -10
 **Check:**
 ```bash
 # Check routing decisions
-grep "Routing decision" ~/.claude-mind/logs/samara.log | tail -10
+grep "Routing decision" ~/.claude-mind/system/logs/samara.log | tail -10
 ```
 
 ### Queue Not Processing
@@ -110,7 +110,7 @@ grep "Routing decision" ~/.claude-mind/logs/samara.log | tail -10
 cat ~/.claude-mind/claude.lock
 
 # Check queue processor
-grep "QueueProcessor" ~/.claude-mind/logs/samara.log | tail -10
+grep "QueueProcessor" ~/.claude-mind/system/logs/samara.log | tail -10
 
 # Force release stale lock if needed
 # rm ~/.claude-mind/claude.lock

@@ -72,12 +72,14 @@ load_config() {
     ENTITY_NAME=$(jq -r '.entity.name // "Claude"' "$CONFIG_FILE")
     ENTITY_ICLOUD=$(jq -r '.entity.icloud // ""' "$CONFIG_FILE")
     ENTITY_BLUESKY=$(jq -r '.entity.bluesky // ""' "$CONFIG_FILE")
+    ENTITY_X=$(jq -r '.entity.x // ""' "$CONFIG_FILE")
     ENTITY_GITHUB=$(jq -r '.entity.github // ""' "$CONFIG_FILE")
 
     COLLABORATOR_NAME=$(jq -r '.collaborator.name' "$CONFIG_FILE")
     COLLABORATOR_PHONE=$(jq -r '.collaborator.phone' "$CONFIG_FILE")
     COLLABORATOR_EMAIL=$(jq -r '.collaborator.email' "$CONFIG_FILE")
     COLLABORATOR_BLUESKY=$(jq -r '.collaborator.bluesky // ""' "$CONFIG_FILE")
+    COLLABORATOR_X=$(jq -r '.collaborator.x // ""' "$CONFIG_FILE")
 
     NOTES_LOCATION=$(jq -r '.notes.location // "Claude Location Log"' "$CONFIG_FILE")
     NOTES_SCRATCHPAD=$(jq -r '.notes.scratchpad // "Claude Scratchpad"' "$CONFIG_FILE")
@@ -106,11 +108,13 @@ fill_template() {
         sed "s/{{entity.name}}/$ENTITY_NAME/g" | \
         sed "s/{{entity.icloud}}/$ENTITY_ICLOUD/g" | \
         sed "s/{{entity.bluesky}}/$ENTITY_BLUESKY/g" | \
+        sed "s/{{entity.x}}/$ENTITY_X/g" | \
         sed "s/{{entity.github}}/$ENTITY_GITHUB/g" | \
         sed "s/{{collaborator.name}}/$COLLABORATOR_NAME/g" | \
         sed "s/{{collaborator.phone}}/$COLLABORATOR_PHONE/g" | \
         sed "s/{{collaborator.email}}/$COLLABORATOR_EMAIL/g" | \
         sed "s/{{collaborator.bluesky}}/$COLLABORATOR_BLUESKY/g" | \
+        sed "s/{{collaborator.x}}/$COLLABORATOR_X/g" | \
         sed "s/{{notes.location}}/$NOTES_LOCATION/g" | \
         sed "s/{{notes.scratchpad}}/$NOTES_SCRATCHPAD/g" | \
         sed "s/{{mail.account}}/$MAIL_ACCOUNT/g" | \
@@ -295,70 +299,208 @@ install_runtime_claude_config() {
 
 # Configure Claude Code global settings
 configure_claude_code() {
-    log_info "Configuring Claude Code retention policy..."
+    log_info "Configuring Claude Code global settings..."
 
     local settings_file="$HOME/.claude/settings.json"
     mkdir -p "$HOME/.claude"
 
-    # Create or update settings with 100-year retention
-    if [ -f "$settings_file" ]; then
-        # Merge cleanupPeriodDays into existing settings
-        local temp_file=$(mktemp)
-        jq '. + {cleanupPeriodDays: 36500}' "$settings_file" > "$temp_file"
-        mv "$temp_file" "$settings_file"
-        log_success "Updated existing Claude Code settings with 100-year retention"
-    else
-        # Create new settings file with retention policy
-        cat > "$settings_file" << 'EOF'
+    # Hooks path uses the runtime symlink (works on any machine after birth)
+    local hooks_base="$HOME/.claude-mind/.claude/hooks"
+    local scripts_base="$HOME/.claude-mind/bin"
+
+    # Build the hooks configuration
+    local hooks_config=$(cat << EOF
 {
-  "cleanupPeriodDays": 36500
+  "cleanupPeriodDays": 36500,
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$hooks_base/read-shared-links.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$hooks_base/hydrate-session.sh",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "$hooks_base/setup-maintenance.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$hooks_base/index-memory-changes.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$hooks_base/auto-integrate-script.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$hooks_base/check-commit-attribution.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$hooks_base/archive-plan-before-write.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$hooks_base/local-model-guardrail.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$hooks_base/block-deriveddata-copy.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$hooks_base/check-autonomous-media.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "$hooks_base/local-model-guardrail.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$scripts_base/distill-claude-session",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$hooks_base/session-end-checks.sh",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$hooks_base/setup-maintenance.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
 }
 EOF
-        log_success "Created Claude Code settings with 100-year retention"
+)
+
+    # Create or merge settings
+    if [ -f "$settings_file" ]; then
+        # Merge hooks and retention into existing settings (preserving other keys like enabledPlugins)
+        local temp_file=$(mktemp)
+        echo "$hooks_config" | jq -s '.[0] * .[1]' "$settings_file" - > "$temp_file"
+        mv "$temp_file" "$settings_file"
+        log_success "Merged hooks and retention into existing Claude Code settings"
+    else
+        echo "$hooks_config" > "$settings_file"
+        log_success "Created Claude Code settings with hooks and 100-year retention"
     fi
 
+    log_info "Global hooks configured at $settings_file"
     log_info "Session transcripts will be preserved for ~100 years at ~/.claude/projects/"
 }
 
-# Create launchd plist templates
-create_launchd_templates() {
-    log_info "Creating launchd templates..."
+# Process plist templates from services directory
+# Replaces {{HOME}} and {{REPO_PATH}} placeholders
+process_plist_templates() {
+    log_info "Processing plist templates from services..."
 
     local plist_dir="$TARGET_DIR/launchd"
     mkdir -p "$plist_dir"
 
-    # Wake Adaptive (every 15 minutes - handles all wake scheduling)
-    cat > "$plist_dir/com.claude.wake-adaptive.plist" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.claude.wake-adaptive</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$TARGET_DIR/bin/wake-adaptive</string>
-    </array>
-    <key>StartInterval</key>
-    <integer>900</integer>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>$TARGET_DIR/logs/wake-adaptive.log</string>
-    <key>StandardErrorPath</key>
-    <string>$TARGET_DIR/logs/wake-adaptive.log</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>HOME</key>
-        <string>$HOME</string>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.local/bin</string>
-    </dict>
-</dict>
-</plist>
-EOF
+    # Find all .plist.template files in services/
+    local templates=$(find "$SCRIPT_DIR/services" -name "*.plist.template" 2>/dev/null)
 
-    # Dream
+    if [ -z "$templates" ]; then
+        log_warn "No plist templates found in $SCRIPT_DIR/services/"
+        return 0
+    fi
+
+    for template in $templates; do
+        local filename=$(basename "$template" .template)
+        local output="$plist_dir/$filename"
+
+        # Replace placeholders
+        sed -e "s|{{HOME}}|$HOME|g" \
+            -e "s|{{REPO_PATH}}|$SCRIPT_DIR|g" \
+            "$template" > "$output"
+
+        log_success "Created: $filename"
+    done
+
+    log_success "Plist templates processed"
+}
+
+# Create launchd plist files (for services without templates)
+create_launchd_templates() {
+    log_info "Creating additional launchd plists..."
+
+    local plist_dir="$TARGET_DIR/launchd"
+    mkdir -p "$plist_dir"
+
+    # Note: Most services now use .plist.template files in services/
+    # Only services without templates are generated here
+
+    # Dream (3 AM memory consolidation)
     cat > "$plist_dir/com.claude.dream.plist" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -381,6 +523,13 @@ EOF
     <string>$TARGET_DIR/logs/dream.log</string>
     <key>StandardErrorPath</key>
     <string>$TARGET_DIR/logs/dream.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>$HOME</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.local/bin</string>
+    </dict>
 </dict>
 </plist>
 EOF
@@ -408,6 +557,8 @@ EOF
     <dict>
         <key>HOME</key>
         <string>$HOME</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin</string>
     </dict>
 </dict>
 </plist>
@@ -437,44 +588,13 @@ EOF
         <key>HOME</key>
         <string>$HOME</string>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin</string>
     </dict>
 </dict>
 </plist>
 EOF
 
-    # X/Twitter Watcher (every 15 minutes)
-    cat > "$plist_dir/com.claude.x-watcher.plist" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.claude.x-watcher</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/bin/python3</string>
-        <string>$SCRIPT_DIR/services/x-watcher/server.py</string>
-    </array>
-    <key>StartInterval</key>
-    <integer>900</integer>
-    <key>StandardOutPath</key>
-    <string>$TARGET_DIR/logs/x-watcher.log</string>
-    <key>StandardErrorPath</key>
-    <string>$TARGET_DIR/logs/x-watcher.log</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>HOME</key>
-        <string>$HOME</string>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin</string>
-    </dict>
-</dict>
-</plist>
-EOF
-
-    log_success "launchd templates created in $plist_dir/"
-    log_info "To install: cp $plist_dir/*.plist ~/Library/LaunchAgents/ && launchctl load ~/Library/LaunchAgents/com.claude.*.plist"
+    log_success "Additional launchd plists created"
 }
 
 # Print next steps
@@ -496,8 +616,15 @@ print_next_steps() {
     echo ""
     echo "3. Install launchd services:"
     echo "   cp $TARGET_DIR/launchd/*.plist ~/Library/LaunchAgents/"
+    echo "   # Core services (load these):"
     echo "   launchctl load ~/Library/LaunchAgents/com.claude.wake-adaptive.plist"
     echo "   launchctl load ~/Library/LaunchAgents/com.claude.dream.plist"
+    echo "   launchctl load ~/Library/LaunchAgents/co.organelle.location-receiver.plist"
+    echo "   launchctl load ~/Library/LaunchAgents/com.claude.memory-bridge.plist"
+    echo "   # Optional services (load as needed):"
+    echo "   # launchctl load ~/Library/LaunchAgents/com.claude.bluesky-watcher.plist"
+    echo "   # launchctl load ~/Library/LaunchAgents/com.claude.github-watcher.plist"
+    echo "   # launchctl load ~/Library/LaunchAgents/com.claude.webhook-receiver.plist"
     echo ""
     echo "4. Set up credentials:"
     echo "   - Bluesky app password: $TARGET_DIR/credentials/bluesky.json"
@@ -545,6 +672,7 @@ main() {
     install_agents
     install_runtime_claude_config
     configure_claude_code
+    process_plist_templates
     create_launchd_templates
     print_next_steps
 }

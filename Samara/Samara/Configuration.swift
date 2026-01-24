@@ -13,6 +13,41 @@ enum MindPaths {
         return URL(fileURLWithPath: relativePath, relativeTo: base).standardizedFileURL
     }
 
+    // MARK: - Domain Paths
+    // Four-domain structure: self/, memory/, state/, system/
+
+    /// Path to self/ domain (identity, goals, ritual, capabilities, credentials, media)
+    static func selfPath(_ relativePath: String? = nil) -> String {
+        guard let relativePath, !relativePath.isEmpty else {
+            return mindPath("self")
+        }
+        return mindPath("self/\(relativePath)")
+    }
+
+    /// Path to memory/ domain (episodes, reflections, people, learnings, semantic, chroma, stream)
+    static func memoryPath(_ relativePath: String? = nil) -> String {
+        guard let relativePath, !relativePath.isEmpty else {
+            return mindPath("memory")
+        }
+        return mindPath("memory/\(relativePath)")
+    }
+
+    /// Path to state/ domain (services, plans, handoffs, queues, location, etc.)
+    static func statePath(_ relativePath: String? = nil) -> String {
+        guard let relativePath, !relativePath.isEmpty else {
+            return mindPath("state")
+        }
+        return mindPath("state/\(relativePath)")
+    }
+
+    /// Path to system/ domain (config, bin, lib, logs, senses, etc.)
+    static func systemPath(_ relativePath: String? = nil) -> String {
+        guard let relativePath, !relativePath.isEmpty else {
+            return mindPath("system")
+        }
+        return mindPath("system/\(relativePath)")
+    }
+
     static var mindDir: URL {
         if let override = resolveMindOverride() {
             return URL(fileURLWithPath: expandTilde(override)).standardizedFileURL
@@ -56,6 +91,7 @@ struct Configuration: Codable {
         let name: String
         let icloud: String
         let bluesky: String
+        let x: String?
         let github: String
     }
 
@@ -64,6 +100,7 @@ struct Configuration: Codable {
         let phone: String
         let email: String
         let bluesky: String
+        let x: String?
     }
 
     struct NotesConfig: Codable {
@@ -160,18 +197,21 @@ struct Configuration: Codable {
     }
 
     /// Default configuration (fallback if config.json doesn't exist)
+    /// NOTE: These are empty templates - all values should come from config.json
     static let defaults = Configuration(
         entity: EntityConfig(
             name: "Claude",
-            icloud: "claudeaceae@icloud.com",
-            bluesky: "@claudaceae.bsky.social",
-            github: "claudeaceae"
+            icloud: "",
+            bluesky: "",
+            x: "",
+            github: ""
         ),
         collaborator: CollaboratorConfig(
-            name: "É",
-            phone: "+15206099095",
-            email: "edouard@urcad.es",
-            bluesky: "@urcad.es"
+            name: "",
+            phone: "",
+            email: "",
+            bluesky: "",
+            x: ""
         ),
         notes: NotesConfig(
             location: "Claude Location Log",

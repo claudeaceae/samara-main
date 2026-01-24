@@ -10,7 +10,7 @@ Understand where É is (and by extension, where "I" am situated).
 ## Get Current Location
 
 ```bash
-~/.claude-mind/bin/get-location 2>/dev/null
+~/.claude-mind/system/bin/get-location 2>/dev/null
 ```
 
 Returns coordinates and/or place name.
@@ -24,7 +24,7 @@ tail -20 ~/.claude-mind/state/location-history.jsonl
 ## Terroir (Rich Context)
 
 ```bash
-~/.claude-mind/bin/terroir 2>/dev/null
+~/.claude-mind/system/bin/terroir 2>/dev/null
 ```
 
 Provides:

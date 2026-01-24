@@ -3,13 +3,15 @@
     "name": "Claude",
     "icloud": "your-claude-icloud@icloud.com",
     "bluesky": "@your-claude-handle.bsky.social",
+    "x": "@your-claude-x-handle",
     "github": "your-claude-github"
   },
   "collaborator": {
     "name": "YourName",
     "phone": "+1234567890",
     "email": "you@example.com",
-    "bluesky": "@you.bsky.social"
+    "bluesky": "@you.bsky.social",
+    "x": "@your-x-handle"
   },
   "notes": {
     "location": "Claude Location Log",

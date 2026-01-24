@@ -23,12 +23,12 @@ You are a LOCAL MODEL with LIMITED capabilities. You MUST:
 
 ### 1. Run sync-organism check
 ```bash
-~/.claude-mind/bin/sync-organism --check
+~/.claude-mind/system/bin/sync-organism --check
 ```
 
 ### 2. Check symlink integrity
 ```bash
-for link in ~/.claude-mind/bin/*; do
+for link in ~/.claude-mind/system/bin/*; do
   if [ -L "$link" ] && [ ! -e "$link" ]; then
     echo "BROKEN: $(basename $link)"
   fi

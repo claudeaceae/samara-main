@@ -2,8 +2,13 @@
 """
 Mine Voice Patterns
 
-Extracts voice-relevant patterns from recent episodes and reflections
+Extracts style-relevant patterns from recent episodes and reflections
 to update voice-state.json for the dynamic voice system.
+
+Focuses on:
+- Claude's message style analysis (casing, punctuation, length)
+- What gets positive reception in conversation flow
+- Identity evolution from reflections
 
 Usage:
     mine-voice-patterns [--days 7] [--dry-run]
@@ -13,9 +18,8 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +35,7 @@ def load_voice_state() -> dict[str, Any]:
         return json.loads(VOICE_STATE_FILE.read_text())
 
     return {
-        "updated": datetime.utcnow().isoformat() + "Z",
+        "updated": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "long_cycle": {
             "recurring_themes": [],
             "current_preoccupations": [],
@@ -67,119 +71,137 @@ def get_recent_files(directory: Path, days: int, extension: str = ".md") -> list
     files = []
 
     for f in directory.glob(f"*{extension}"):
-        # Try to parse date from filename (YYYY-MM-DD.md)
         try:
             date_str = f.stem
             file_date = datetime.strptime(date_str, "%Y-%m-%d")
             if file_date >= cutoff:
                 files.append(f)
         except ValueError:
-            # Not a date-named file, check mtime
             if datetime.fromtimestamp(f.stat().st_mtime) >= cutoff:
                 files.append(f)
 
     return sorted(files, reverse=True)
 
 
-def extract_themes(content: str) -> list[str]:
-    """Extract recurring themes from content using conservative heuristics."""
-    themes = []
+def extract_claude_messages(content: str) -> list[str]:
+    """Extract Claude's messages from episode content."""
+    messages = []
+    lines = content.split("\n")
 
-    # Look for explicitly labeled themes only
-    # Match "theme: X" or "themes: X, Y" patterns with short captures
-    theme_matches = re.findall(
-        r'(?:theme|recurring theme|pattern)[s]?:\s*([a-zA-Z][a-zA-Z\s]{3,30}?)(?:[,.\n]|$)',
-        content, re.IGNORECASE
+    for line in lines:
+        if line.startswith("**Claude:**"):
+            msg = line.replace("**Claude:**", "").strip()
+            if msg and len(msg) > 3:
+                messages.append(msg)
+
+    return messages
+
+
+def analyze_claude_style(messages: list[str]) -> dict[str, Any]:
+    """Analyze Claude's message style patterns."""
+    if not messages:
+        return {}
+
+    # Casing analysis
+    lowercase_starts = 0
+    for msg in messages:
+        first_word = msg.split()[0] if msg.split() else ""
+        if first_word and first_word[0].islower():
+            lowercase_starts += 1
+
+    lowercase_pct = (lowercase_starts / len(messages)) * 100 if messages else 0
+
+    # Length analysis
+    lengths = [len(msg.split()) for msg in messages]
+    avg_length = sum(lengths) / len(lengths) if lengths else 0
+
+    # Punctuation patterns
+    period_ends = sum(1 for m in messages if m.rstrip().endswith("."))
+    ellipsis_uses = sum(1 for m in messages if "..." in m or "…" in m)
+    kaomoji_uses = sum(1 for m in messages if re.search(r'[（）っω˘ಠ益＞＜つ╯°□╰┻━┻]', m))
+
+    # Opening patterns
+    casual_openers = ["yeah", "yep", "nah", "lol", "haha", "heard", "got it",
+                     "nice", "oh", "ah", "hm", "hmm", "makes sense", "fair", "true"]
+    casual_opener_count = sum(
+        1 for m in messages
+        if any(m.lower().startswith(op) for op in casual_openers)
     )
-    themes.extend(m.strip().lower() for m in theme_matches if 5 < len(m.strip()) < 40)
 
-    # Look for frequently mentioned meaningful terms (nouns/concepts)
-    # Use word frequency with strict filtering
-    words = re.findall(r'\b([a-z]{5,15})\b', content.lower())
-    word_counts = Counter(words)
-
-    # Extensive common word filter
-    common_words = {
-        "this", "that", "with", "from", "have", "been", "were", "what", "when",
-        "about", "would", "could", "should", "there", "their", "which", "these",
-        "some", "more", "other", "into", "just", "also", "than", "then", "they",
-        "being", "want", "make", "like", "time", "very", "after", "most", "only",
-        "session", "direct", "working", "directory", "users", "claude", "using",
-        "claude", "today", "episode", "memory", "conversation", "message", "system",
-        "because", "before", "between", "during", "found", "still", "while",
-        "notes", "files", "script", "check", "state", "based", "first", "where",
+    return {
+        "lowercase_start_pct": round(lowercase_pct, 1),
+        "avg_word_count": round(avg_length, 1),
+        "period_end_pct": round((period_ends / len(messages)) * 100, 1) if messages else 0,
+        "uses_ellipsis": ellipsis_uses > 0,
+        "uses_kaomoji": kaomoji_uses > 0,
+        "casual_opener_pct": round((casual_opener_count / len(messages)) * 100, 1) if messages else 0,
+        "messages_analyzed": len(messages)
     }
 
-    # Concept words we're interested in
-    concept_words = [
-        word for word, count in word_counts.most_common(50)
-        if count >= 5 and word not in common_words and len(word) >= 5
+
+def extract_what_lands_well(episodes: list[str]) -> list[str]:
+    """
+    Extract patterns of what's working well from conversation flow.
+    Look for:
+    - Messages followed by engaged responses (questions, elaboration)
+    - Positive emotional markers in responses
+    - Continued threads (topic carried forward)
+    """
+    landing_well = []
+
+    # Patterns that indicate positive reception
+    positive_indicators = [
+        (r"(?:appreciated|liked|enjoyed)\s+([a-zA-Z][a-zA-Z\s]{4,40}?)[,.\n;]", "explicit appreciation"),
+        (r"(?:worked well|landed well|resonated):\s*([a-zA-Z][a-zA-Z\s]{4,40}?)[,.\n;]", "explicit success"),
+        (r"É:\s*(?:haha|lol|😂|❤️)", "humor/warmth success"),
+        (r"É:\s*(?:good point|fair|true|yeah|exactly)", "agreement"),
     ]
 
-    themes.extend(concept_words[:5])
+    for episode in episodes[:5]:
+        for pattern, category in positive_indicators:
+            matches = re.findall(pattern, episode, re.IGNORECASE)
+            for m in matches:
+                if isinstance(m, str) and 5 < len(m) < 50 and "/" not in m:
+                    landing_well.append(m.strip())
 
-    return list(set(themes))[:8]
+    # Dedupe
+    return list(set(landing_well))[:6]
 
 
-def extract_preoccupations(episodes: list[str]) -> list[str]:
-    """Extract current preoccupations from recent episodes."""
+def extract_current_preoccupations(episodes: list[str]) -> list[str]:
+    """Extract current work focus from recent episodes."""
     preoccupations = []
 
-    # Look for explicit short markers in recent content
-    # Capture only 5-50 chars after the marker
+    # Look for explicit work markers
     patterns = [
-        r"working on:?\s*([a-zA-Z][a-zA-Z\s]{4,45}?)(?:[,.\n;]|$)",
-        r"focused on:?\s*([a-zA-Z][a-zA-Z\s]{4,45}?)(?:[,.\n;]|$)",
-        r"building:?\s*([a-zA-Z][a-zA-Z\s]{4,45}?)(?:[,.\n;]|$)",
-        r"implementing:?\s*([a-zA-Z][a-zA-Z\s]{4,45}?)(?:[,.\n;]|$)",
+        r"working on:?\s*([a-zA-Z][a-zA-Z\s\-]{4,40}?)(?:[,.\n;]|$)",
+        r"implementing:?\s*([a-zA-Z][a-zA-Z\s\-]{4,40}?)(?:[,.\n;]|$)",
+        r"building:?\s*([a-zA-Z][a-zA-Z\s\-]{4,40}?)(?:[,.\n;]|$)",
+        r"debugging:?\s*([a-zA-Z][a-zA-Z\s\-]{4,40}?)(?:[,.\n;]|$)",
     ]
 
-    for episode in episodes[:3]:  # Focus on most recent
+    for episode in episodes[:3]:
         for pattern in patterns:
             matches = re.findall(pattern, episode, re.IGNORECASE)
             for m in matches:
                 clean = m.strip()
-                # Skip if it looks like a file path or code
-                if "/" in clean or "=" in clean or len(clean) < 5:
-                    continue
-                preoccupations.append(clean)
+                if "/" not in clean and "=" not in clean and 5 < len(clean) < 50:
+                    preoccupations.append(clean)
 
     # Dedupe while preserving order
     seen = set()
     unique = []
     for p in preoccupations:
         p_lower = p.lower()
-        if p_lower not in seen and len(p) < 60:
+        if p_lower not in seen:
             seen.add(p_lower)
             unique.append(p)
 
     return unique[:6]
 
 
-def extract_what_lands_well(episodes: list[str]) -> list[str]:
-    """Extract patterns of what's working well from episodes."""
-    landing_well = []
-
-    # Look for positive interaction markers with tight length bounds
-    patterns = [
-        r"É (?:appreciated|liked|enjoyed):?\s*([a-zA-Z][a-zA-Z\s]{4,40}?)(?:[,.\n;]|$)",
-        r"(?:worked well|landed well|resonated):?\s*([a-zA-Z][a-zA-Z\s]{4,40}?)(?:[,.\n;]|$)",
-    ]
-
-    for episode in episodes[:5]:  # Recent episodes only
-        for pattern in patterns:
-            matches = re.findall(pattern, episode, re.IGNORECASE)
-            for m in matches:
-                clean = m.strip()
-                if 5 < len(clean) < 50 and "/" not in clean:
-                    landing_well.append(clean)
-
-    return list(set(landing_well))[:6]
-
-
 def extract_identity_evolution(reflections: list[str]) -> str:
     """Extract identity evolution notes from reflections."""
-    # Look for self-referential observations in recent reflections
     identity_markers = []
 
     patterns = [
@@ -187,7 +209,7 @@ def extract_identity_evolution(reflections: list[str]) -> str:
         r"I've (?:learned|realized):?\s*([a-zA-Z][a-zA-Z\s]{5,50}?)(?:[,.\n;]|$)",
     ]
 
-    for reflection in reflections[:3]:  # Recent reflections only
+    for reflection in reflections[:3]:
         for pattern in patterns:
             matches = re.findall(pattern, reflection, re.IGNORECASE)
             for m in matches:
@@ -203,44 +225,30 @@ def extract_identity_evolution(reflections: list[str]) -> str:
 
 def mine_patterns(days: int = 7) -> dict[str, Any]:
     """Mine patterns from recent episodes and reflections."""
-    # Load recent episodes
     episode_files = get_recent_files(EPISODES_DIR, days)
     episodes = [f.read_text() for f in episode_files]
 
-    # Load recent reflections
     reflection_files = get_recent_files(REFLECTIONS_DIR, days)
     reflections = [f.read_text() for f in reflection_files]
 
-    # Combine all content for theme extraction
-    all_content = "\n".join(episodes + reflections)
+    # Extract Claude messages for style analysis
+    all_claude_messages = []
+    for ep in episodes:
+        all_claude_messages.extend(extract_claude_messages(ep))
 
-    # Extract patterns
-    themes = extract_themes(all_content)
-    preoccupations = extract_preoccupations(episodes)
+    # Analyze style
+    style_analysis = analyze_claude_style(all_claude_messages)
+
+    # Extract other patterns
+    preoccupations = extract_current_preoccupations(episodes)
     what_lands_well = extract_what_lands_well(episodes)
     identity_notes = extract_identity_evolution(reflections)
 
-    # Extract recent topics from last 2 days
-    # Look for explicit topic mentions, not section headers
-    recent_episodes = episodes[:2]
-    recent_topics = []
-    for ep in recent_episodes:
-        # Look for "discussed X", "worked on X", "explored X" patterns
-        topic_matches = re.findall(
-            r'(?:discussed|explored|worked on|implemented|built|created)\s+([a-zA-Z][a-zA-Z\s]{4,30}?)(?:[,.\n;]|$)',
-            ep, re.IGNORECASE
-        )
-        for t in topic_matches:
-            clean = t.strip()
-            if 5 < len(clean) < 35 and "/" not in clean:
-                recent_topics.append(clean)
-
     return {
-        "themes": themes,
+        "style_analysis": style_analysis,
         "preoccupations": preoccupations,
         "what_lands_well": what_lands_well,
         "identity_notes": identity_notes,
-        "recent_topics": recent_topics[:10],
         "episodes_analyzed": len(episodes),
         "reflections_analyzed": len(reflections),
     }
@@ -250,13 +258,23 @@ def update_voice_state(mined: dict[str, Any], dry_run: bool = False) -> dict[str
     """Update voice-state.json with mined patterns."""
     state = load_voice_state()
 
-    # Update long_cycle with mined patterns
-    if mined["themes"]:
-        # Merge with existing, keeping recent
-        existing = state["long_cycle"].get("recurring_themes", [])
-        merged = list(dict.fromkeys(mined["themes"] + existing))[:10]
-        state["long_cycle"]["recurring_themes"] = merged
+    # Ensure required sections exist
+    if "long_cycle" not in state:
+        state["long_cycle"] = {
+            "recurring_themes": [],
+            "current_preoccupations": [],
+            "what_lands_well": [],
+            "identity_notes": ""
+        }
 
+    # Update style_patterns section (new)
+    if "style_patterns" not in state:
+        state["style_patterns"] = {}
+
+    state["style_patterns"] = mined["style_analysis"]
+    state["style_patterns"]["last_mined"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    # Update long_cycle
     if mined["preoccupations"]:
         state["long_cycle"]["current_preoccupations"] = mined["preoccupations"]
 
@@ -266,7 +284,6 @@ def update_voice_state(mined: dict[str, Any], dry_run: bool = False) -> dict[str
         state["long_cycle"]["what_lands_well"] = merged
 
     if mined["identity_notes"]:
-        # Append to existing notes with date
         existing = state["long_cycle"].get("identity_notes", "")
         today = datetime.now().strftime("%Y-%m-%d")
         if existing:
@@ -274,17 +291,16 @@ def update_voice_state(mined: dict[str, Any], dry_run: bool = False) -> dict[str
         else:
             state["long_cycle"]["identity_notes"] = f"[{today}] {mined['identity_notes']}"
 
-        # Keep identity notes from getting too long
+        # Keep identity notes reasonable length
         if len(state["long_cycle"]["identity_notes"]) > 500:
-            # Keep most recent portion
             state["long_cycle"]["identity_notes"] = state["long_cycle"]["identity_notes"][-500:]
 
-    # Update short_cycle recent topics
-    if mined["recent_topics"]:
-        state["short_cycle"]["recent_topics"] = mined["recent_topics"]
+    # Clear noisy recurring_themes (legacy cleanup)
+    # We no longer extract word frequency themes
+    state["long_cycle"]["recurring_themes"] = []
 
     # Update timestamp
-    state["updated"] = datetime.utcnow().isoformat() + "Z"
+    state["updated"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
     if not dry_run:
         VOICE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -313,8 +329,17 @@ def main():
 
     # Report
     print(f"Analyzed {mined['episodes_analyzed']} episodes, {mined['reflections_analyzed']} reflections")
-    print(f"\nThemes found: {', '.join(mined['themes'][:5]) or 'none'}")
-    print(f"Preoccupations: {', '.join(mined['preoccupations'][:5]) or 'none'}")
+
+    style = mined.get("style_analysis", {})
+    if style:
+        print(f"\nStyle patterns:")
+        print(f"  Lowercase starts: {style.get('lowercase_start_pct', 0)}%")
+        print(f"  Avg message length: {style.get('avg_word_count', 0)} words")
+        print(f"  Casual openers: {style.get('casual_opener_pct', 0)}%")
+        if style.get('uses_kaomoji'):
+            print(f"  Uses kaomoji: yes")
+
+    print(f"\nPreoccupations: {', '.join(mined['preoccupations'][:3]) or 'none'}")
     print(f"What lands well: {', '.join(mined['what_lands_well'][:3]) or 'none'}")
 
     if args.dry_run:

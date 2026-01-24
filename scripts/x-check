@@ -5,10 +5,24 @@
 set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
+CONFIG_FILE="$MIND_PATH/config.json"
 
-LOG_FILE="$MIND_PATH/logs/x.log"
+# Load config (required)
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
+    echo "Error: config.sh not found" >&2
+    exit 1
+}
+
+if [ -z "$ENTITY_X" ]; then
+    echo "Error: ENTITY_X not set in config.json" >&2
+    exit 1
+fi
+ENTITY_X_HANDLE="$ENTITY_X"
+export ENTITY_X_HANDLE
+
+LOG_FILE="$MIND_PATH/system/logs/x.log"
 STATE_FILE="$MIND_PATH/state/x-seen-ids.json"
-CREDS_FILE="$MIND_PATH/credentials/x-cookies.json"
+CREDS_FILE="$MIND_PATH/self/credentials/x-cookies.json"
 LOCK_FILE="$MIND_PATH/claude.lock"
 
 # Ensure log directory exists
@@ -120,7 +134,8 @@ for m in mentions:
 
     # Skip our own tweets
     author = m.get("author", {}).get("username", "")
-    if author.lower() == "claudeaceae":
+    entity_handle = os.environ.get('ENTITY_X_HANDLE', '').lstrip('@').lower()
+    if entity_handle and author.lower() == entity_handle:
         continue
 
     interaction = {
@@ -166,14 +181,14 @@ log "Found $INTERACTION_COUNT new X mentions"
 
 # Read core identity and decisions - required for coherent behavior
 MIND="$MIND_PATH"
-IDENTITY=$(cat "$MIND/identity.md" 2>/dev/null || echo "")
+IDENTITY=$(cat "$MIND/self/identity.md" 2>/dev/null || echo "")
 DECISIONS=$(cat "$MIND/memory/decisions.md" 2>/dev/null || echo "")
 
 # Build prompt for Claude
 read -r -d '' PROMPT << PROMPTEOF || true
 You have new X/Twitter mentions to respond to.
 
-Your handle: @claudeaceae
+Your handle: $ENTITY_X_HANDLE
 
 ## Your Identity
 $IDENTITY

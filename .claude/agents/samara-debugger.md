@@ -60,7 +60,7 @@ Complex group chats can cause internal content to leak. Three layers prevent thi
 
 ## Key Files to Check
 
-- Logs: `~/.claude-mind/logs/samara.log`
+- Logs: `~/.claude-mind/system/logs/samara.log`
 - Sessions: `~/.claude-mind/state/sessions.json`
 - Lock: `~/.claude-mind/claude.lock`
 - Episodes: `~/.claude-mind/memory/episodes/$(date +%Y-%m-%d).md`
@@ -69,7 +69,7 @@ Complex group chats can cause internal content to leak. Three layers prevent thi
 
 ```bash
 # Check for filtered content
-grep "Filtered from response" ~/.claude-mind/logs/samara.log | tail -20
+grep "Filtered from response" ~/.claude-mind/system/logs/samara.log | tail -20
 
 # Look for leaked session IDs in episodes
 grep -E "\d{10}-\d{5}" ~/.claude-mind/memory/episodes/*.md

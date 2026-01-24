@@ -5,7 +5,7 @@
 set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-SCRIPT_DIR="$MIND_PATH/bin"
+SCRIPT_DIR="$MIND_PATH/system/bin"
 OUTPUT_FILE="$HOME/www/public/terroir.json"
 
 # Ensure output directory exists
@@ -15,4 +15,4 @@ mkdir -p "$(dirname "$OUTPUT_FILE")"
 "$SCRIPT_DIR/terroir" > "$OUTPUT_FILE"
 
 # Log success
-echo "[$(date)] Updated terroir data" >> "$MIND_PATH/logs/terroir.log"
+echo "[$(date)] Updated terroir data" >> "$MIND_PATH/system/logs/terroir.log"

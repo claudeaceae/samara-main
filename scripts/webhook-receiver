@@ -26,7 +26,7 @@ fi
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 PID_FILE="${MIND_PATH}/state/webhook-receiver.pid"
-LOG_FILE="${MIND_PATH}/logs/webhook-receiver.log"
+LOG_FILE="${MIND_PATH}/system/logs/webhook-receiver.log"
 DEFAULT_PORT=8082
 
 # Ensure directories exist

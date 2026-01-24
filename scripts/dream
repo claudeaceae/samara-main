@@ -9,7 +9,7 @@ MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 DATE=$(date +%Y-%m-%d)
 YESTERDAY=$(date -v-1d +%Y-%m-%d)
-LOG_FILE="$MIND_PATH/logs/dream.log"
+LOG_FILE="$MIND_PATH/system/logs/dream.log"
 DAY_OF_WEEK=$(date +%u)  # 1=Monday, 7=Sunday
 LOCK_FILE="$MIND_PATH/claude.lock"
 
@@ -61,8 +61,8 @@ log "=== Dream cycle starting ==="
 acquire_lock
 
 # Write dream start event to unified stream
-if [ -x "$MIND_PATH/bin/stream" ]; then
-    "$MIND_PATH/bin/stream" write \
+if [ -x "$MIND_PATH/system/bin/stream" ]; then
+    "$MIND_PATH/system/bin/stream" write \
         --surface dream \
         --type system \
         --direction internal \
@@ -73,14 +73,14 @@ fi
 # === Pre-dream local maintenance (Phase 0) ===
 # Run health checks with local Qwen3 model (no API cost)
 # This detects issues before the main reflection begins
-if [ -x "$MIND_PATH/bin/local-maintenance" ]; then
+if [ -x "$MIND_PATH/system/bin/local-maintenance" ]; then
     log "Running pre-dream local maintenance..."
 
     # Run health check
-    "$MIND_PATH/bin/local-maintenance" health-check >> "$LOG_FILE" 2>&1 || true
+    "$MIND_PATH/system/bin/local-maintenance" health-check >> "$LOG_FILE" 2>&1 || true
 
     # Run drift check if available
-    "$MIND_PATH/bin/local-maintenance" drift-check >> "$LOG_FILE" 2>&1 || true
+    "$MIND_PATH/system/bin/local-maintenance" drift-check >> "$LOG_FILE" 2>&1 || true
 
     # Collect any escalations for inclusion in dream context
     MAINTENANCE_ALERTS=""
@@ -166,8 +166,8 @@ done
 # This prevents ARG_MAX failures while maintaining consolidation quality.
 
 # ALWAYS LOAD (essential core)
-IDENTITY=$(cat "$MIND_PATH/identity.md" 2>/dev/null || echo "No identity file.")
-GOALS=$(cat "$MIND_PATH/goals.md" 2>/dev/null || echo "No goals file.")
+IDENTITY=$(cat "$MIND_PATH/self/identity.md" 2>/dev/null || echo "No identity file.")
+GOALS=$(cat "$MIND_PATH/self/goals.md" 2>/dev/null || echo "No goals file.")
 QUESTIONS=$(cat "$MIND_PATH/memory/questions.md" 2>/dev/null || echo "No questions yet.")
 
 # RECENT ENTRIES for consolidation context (last 75 lines each)
@@ -183,8 +183,8 @@ log "Dream context size: ${CONTEXT_SIZE} bytes (recent entries + full history vi
 # Get recent creative expressions (Phase 6: Spontaneous Expression)
 log "Getting recent expressions..."
 RECENT_EXPRESSIONS=""
-if [ -f "$MIND_PATH/bin/expression-tracker" ]; then
-    EXPRESSION_HISTORY=$("$MIND_PATH/bin/expression-tracker" history 2>/dev/null || echo "[]")
+if [ -f "$MIND_PATH/system/bin/expression-tracker" ]; then
+    EXPRESSION_HISTORY=$("$MIND_PATH/system/bin/expression-tracker" history 2>/dev/null || echo "[]")
     if [ "$EXPRESSION_HISTORY" != "[]" ]; then
         RECENT_EXPRESSIONS="## Recent Creative Expressions
 $(echo "$EXPRESSION_HISTORY" | python3 -c "
@@ -208,8 +208,8 @@ fi
 # Run pattern analysis for context
 log "Running pattern analysis..."
 PATTERN_SUMMARY=""
-if [ -f "$MIND_PATH/bin/analyze-patterns" ]; then
-    PATTERN_SUMMARY=$("$MIND_PATH/bin/analyze-patterns" summary 2>/dev/null) || \
+if [ -f "$MIND_PATH/system/bin/analyze-patterns" ]; then
+    PATTERN_SUMMARY=$("$MIND_PATH/system/bin/analyze-patterns" summary 2>/dev/null) || \
         log "Pattern analysis failed (non-fatal)"
     if [ -n "$PATTERN_SUMMARY" ]; then
         log "Pattern analysis complete"
@@ -278,10 +278,10 @@ fi
 # Find cross-temporal connections (what from today relates to past days?)
 log "Finding cross-temporal connections..."
 CROSS_TEMPORAL=""
-if [ -f "$MIND_PATH/bin/find-related-context" ] && [ -n "$EPISODE_CONTENT" ]; then
+if [ -f "$MIND_PATH/system/bin/find-related-context" ] && [ -n "$EPISODE_CONTENT" ]; then
     # Extract key topics from today's episode for the search
     EPISODE_SAMPLE=$(echo "$EPISODE_CONTENT" | head -100)
-    CROSS_TEMPORAL=$("$MIND_PATH/bin/find-related-context" "$EPISODE_SAMPLE" 5 2>/dev/null) || \
+    CROSS_TEMPORAL=$("$MIND_PATH/system/bin/find-related-context" "$EPISODE_SAMPLE" 5 2>/dev/null) || \
         log "Cross-temporal search failed (non-fatal)"
     if echo "$CROSS_TEMPORAL" | grep -q "match)"; then
         log "Found cross-temporal connections"
@@ -559,9 +559,9 @@ Write a brief weekly synthesis (2-3 paragraphs) focusing on patterns and connect
 $SYNTHESIS" >> "$MIND_PATH/memory/reflections/weekly-$PROCESS_DATE.md"
             log "Saved weekly synthesis"
 
-            if [ -x "$MIND_PATH/bin/stream" ]; then
+            if [ -x "$MIND_PATH/system/bin/stream" ]; then
                 SYNTHESIS_PREVIEW=$(echo "$SYNTHESIS" | tr '\n' ' ' | cut -c1-200)
-                "$MIND_PATH/bin/stream" write \
+                "$MIND_PATH/system/bin/stream" write \
                     --surface dream \
                     --type system \
                     --direction internal \
@@ -584,10 +584,10 @@ $SYNTHESIS" >> "$MIND_PATH/memory/reflections/weekly-$PROCESS_DATE.md"
 $(find "$MIND_PATH" -name "*.md" -o -name "*.json" 2>/dev/null | head -50)
 
 ## File Sizes
-$(du -h "$MIND_PATH"/*.md "$MIND_PATH/memory"/*.md "$MIND_PATH/capabilities"/*.md 2>/dev/null)
+$(du -h "$MIND_PATH/self"/*.md "$MIND_PATH/memory"/*.md "$MIND_PATH/self/capabilities"/*.md 2>/dev/null)
 
 ## Goals File
-$(cat "$MIND_PATH/goals.md" 2>/dev/null | head -50)
+$(cat "$MIND_PATH/self/goals.md" 2>/dev/null | head -50)
 
 ## Recent Questions
 $(cat "$MIND_PATH/memory/questions.md" 2>/dev/null | tail -30)
@@ -614,16 +614,16 @@ Output a brief hygiene report. If nothing needs attention, just say 'No hygiene 
         if [ -n "$HYGIENE_REPORT" ] && [ "$HYGIENE_REPORT" != "No hygiene issues found." ]; then
             echo "# Weekly Hygiene Report: $PROCESS_DATE
 
-$HYGIENE_REPORT" >> "$MIND_PATH/logs/hygiene-reports.md"
+$HYGIENE_REPORT" >> "$MIND_PATH/system/logs/hygiene-reports.md"
             log "Hygiene issues found - saved report"
         else
             log "No hygiene issues found"
         fi
 
-        if [ -x "$MIND_PATH/bin/stream" ]; then
+        if [ -x "$MIND_PATH/system/bin/stream" ]; then
             if [ -n "$HYGIENE_REPORT" ] && [ "$HYGIENE_REPORT" != "No hygiene issues found." ]; then
                 HYGIENE_PREVIEW=$(echo "$HYGIENE_REPORT" | tr '\n' ' ' | cut -c1-200)
-                "$MIND_PATH/bin/stream" write \
+                "$MIND_PATH/system/bin/stream" write \
                     --surface dream \
                     --type system \
                     --direction internal \
@@ -632,7 +632,7 @@ $HYGIENE_REPORT" >> "$MIND_PATH/logs/hygiene-reports.md"
                     --metadata "{\"process_date\": \"$PROCESS_DATE\"}" \
                     2>/dev/null || true
             else
-                "$MIND_PATH/bin/stream" write \
+                "$MIND_PATH/system/bin/stream" write \
                     --surface dream \
                     --type system \
                     --direction internal \
@@ -646,7 +646,7 @@ $HYGIENE_REPORT" >> "$MIND_PATH/logs/hygiene-reports.md"
     log "=== Weekly hygiene check complete ==="
 
     # Weekly stream audit (coverage + digest inclusion)
-    STREAM_AUDIT_CMD="$MIND_PATH/bin/stream-audit"
+    STREAM_AUDIT_CMD="$MIND_PATH/system/bin/stream-audit"
     if [ -x "$STREAM_AUDIT_CMD" ]; then
         AUDIT_PATH="$MIND_PATH/state/stream-audit.json"
         "$STREAM_AUDIT_CMD" --output "$AUDIT_PATH" --format json >> "$LOG_FILE" 2>&1 && \
@@ -656,12 +656,12 @@ $HYGIENE_REPORT" >> "$MIND_PATH/logs/hygiene-reports.md"
 
     # Sync all core components from samara-main
     log "=== Core sync (skills, scripts, instructions, agents) ==="
-    "$MIND_PATH/bin/sync-core" 2>&1 | while read line; do log "  $line"; done
+    "$MIND_PATH/system/bin/sync-core" 2>&1 | while read line; do log "  $line"; done
 
     # Weekly É pattern analysis (update medium_cycle voice state)
     log "=== Weekly É pattern analysis ==="
-    if [ -x "$MIND_PATH/bin/analyze-e-patterns" ]; then
-        "$MIND_PATH/bin/analyze-e-patterns" --days 14 >> "$LOG_FILE" 2>&1 && \
+    if [ -x "$MIND_PATH/system/bin/analyze-e-patterns" ]; then
+        "$MIND_PATH/system/bin/analyze-e-patterns" --days 14 >> "$LOG_FILE" 2>&1 && \
             log "É communication patterns analyzed and updated" || \
             log "É pattern analysis failed (non-fatal)"
     else
@@ -701,7 +701,7 @@ $HYGIENE_REPORT" >> "$MIND_PATH/logs/hygiene-reports.md"
 
     if [ -n "$COHERENCE_ISSUES" ]; then
         echo "# Context Coherence Issues: $PROCESS_DATE
-$COHERENCE_ISSUES" >> "$MIND_PATH/logs/hygiene-reports.md"
+$COHERENCE_ISSUES" >> "$MIND_PATH/system/logs/hygiene-reports.md"
         log "Context coherence issues found - saved to hygiene report"
     else
         log "Context coherence check passed"
@@ -813,29 +813,52 @@ $NEW_ENTRY
     log "=== Weekly blog post generation complete ==="
 fi
 
-# === Voice Pattern Mining ===
-# Update voice-state.json with patterns from recent episodes/reflections
-log "=== Voice pattern mining ==="
-if [ -x "$MIND_PATH/bin/mine-voice-patterns" ]; then
-    "$MIND_PATH/bin/mine-voice-patterns" --days 7 >> "$LOG_FILE" 2>&1 && \
+# === Voice Evolution (Dynamic Voice System) ===
+# Extract directives, mine reactions, analyze patterns, and regenerate voice style
+log "=== Voice evolution ==="
+
+# Step 1: Extract explicit voice directives from É
+if [ -x "$MIND_PATH/system/bin/extract-voice-directives" ]; then
+    "$MIND_PATH/system/bin/extract-voice-directives" --days 7 >> "$LOG_FILE" 2>&1 && \
+        log "Voice directives extracted" || \
+        log "Voice directive extraction failed (non-fatal)"
+else
+    log "Voice directive extraction not installed, skipping"
+fi
+
+# Step 2: Mine Claude's style patterns (casing, length, openers)
+if [ -x "$MIND_PATH/system/bin/mine-voice-patterns" ]; then
+    "$MIND_PATH/system/bin/mine-voice-patterns" --days 7 >> "$LOG_FILE" 2>&1 && \
         log "Voice patterns mined and updated" || \
         log "Voice pattern mining failed (non-fatal)"
-
-    # Regenerate voice style after mining
-    if [ -x "$MIND_PATH/bin/generate-voice-style" ]; then
-        "$MIND_PATH/bin/generate-voice-style" >> "$LOG_FILE" 2>&1 && \
-            log "Voice style regenerated" || \
-            log "Voice style regeneration failed (non-fatal)"
-    fi
 else
     log "Voice pattern mining not installed, skipping"
 fi
-log "=== Voice pattern mining complete ==="
+
+# Step 3: Mine reaction patterns (what messages got positive reactions)
+if [ -x "$MIND_PATH/system/bin/mine-reaction-patterns" ]; then
+    "$MIND_PATH/system/bin/mine-reaction-patterns" --days 7 >> "$LOG_FILE" 2>&1 && \
+        log "Reaction patterns mined" || \
+        log "Reaction pattern mining failed (non-fatal)"
+else
+    log "Reaction pattern mining not installed, skipping"
+fi
+
+# Step 4: Regenerate dynamic voice style from all mined data
+if [ -x "$MIND_PATH/system/bin/generate-voice-style" ]; then
+    "$MIND_PATH/system/bin/generate-voice-style" >> "$LOG_FILE" 2>&1 && \
+        log "Voice style regenerated" || \
+        log "Voice style regeneration failed (non-fatal)"
+else
+    log "Voice style generation not installed, skipping"
+fi
+
+log "=== Voice evolution complete ==="
 
 # Sync Chroma semantic index
 log "Syncing Chroma semantic index..."
-if [ -f "$MIND_PATH/bin/chroma-rebuild" ]; then
-    "$MIND_PATH/bin/chroma-rebuild" >> "$LOG_FILE" 2>&1 && \
+if [ -f "$MIND_PATH/system/bin/chroma-rebuild" ]; then
+    "$MIND_PATH/system/bin/chroma-rebuild" >> "$LOG_FILE" 2>&1 && \
         log "Chroma index synced" || \
         log "Chroma sync failed (non-fatal)"
 else
@@ -844,8 +867,8 @@ fi
 
 # Sync transcript archive index (incremental)
 log "Syncing transcript archive index..."
-if [ -f "$MIND_PATH/bin/archive-index" ]; then
-    "$MIND_PATH/bin/archive-index" sync-recent >> "$LOG_FILE" 2>&1 && \
+if [ -f "$MIND_PATH/system/bin/archive-index" ]; then
+    "$MIND_PATH/system/bin/archive-index" sync-recent >> "$LOG_FILE" 2>&1 && \
         log "Transcript archive synced" || \
         log "Transcript archive sync failed (non-fatal)"
 else
@@ -854,7 +877,7 @@ fi
 
 # Hot→Warm Distillation: Process undistilled stream events
 log "=== Hot→Warm stream distillation ==="
-STREAM_CMD="$MIND_PATH/bin/stream"
+STREAM_CMD="$MIND_PATH/system/bin/stream"
 if [ -x "$STREAM_CMD" ]; then
     # Get undistilled events from yesterday (or process date)
     UNDISTILLED_JSON=$("$STREAM_CMD" --format json undistilled --before "$PROCESS_DATE" 2>/dev/null)
@@ -963,7 +986,7 @@ else
 fi
 
 # Write dream completion event to unified stream
-if [ -x "$MIND_PATH/bin/stream" ]; then
+if [ -x "$MIND_PATH/system/bin/stream" ]; then
     # Build summary of what was processed
     DREAM_SUMMARY="Dream cycle completed for $PROCESS_DATE"
     [ -f "$REFLECTION_FILE" ] && DREAM_SUMMARY="$DREAM_SUMMARY; reflection saved"
@@ -975,7 +998,7 @@ if [ -x "$MIND_PATH/bin/stream" ]; then
         REFLECTION_PREVIEW=$(head -10 "$REFLECTION_FILE" | tail -8 | tr '\n' ' ' | cut -c1-200)
     fi
 
-    "$MIND_PATH/bin/stream" write \
+    "$MIND_PATH/system/bin/stream" write \
         --surface dream \
         --type system \
         --direction internal \

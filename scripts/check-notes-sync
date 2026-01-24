@@ -46,8 +46,8 @@ fi
 
 echo ""
 echo "=== Recent NoteWatcher Logs ==="
-if [[ -f "$HOME/.claude-mind/logs/samara.log" ]]; then
-    grep -i "notewatcher\|note.*change\|heartbeat" "$HOME/.claude-mind/logs/samara.log" 2>/dev/null | tail -20 || echo "(No matching log entries)"
+if [[ -f "$HOME/.claude-mind/system/logs/samara.log" ]]; then
+    grep -i "notewatcher\|note.*change\|heartbeat" "$HOME/.claude-mind/system/logs/samara.log" 2>/dev/null | tail -20 || echo "(No matching log entries)"
 else
     echo "(Log file not found)"
 fi

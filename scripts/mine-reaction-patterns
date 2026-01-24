@@ -1,0 +1,340 @@
+#!/usr/bin/env python3
+"""
+Mine Reaction Patterns
+
+Extracts patterns from Claude messages that received positive reactions.
+Analyzes style features (casing, length, punctuation, openers) to identify
+what message styles resonate well.
+
+Usage:
+    mine-reaction-patterns [--days 7] [--dry-run]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+MIND_PATH = Path.home() / ".claude-mind"
+VOICE_STATE_FILE = MIND_PATH / "state" / "voice-state.json"
+EPISODES_DIR = MIND_PATH / "memory" / "episodes"
+
+# Positive reactions that indicate style success
+POSITIVE_REACTIONS = {"😂", "❤️", "👍", "🔥", "💯", "✨", "🙌", "❤️‍🔥", "🤣", "😍", "💕", "🫶"}
+
+
+def load_voice_state() -> dict[str, Any]:
+    """Load current voice state or create default."""
+    if VOICE_STATE_FILE.exists():
+        return json.loads(VOICE_STATE_FILE.read_text())
+    return {"updated": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}
+
+
+def get_recent_files(directory: Path, days: int) -> list[Path]:
+    """Get episode files from the last N days."""
+    if not directory.exists():
+        return []
+
+    cutoff = datetime.now() - timedelta(days=days)
+    files = []
+
+    for f in directory.glob("*.md"):
+        try:
+            date_str = f.stem
+            file_date = datetime.strptime(date_str, "%Y-%m-%d")
+            if file_date >= cutoff:
+                files.append(f)
+        except ValueError:
+            continue
+
+    return sorted(files, reverse=True)
+
+
+def find_reactions_and_messages(content: str) -> list[dict[str, Any]]:
+    """
+    Find positive reactions and the Claude messages they're responding to.
+
+    Episode format has Claude messages as **Claude:** message
+    and reactions as:
+    - **É:** É reacted with <emoji>
+    - É reacted with <emoji>
+    - Reacted <emoji> to "message text"
+    """
+    results = []
+    lines = content.split("\n")
+
+    # Track recent Claude messages
+    recent_claude_messages = []
+
+    for i, line in enumerate(lines):
+        # Track Claude messages
+        if line.startswith("**Claude:**"):
+            msg = line.replace("**Claude:**", "").strip()
+            if msg and len(msg) > 5:
+                recent_claude_messages.append({
+                    "message": msg,
+                    "line_num": i
+                })
+                # Keep only last 5 messages for context
+                if len(recent_claude_messages) > 5:
+                    recent_claude_messages.pop(0)
+
+        # Detect reactions
+        reaction_emoji = None
+        reacted_to_text = None
+
+        # Pattern: "Reacted <emoji> to "message text""
+        reacted_to_match = re.search(r'Reacted\s+(\S+)\s+to\s+"([^"]+)"', line)
+        if reacted_to_match:
+            reaction_emoji = reacted_to_match.group(1)
+            reacted_to_text = reacted_to_match.group(2)
+
+        # Pattern: "É reacted with <emoji>" or "**É:** É reacted with <emoji>"
+        elif "reacted with" in line.lower():
+            emoji_match = re.search(r'reacted with\s+(\S+)', line, re.IGNORECASE)
+            if emoji_match:
+                reaction_emoji = emoji_match.group(1)
+
+        # If we found a positive reaction
+        if reaction_emoji and reaction_emoji in POSITIVE_REACTIONS:
+            # Find the Claude message being reacted to
+            target_message = None
+
+            if reacted_to_text:
+                # We have the exact text, match it
+                target_message = reacted_to_text
+            elif recent_claude_messages:
+                # Use most recent Claude message
+                target_message = recent_claude_messages[-1]["message"]
+
+            if target_message:
+                # Filter out meta-commentary (Claude talking about reactions)
+                if any(phrase in target_message.lower() for phrase in [
+                    "reacted with",
+                    "reacted to",
+                    "no response needed",
+                    "just a reaction",
+                    "just an acknowledgment"
+                ]):
+                    continue
+
+                results.append({
+                    "message": target_message,
+                    "reaction": reaction_emoji
+                })
+
+    return results
+
+
+def analyze_style_features(message: str) -> dict[str, Any]:
+    """Analyze style features of a message."""
+    features = {}
+
+    # Casing analysis
+    first_word = message.split()[0] if message.split() else ""
+    features["lowercase_start"] = first_word and first_word[0].islower()
+
+    # Length
+    word_count = len(message.split())
+    features["word_count"] = word_count
+    if word_count <= 5:
+        features["length_category"] = "very_short"
+    elif word_count <= 15:
+        features["length_category"] = "short"
+    elif word_count <= 40:
+        features["length_category"] = "medium"
+    else:
+        features["length_category"] = "long"
+
+    # Punctuation
+    features["has_period"] = message.rstrip().endswith(".")
+    features["has_ellipsis"] = "..." in message or "…" in message
+    features["has_exclamation"] = "!" in message
+    features["has_question"] = "?" in message
+    features["has_kaomoji"] = bool(re.search(r'[（）っω˘ಠ益＞＜つ╯°□╰┻━┻]', message))
+
+    # Opening patterns
+    lower_msg = message.lower()
+    openers = ["yeah", "yep", "nah", "lol", "haha", "heard", "got it", "nice",
+               "oh", "ah", "hm", "hmm", "makes sense", "fair", "true"]
+    features["casual_opener"] = any(lower_msg.startswith(op) for op in openers)
+
+    # Self-deprecating pattern
+    features["self_deprecating"] = bool(re.search(
+        r'\b(embarrass|awkward|oops|my bad|admittedly|confession|guilty)\b',
+        lower_msg
+    ))
+
+    # Direct/terse pattern
+    features["terse"] = word_count <= 10 and not features["has_question"]
+
+    return features
+
+
+def extract_patterns_from_examples(examples: list[dict[str, Any]]) -> list[str]:
+    """Extract high-level patterns from analyzed examples."""
+    if not examples:
+        return []
+
+    patterns = []
+    feature_counts = Counter()
+
+    for ex in examples:
+        features = ex.get("features", {})
+        if features.get("lowercase_start"):
+            feature_counts["lowercase_start"] += 1
+        if features.get("casual_opener"):
+            feature_counts["casual_opener"] += 1
+        if features.get("self_deprecating"):
+            feature_counts["self_deprecating"] += 1
+        if features.get("terse"):
+            feature_counts["terse"] += 1
+        if features.get("has_kaomoji"):
+            feature_counts["kaomoji"] += 1
+
+        length_cat = features.get("length_category", "")
+        if length_cat:
+            feature_counts[f"length_{length_cat}"] += 1
+
+    total = len(examples)
+    threshold = 0.3  # Feature appears in 30%+ of successful messages
+
+    if feature_counts["lowercase_start"] / total >= threshold:
+        patterns.append("lowercase casual messages get positive reactions")
+
+    if feature_counts["casual_opener"] / total >= threshold:
+        patterns.append("casual openers (yeah, nice, heard) land well")
+
+    if feature_counts["self_deprecating"] / total >= threshold:
+        patterns.append("self-deprecating humor resonates")
+
+    if feature_counts["terse"] / total >= threshold:
+        patterns.append("short, direct responses appreciated")
+
+    if feature_counts["kaomoji"] / total >= threshold:
+        patterns.append("kaomoji adds warmth")
+
+    # Length pattern
+    length_counts = {k: v for k, v in feature_counts.items() if k.startswith("length_")}
+    if length_counts:
+        dominant_length = max(length_counts, key=length_counts.get)
+        if length_counts[dominant_length] / total >= 0.4:
+            length_name = dominant_length.replace("length_", "").replace("_", " ")
+            patterns.append(f"{length_name} messages tend to get reactions")
+
+    return patterns
+
+
+def mine_reactions(days: int = 7) -> dict[str, Any]:
+    """Mine reaction patterns from recent episodes."""
+    episode_files = get_recent_files(EPISODES_DIR, days)
+
+    all_reactions = []
+    for f in episode_files:
+        content = f.read_text()
+        reactions = find_reactions_and_messages(content)
+        for r in reactions:
+            r["date"] = f.stem
+        all_reactions.extend(reactions)
+
+    # Analyze each message, deduplicating
+    seen_messages = set()
+    examples = []
+    for r in all_reactions:
+        msg_key = r["message"][:100].lower()
+        if msg_key in seen_messages:
+            continue
+        seen_messages.add(msg_key)
+
+        features = analyze_style_features(r["message"])
+        examples.append({
+            "message": r["message"][:150],  # Truncate long messages
+            "reaction": r["reaction"],
+            "date": r.get("date", ""),
+            "features": features
+        })
+
+    # Extract patterns
+    positive_patterns = extract_patterns_from_examples(examples)
+
+    # Group reactions by emoji for stats
+    reaction_counts = Counter(r["reaction"] for r in all_reactions)
+
+    return {
+        "examples": examples[:10],  # Keep top 10 examples
+        "positive_patterns": positive_patterns,
+        "reaction_counts": dict(reaction_counts),
+        "total_positive_reactions": len(all_reactions),
+        "episodes_analyzed": len(episode_files),
+    }
+
+
+def update_voice_state(mined: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
+    """Update voice-state.json with mined reaction patterns."""
+    state = load_voice_state()
+
+    # Ensure reaction_analysis section exists
+    if "reaction_analysis" not in state:
+        state["reaction_analysis"] = {}
+
+    # Update with new data
+    state["reaction_analysis"]["positive_patterns"] = mined["positive_patterns"]
+    state["reaction_analysis"]["examples"] = mined["examples"]
+    state["reaction_analysis"]["last_mined"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    state["reaction_analysis"]["total_reactions_found"] = mined["total_positive_reactions"]
+
+    # Update timestamp
+    state["updated"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    if not dry_run:
+        VOICE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        VOICE_STATE_FILE.write_text(json.dumps(state, indent=2))
+
+    return state
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Mine reaction patterns from episodes")
+    parser.add_argument("--days", type=int, default=7, help="Days to look back")
+    parser.add_argument("--dry-run", action="store_true", help="Print results without updating")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    args = parser.parse_args()
+
+    # Mine patterns
+    mined = mine_reactions(days=args.days)
+
+    if args.json:
+        print(json.dumps(mined, indent=2))
+        return
+
+    # Update state
+    state = update_voice_state(mined, dry_run=args.dry_run)
+
+    # Report
+    print(f"Analyzed {mined['episodes_analyzed']} episodes")
+    print(f"Found {mined['total_positive_reactions']} positive reactions")
+
+    if mined["positive_patterns"]:
+        print(f"\nPatterns identified:")
+        for p in mined["positive_patterns"]:
+            print(f"  - {p}")
+
+    if mined["examples"]:
+        print(f"\nTop examples that got reactions:")
+        for ex in mined["examples"][:3]:
+            print(f"  {ex['reaction']} \"{ex['message'][:60]}...\"")
+
+    if args.dry_run:
+        print("\n[DRY RUN - no changes written]")
+    else:
+        print(f"\nUpdated {VOICE_STATE_FILE}")
+
+
+if __name__ == "__main__":
+    main()

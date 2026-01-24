@@ -24,15 +24,15 @@ run_checks() {
     local issues=""
 
     # 1. Check for system drift
-    if [ -f "$MIND_PATH/bin/sync-organism" ]; then
-        if ! "$MIND_PATH/bin/sync-organism" --check >/dev/null 2>&1; then
+    if [ -f "$MIND_PATH/system/bin/sync-organism" ]; then
+        if ! "$MIND_PATH/system/bin/sync-organism" --check >/dev/null 2>&1; then
             issues="$issues\n- System drift detected (run sync-organism to fix)"
         fi
     fi
 
     # 2. Check symlinks
     local broken_links=0
-    for link in "$MIND_PATH/bin" "$MIND_PATH/.claude" "$MIND_PATH/instructions"; do
+    for link in "$MIND_PATH/system/bin" "$MIND_PATH/.claude" "$MIND_PATH/system/instructions"; do
         if [ -L "$link" ] && [ ! -e "$link" ]; then
             issues="$issues\n- Broken symlink: $link"
             broken_links=$((broken_links + 1))

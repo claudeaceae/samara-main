@@ -13,14 +13,10 @@ Navigation hub for all documentation.
 
 ---
 
-## For Running Instances
+## System Reference
 
 - [Memory Systems](memory-systems.md) — Session retention, semantic search, transcript archive
-- [Contiguous Memory System](contiguous-memory-system.md) — Unified event stream, hot digest, cross-surface context
-- [Contiguous Memory To Notes Summary](contiguous-memory-to-notes-summary.md) — Timeline from contiguous memory through smart context and Notes fix
-- [Smart Context Retrieval Rollout](smart-context-retrieval-rollout.md) — Config checklist and verification
-- [Apple Notes Scratchpad Issue Report](scratchpad-notes-issue-report.md) — Notes watcher bug, root cause, and fix
-- [Dynamic Voice System](dynamic-voice-system.md) — Evolving output style based on memory and relationship patterns
+- [Skills Reference](skills-reference.md) — Complete skill catalog by category
 - [Scripts Reference](scripts-reference.md) — Communication, memory, and sync scripts
 - [Services Reference](services-reference.md) — Webhook, MCP, X/Twitter, wallet services
 
@@ -30,18 +26,14 @@ Navigation hub for all documentation.
 
 - [Sync Guide](sync-guide.md) — Keeping repo/runtime aligned
 - [Troubleshooting](troubleshooting.md) — Common issues and fixes
+- [Development Patterns](development-patterns.md) — Implementation patterns and workarounds
 
 ---
 
-## Phase History
+## Behavioral Guidance (Templates)
 
-- [Phases 1-4](whats-changed-phases-1-4.md) — Model fallback, semantic memory, proactive messaging, sense events
-- [Phases 5-8](whats-changed-phases-5-8.md) — Meeting awareness, spontaneous expression, wallet, transcript archive
+- [Privacy Guardrails](../.claude/rules/privacy.md) — Privacy protection rules
+- [iMessage Guidance](../templates/instructions/imessage.md) — Message handling behavior
+- [Group Chat](../templates/instructions/imessage-group.md) — Group chat specific guidance
 
----
-
-## Behavioral Guidance
-
-- [Privacy Guardrails](../instructions/privacy-guardrails.md) — Privacy protection rules
-- [iMessage Guidance](../instructions/imessage.md) — Message handling behavior
-- [Group Chat](../instructions/imessage-group.md) — Group chat specific guidance
+> **Note:** These are templates. Each organism's actual instructions live at `~/.claude-mind/system/instructions/`.

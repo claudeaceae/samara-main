@@ -72,7 +72,7 @@ final class RitualLoader {
     init(mindPath: String? = nil) {
         let basePath = mindPath ?? MindPaths.mindPath()
 
-        self.ritualPath = (basePath as NSString).appendingPathComponent("ritual.md")
+        self.ritualPath = (basePath as NSString).appendingPathComponent("self/ritual.md")
 
         // Load and parse
         loadRitual()

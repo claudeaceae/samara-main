@@ -27,13 +27,13 @@ Accepts webhooks from external services and converts them to sense events.
 
 ```bash
 # Start
-~/.claude-mind/bin/webhook-receiver start
+~/.claude-mind/system/bin/webhook-receiver start
 
 # Status
-~/.claude-mind/bin/webhook-receiver status
+~/.claude-mind/system/bin/webhook-receiver status
 
 # Stop
-~/.claude-mind/bin/webhook-receiver stop
+~/.claude-mind/system/bin/webhook-receiver stop
 ```
 
 **Endpoints:**

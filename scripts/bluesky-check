@@ -7,13 +7,13 @@ MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 
 # Load config (with fallbacks)
-source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
+source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
     ENTITY_BLUESKY="@claudaceae.bsky.social"
 }
 
-LOG_FILE="$MIND_PATH/logs/bluesky.log"
+LOG_FILE="$MIND_PATH/system/logs/bluesky.log"
 STATE_FILE="$MIND_PATH/state/services/bluesky-state.json"
-CREDS_FILE="$MIND_PATH/credentials/bluesky.json"
+CREDS_FILE="$MIND_PATH/self/credentials/bluesky.json"
 LOCK_FILE="$MIND_PATH/claude.lock"
 
 log() {
@@ -75,7 +75,7 @@ except ImportError:
     sys.exit(0)
 
 home = os.environ.get('HOME', os.path.expanduser('~'))
-creds_file = f"{home}/.claude-mind/credentials/bluesky.json"
+creds_file = f"{home}/.claude-mind/self/credentials/bluesky.json"
 state_file = f"{home}/.claude-mind/state/services/bluesky-state.json"
 
 # Load credentials
@@ -204,7 +204,7 @@ log "Found Bluesky interactions: $INTERACTIONS"
 
 # Read core identity and decisions - required for coherent behavior
 MIND="$MIND_PATH"
-IDENTITY=$(cat "$MIND/identity.md" 2>/dev/null || echo "")
+IDENTITY=$(cat "$MIND/self/identity.md" 2>/dev/null || echo "")
 DECISIONS=$(cat "$MIND/memory/decisions.md" 2>/dev/null || echo "")
 
 # Build prompt for Claude
@@ -286,7 +286,7 @@ echo "$RESPONSES" | while IFS='|' read -r action target text; do
     case "$action" in
         POST)
             log "Posting publicly: ${text:0:50}..."
-            "$MIND_PATH/bin/bluesky-post" "$text" || log "Failed to post"
+            "$MIND_PATH/system/bin/bluesky-post" "$text" || log "Failed to post"
             ;;
         REPLY)
             log "Replying to $target: ${text:0:50}..."
@@ -299,7 +299,7 @@ try:
     from atproto import models
 
     home = os.environ.get('HOME', os.path.expanduser('~'))
-    creds_file = f"{home}/.claude-mind/credentials/bluesky.json"
+    creds_file = f"{home}/.claude-mind/self/credentials/bluesky.json"
 
     with open(creds_file) as f:
         creds = json.load(f)
@@ -358,7 +358,7 @@ try:
     from atproto import Client
 
     home = os.environ.get('HOME', os.path.expanduser('~'))
-    creds_file = f"{home}/.claude-mind/credentials/bluesky.json"
+    creds_file = f"{home}/.claude-mind/self/credentials/bluesky.json"
 
     with open(creds_file) as f:
         creds = json.load(f)

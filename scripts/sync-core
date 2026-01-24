@@ -73,11 +73,11 @@ sync_skills() {
 }
 
 # ============================================================
-# 2. SCRIPTS (repo/scripts/* → ~/.claude-mind/bin/*)
+# 2. SCRIPTS (repo/scripts/* → ~/.claude-mind/system/bin/*)
 # ============================================================
 sync_scripts() {
     local src="$REPO_DIR/scripts"
-    local dst="$MIND_PATH/bin"
+    local dst="$MIND_PATH/system/bin"
 
     log "## Scripts"
     mkdir -p "$dst"
@@ -149,7 +149,7 @@ sync_scripts() {
 }
 
 # ============================================================
-# 3. LIB (repo/lib/* → ~/.claude-mind/lib/*)
+# 3. LIB (repo/lib/* → ~/.claude-mind/system/lib/*)
 # ============================================================
 sync_lib() {
     local src="$REPO_DIR/lib"
@@ -232,7 +232,7 @@ sync_lib() {
 }
 
 # ============================================================
-# 4. INSTRUCTIONS (repo/instructions/* → ~/.claude-mind/instructions/*)
+# 4. INSTRUCTIONS (repo/instructions/* → ~/.claude-mind/system/instructions/*)
 # ============================================================
 sync_instructions() {
     local src="$REPO_DIR/instructions"
@@ -351,7 +351,7 @@ sync_runtime_claude
 log ""
 
 # Emit stream event for audit coverage
-STREAM_CMD="$MIND_PATH/bin/stream"
+STREAM_CMD="$MIND_PATH/system/bin/stream"
 if [ -x "$STREAM_CMD" ]; then
     CHECK_ONLY_FLAG=$($CHECK_ONLY && echo true || echo false)
     METADATA="{\"items_synced\": $ITEMS_SYNCED, \"items_needed\": $ITEMS_NEEDED, \"check_only\": $CHECK_ONLY_FLAG}"

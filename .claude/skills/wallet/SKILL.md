@@ -60,7 +60,7 @@ fi
 Read wallet addresses from the credentials file:
 
 ```bash
-CREDS_FILE="$HOME/.claude-mind/credentials/wallet-apis.json"
+CREDS_FILE="$HOME/.claude-mind/self/credentials/wallet-apis.json"
 
 if [ -f "$CREDS_FILE" ]; then
     python3 -c "

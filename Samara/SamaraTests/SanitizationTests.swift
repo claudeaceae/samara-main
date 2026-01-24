@@ -331,4 +331,69 @@ final class SanitizationTests: SamaraTestCase {
         XCTAssertEqual(sanitized, input)
         XCTAssertNil(filtered)
     }
+
+    // MARK: - Thinking Trace Narration Tests (Jan 2026 group chat leak)
+
+    func testCatchesIsAboutToNarration() {
+        // Real-world leak from 2026-01-23 group chat
+        let input = "É is about to tell Mackenzie a story - this is a moment for me to step back and let them have their conversation. No response needed from me here."
+        let (sanitized, filtered) = sanitize(input)
+
+        XCTAssertEqual(sanitized, "[Message not delivered - please try again]")
+        XCTAssertNotNil(filtered)
+        XCTAssertTrue(filtered!.contains("PURE_META_COMMENTARY:"))
+    }
+
+    func testCatchesReactedWithNarration() {
+        // Real-world leak from 2026-01-23 group chat
+        let input = "É reacted with 😂 to Mackenzie's \"My friday is okay\" - it's a light moment between them. This is just a reaction, not requiring a response from me. I'll stay quiet and let the conversation flow naturally."
+        let (sanitized, filtered) = sanitize(input)
+
+        XCTAssertEqual(sanitized, "[Message not delivered - please try again]")
+        XCTAssertNotNil(filtered)
+        XCTAssertTrue(filtered!.contains("PURE_META_COMMENTARY:"))
+    }
+
+    func testCatchesIsTellingNarration() {
+        // Narrating third-party communication
+        let input = "É is telling Mackenzie about the Solana situation. Mackenzie's \"omg\" shows interest - this is É's story to tell so I'll let them continue. No response needed from me right now."
+        let (sanitized, filtered) = sanitize(input)
+
+        XCTAssertEqual(sanitized, "[Message not delivered - please try again]")
+        XCTAssertNotNil(filtered)
+    }
+
+    func testCatchesNoResponseNeeded() {
+        // Explicit internal note about not responding
+        let input = "No response needed from me here - this is between É and Mackenzie."
+        let (sanitized, filtered) = sanitize(input)
+
+        XCTAssertEqual(sanitized, "[Message not delivered - please try again]")
+        XCTAssertNotNil(filtered)
+    }
+
+    func testCatchesSteppingBack() {
+        // Another form of explicit non-response
+        let input = "Stepping back to let them have their moment."
+        let (sanitized, filtered) = sanitize(input)
+
+        XCTAssertEqual(sanitized, "[Message not delivered - please try again]")
+        XCTAssertNotNil(filtered)
+    }
+
+    func testAllowsLegitimateNamesInResponses() {
+        // Normal responses that happen to start with names should pass through
+        let inputs = [
+            "Mackenzie, good to hear from you!",
+            "É mentioned you were coming over.",
+            "Jenny's birthday is today!",
+            "Is about time we caught up."  // "Is about" but not "[Name] is about to"
+        ]
+
+        for input in inputs {
+            let (sanitized, filtered) = sanitize(input)
+            XCTAssertEqual(sanitized, input, "Legitimate response should pass through: \(input)")
+            XCTAssertNil(filtered, "Legitimate response should not be filtered: \(input)")
+        }
+    }
 }

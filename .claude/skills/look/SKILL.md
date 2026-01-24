@@ -10,7 +10,7 @@ Use the Logitech C920 webcam to see what's around.
 ## Basic Capture
 
 ```bash
-IMG=$(~/.claude-mind/bin/look)
+IMG=$(~/.claude-mind/system/bin/look)
 ```
 
 Then use the Read tool to view the captured image at `$IMG`.
@@ -18,7 +18,7 @@ Then use the Read tool to view the captured image at `$IMG`.
 ## Capture and Send
 
 ```bash
-~/.claude-mind/bin/look -s
+~/.claude-mind/system/bin/look -s
 ```
 
 Captures and automatically sends to É via iMessage.
@@ -34,7 +34,7 @@ Captures and automatically sends to É via iMessage.
 
 ## Workflow
 
-1. **Capture**: `IMG=$(~/.claude-mind/bin/look)`
+1. **Capture**: `IMG=$(~/.claude-mind/system/bin/look)`
 2. **View it**: Read tool on `$IMG` to see what was captured
 3. **Observe**: What's visible? Weather, lighting, anything notable?
 4. **Decide**: Worth sharing? Use `-s` to send.

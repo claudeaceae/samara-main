@@ -12,7 +12,7 @@
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 SAMARA_PROJECT="$HOME/Developer/samara-main/Samara"
-LOG_FILE="$MIND_PATH/logs/test-samara.log"
+LOG_FILE="$MIND_PATH/system/logs/test-samara.log"
 
 # Parse arguments
 VERBOSE=""
@@ -26,7 +26,7 @@ done
 
 # Quick mode: skip if recently tested
 if [[ -n "$QUICK" ]]; then
-    LAST_TEST="$MIND_PATH/logs/.last-samara-test"
+    LAST_TEST="$MIND_PATH/system/logs/.last-samara-test"
     if [[ -f "$LAST_TEST" ]]; then
         LAST_TIME=$(cat "$LAST_TEST")
         NOW=$(date +%s)
@@ -88,8 +88,8 @@ else
 fi
 
 # Record last test time
-mkdir -p "$(dirname "$MIND_PATH/logs/.last-samara-test")"
-date +%s > "$MIND_PATH/logs/.last-samara-test"
+mkdir -p "$(dirname "$MIND_PATH/system/logs/.last-samara-test")"
+date +%s > "$MIND_PATH/system/logs/.last-samara-test"
 
 if [[ $RESULT -eq 0 ]]; then
     log "Samara tests completed successfully"

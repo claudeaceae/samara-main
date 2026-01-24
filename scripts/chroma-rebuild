@@ -6,7 +6,7 @@ set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 VENV_PATH="$MIND_PATH/.venv"
-LOG_FILE="$MIND_PATH/logs/chroma.log"
+LOG_FILE="$MIND_PATH/system/logs/chroma.log"
 
 log() {
     mkdir -p "$(dirname "$LOG_FILE")"
@@ -26,6 +26,6 @@ source "$VENV_PATH/bin/activate"
 
 # Run the rebuild
 cd "$MIND_PATH"
-python3 "$MIND_PATH/lib/chroma_helper.py" rebuild
+python3 "$MIND_PATH/system/lib/chroma_helper.py" rebuild
 
 log "Chroma index rebuild complete"

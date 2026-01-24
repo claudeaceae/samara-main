@@ -91,7 +91,7 @@ final class SessionManager {
     // MARK: - Initialization
 
     init(
-        sessionStateDir: String = MindPaths.mindPath("sessions"),
+        sessionStateDir: String = MindPaths.memoryPath("sessions"),
         onBatchReady: @escaping ([Message], String?) -> Void,
         checkReadStatus: @escaping (Int64) -> ReadStatus?,
         onSessionExpired: ((String, [Message]) -> Void)? = nil

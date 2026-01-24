@@ -5,7 +5,7 @@
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 QUEUE_FILE="$MIND_PATH/state/research-queue/queue.jsonl"
 ARCHIVE_FILE="$MIND_PATH/state/research-queue/archive.jsonl"
-SENSES_DIR="$MIND_PATH/senses"
+SENSES_DIR="$MIND_PATH/system/senses"
 
 mkdir -p "$(dirname "$QUEUE_FILE")"
 touch "$QUEUE_FILE" "$ARCHIVE_FILE"

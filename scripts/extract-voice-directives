@@ -1,0 +1,291 @@
+#!/usr/bin/env python3
+"""
+Extract Voice Directives
+
+Captures explicit feedback from É about Claude's voice/style as persistent directives.
+Looks for patterns like "you can relax", "less formal", "tone down X", etc.
+
+Usage:
+    extract-voice-directives [--days 7] [--dry-run]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+MIND_PATH = Path.home() / ".claude-mind"
+VOICE_STATE_FILE = MIND_PATH / "state" / "voice-state.json"
+EPISODES_DIR = MIND_PATH / "memory" / "episodes"
+
+
+# Patterns that indicate voice/style directives
+# These must be direct feedback about Claude's voice/behavior
+DIRECTIVE_PATTERNS = [
+    # Relaxation/formality (direct feedback to Claude)
+    (r"you can (?:relax|loosen up|chill|be more casual)", "casual_tone"),
+    (r"(?:you )?(?:could be |should be )?(?:less formal|more casual)", "casual_tone"),
+    (r"(?:don't|stop) be(?:ing)? so formal", "casual_tone"),
+    (r"you (?:feel|sound|seem) (?:a bit |a little )?(?:stiff|formal|rigid)", "casual_tone"),
+
+    # Verbosity (direct feedback to Claude)
+    (r"(?:use )?(?:less|fewer) words", "brevity"),
+    (r"(?:be|you could be) (?:more )?(?:brief|concise|succinct)", "brevity"),
+    (r"(?:don't|stop) over[-\s]?explain(?:ing)?", "brevity"),
+    (r"(?:you(?:'re| are) )?(?:being )?(?:too )?verbose", "brevity"),
+
+    # Hedging/confidence (direct feedback to Claude)
+    (r"(?:don't|stop) hedg(?:e|ing) so much", "less_hedging"),
+    (r"(?:use )?(?:less|fewer) disclaimers", "less_hedging"),
+
+    # Emoji/expression (direct feedback to Claude)
+    (r"(?:don't|stop) (?:use|using) (?:so many )?emojis?", "no_emoji"),
+    (r"(?:use )?(?:less|fewer) emojis?", "no_emoji"),
+
+    # Check-ins (direct feedback to Claude)
+    (r"(?:don't|stop) (?:check(?:ing)? in|asking if I'm okay) so (?:much|often)", "fewer_checkins"),
+    (r"performative check-?ins?", "fewer_checkins"),
+
+    # Casing (direct feedback to Claude)
+    (r"(?:you (?:can|should) )?(?:use )?lowercase", "lowercase"),
+    (r"(?:don't|stop) capitaliz(?:e|ing)", "lowercase"),
+
+    # Tone adjustments (must be directed at Claude)
+    (r"(?:you could |you should |please )?tone (?:it )?down", "tone_down"),
+    (r"I(?:'d| would) (?:appreciate|prefer) (?:if you )?(?:tone (?:it )?down|were? less)", "tone_down"),
+
+    # Explicit preference about Claude's behavior
+    (r"I (?:prefer|like) (?:when|it when) you ([^.!?]{5,40})", "preference"),
+    (r"(?:don't|stop) (?:being|doing|saying) ([^.!?]{5,30}) so much", "reduce_behavior"),
+]
+
+
+def load_voice_state() -> dict[str, Any]:
+    """Load current voice state or create default."""
+    if VOICE_STATE_FILE.exists():
+        return json.loads(VOICE_STATE_FILE.read_text())
+    return {"updated": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}
+
+
+def get_recent_files(directory: Path, days: int) -> list[Path]:
+    """Get episode files from the last N days."""
+    if not directory.exists():
+        return []
+
+    cutoff = datetime.now() - timedelta(days=days)
+    files = []
+
+    for f in directory.glob("*.md"):
+        try:
+            date_str = f.stem
+            file_date = datetime.strptime(date_str, "%Y-%m-%d")
+            if file_date >= cutoff:
+                files.append(f)
+        except ValueError:
+            continue
+
+    return sorted(files, reverse=True)
+
+
+def extract_e_messages(content: str) -> list[dict[str, Any]]:
+    """Extract É's messages from episode content."""
+    messages = []
+    lines = content.split("\n")
+
+    current_message = None
+    in_e_block = False
+
+    for i, line in enumerate(lines):
+        # Start of É message
+        if line.startswith("**É:**"):
+            if current_message:
+                messages.append(current_message)
+            current_message = {
+                "text": line.replace("**É:**", "").strip(),
+                "line_num": i
+            }
+            in_e_block = True
+
+        # Continuation of É message (lines starting with ---)
+        elif in_e_block and line.strip() == "---":
+            # This is a separator, next line might be continuation
+            continue
+
+        elif in_e_block and current_message:
+            # Check if this is a continuation (not a new speaker/section)
+            if line.startswith("**") and not line.startswith("**É:**"):
+                # New speaker, end É block
+                in_e_block = False
+                if current_message:
+                    messages.append(current_message)
+                    current_message = None
+            elif line.startswith("##"):
+                # New section
+                in_e_block = False
+                if current_message:
+                    messages.append(current_message)
+                    current_message = None
+            elif line.strip() and not line.startswith("["):
+                # Continuation text
+                current_message["text"] += " " + line.strip()
+
+    if current_message:
+        messages.append(current_message)
+
+    return messages
+
+
+def find_directives(content: str, date: str) -> list[dict[str, Any]]:
+    """Find voice directives in episode content."""
+    directives = []
+    e_messages = extract_e_messages(content)
+
+    for msg in e_messages:
+        text = msg["text"]
+        text_lower = text.lower()
+
+        for pattern, category in DIRECTIVE_PATTERNS:
+            match = re.search(pattern, text_lower)
+            if match:
+                # Extract the directive
+                directive = {
+                    "date": date,
+                    "source": text[:100],  # Truncate source
+                    "category": category,
+                    "match": match.group(0)
+                }
+
+                # Generate actionable directive text
+                if category == "casual_tone":
+                    directive["directive"] = "Use casual tone and casing in messages"
+                elif category == "brevity":
+                    directive["directive"] = "Keep responses concise; avoid over-explaining"
+                elif category == "less_hedging":
+                    directive["directive"] = "Reduce hedging and disclaimers"
+                elif category == "directness":
+                    directive["directive"] = "Be more direct and confident"
+                elif category == "no_emoji":
+                    directive["directive"] = "Minimize emoji usage"
+                elif category == "use_emoji":
+                    directive["directive"] = "Use emojis for warmth"
+                elif category == "fewer_checkins":
+                    directive["directive"] = "Reduce performative check-ins"
+                elif category == "lowercase":
+                    directive["directive"] = "Use lowercase in casual messages"
+                elif category == "tone_down":
+                    directive["directive"] = "Tone down intensity"
+                elif category == "tone_down_specific":
+                    specific = match.group(1) if match.lastindex else "intensity"
+                    directive["directive"] = f"Reduce {specific}"
+                elif category == "preference":
+                    pref = match.group(1) if match.lastindex else "unknown"
+                    directive["directive"] = f"Preference: {pref}"
+                elif category == "reduce_behavior":
+                    behavior = match.group(1) if match.lastindex else "unknown"
+                    directive["directive"] = f"Reduce: {behavior}"
+                else:
+                    directive["directive"] = f"Style adjustment: {category}"
+
+                directives.append(directive)
+                break  # Only one directive per message
+
+    return directives
+
+
+def mine_directives(days: int = 7) -> dict[str, Any]:
+    """Mine voice directives from recent episodes."""
+    episode_files = get_recent_files(EPISODES_DIR, days)
+
+    all_directives = []
+    for f in episode_files:
+        content = f.read_text()
+        directives = find_directives(content, f.stem)
+        all_directives.extend(directives)
+
+    # Dedupe by directive text, keeping most recent
+    seen = {}
+    for d in reversed(all_directives):  # Reverse to keep most recent
+        key = d["directive"]
+        if key not in seen:
+            seen[key] = d
+
+    unique_directives = list(reversed(seen.values()))
+
+    return {
+        "directives": unique_directives,
+        "total_found": len(all_directives),
+        "unique_count": len(unique_directives),
+        "episodes_analyzed": len(episode_files),
+    }
+
+
+def update_voice_state(mined: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
+    """Update voice-state.json with mined directives."""
+    state = load_voice_state()
+
+    # Ensure style_directives section exists
+    if "style_directives" not in state:
+        state["style_directives"] = {"explicit": []}
+
+    # Get existing directives
+    existing = state["style_directives"].get("explicit", [])
+    existing_texts = {d["directive"] for d in existing}
+
+    # Add new directives that aren't duplicates
+    for d in mined["directives"]:
+        if d["directive"] not in existing_texts:
+            existing.append(d)
+            existing_texts.add(d["directive"])
+
+    state["style_directives"]["explicit"] = existing
+    state["style_directives"]["last_mined"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    # Update timestamp
+    state["updated"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    if not dry_run:
+        VOICE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        VOICE_STATE_FILE.write_text(json.dumps(state, indent=2))
+
+    return state
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Extract voice directives from episodes")
+    parser.add_argument("--days", type=int, default=7, help="Days to look back")
+    parser.add_argument("--dry-run", action="store_true", help="Print results without updating")
+    parser.add_argument("--json", action="store_true", help="Output as JSON")
+
+    args = parser.parse_args()
+
+    # Mine directives
+    mined = mine_directives(days=args.days)
+
+    if args.json:
+        print(json.dumps(mined, indent=2))
+        return
+
+    # Update state
+    state = update_voice_state(mined, dry_run=args.dry_run)
+
+    # Report
+    print(f"Analyzed {mined['episodes_analyzed']} episodes")
+    print(f"Found {mined['total_found']} directives ({mined['unique_count']} unique)")
+
+    if mined["directives"]:
+        print(f"\nDirectives:")
+        for d in mined["directives"]:
+            print(f"  [{d['date']}] {d['directive']}")
+            print(f"    Source: \"{d['source'][:50]}...\"")
+
+    if args.dry_run:
+        print("\n[DRY RUN - no changes written]")
+    else:
+        print(f"\nUpdated {VOICE_STATE_FILE}")
+
+
+if __name__ == "__main__":
+    main()

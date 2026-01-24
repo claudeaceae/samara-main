@@ -14,7 +14,7 @@ set -e
 
 REPO_SCRIPTS="$HOME/Developer/samara-main/scripts"
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-RUNTIME_SCRIPTS="$MIND_PATH/bin"
+RUNTIME_SCRIPTS="$MIND_PATH/system/bin"
 
 MODE="${1:---dry-run}"
 

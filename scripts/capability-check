@@ -15,11 +15,17 @@ MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 OSASCRIPT_BIN="${OSASCRIPT_BIN:-osascript}"
 CLAUDE_PATH="${CLAUDE_PATH:-$HOME/.local/bin/claude}"
 
-# Load config (with fallbacks)
-source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
-    COLLABORATOR_PHONE="+15206099095"
+# Load config (required)
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
+    echo "Error: config.sh not found" >&2
+    exit 1
 }
-LOG_FILE="$MIND_PATH/logs/capability-check.log"
+
+if [ -z "$COLLABORATOR_PHONE" ]; then
+    echo "Error: COLLABORATOR_PHONE not set in config.json" >&2
+    exit 1
+fi
+LOG_FILE="$MIND_PATH/system/logs/capability-check.log"
 PASSED=0
 FAILED=0
 CRITICAL_FAILURES=""
@@ -101,8 +107,8 @@ WARNINGS=0
 # === MEMORY SYSTEM ===
 log "--- Memory System ---"
 
-check "Identity file exists" "test -f $MIND_PATH/identity.md"
-check "Goals file exists" "test -f $MIND_PATH/goals.md"
+check "Identity file exists" "test -f $MIND_PATH/self/identity.md"
+check "Goals file exists" "test -f $MIND_PATH/self/goals.md"
 check "Episode dir exists" "test -d $MIND_PATH/memory/episodes"
 
 # === APPLE APPS (Read-only) ===
@@ -122,7 +128,7 @@ log "--- Filesystem ---"
 check "Home dir readable" "ls ~ > /dev/null"
 check "Developer dir exists" "test -d ~/Developer"
 check "Samara project exists" "test -d ~/Developer/Samara"
-check "Scripts executable" "test -x $MIND_PATH/bin/wake"
+check "Scripts executable" "test -x $MIND_PATH/system/bin/wake"
 
 # === NETWORK ===
 log "--- Network ---"
@@ -139,13 +145,13 @@ check "Messages DB exists" "test -f ~/Library/Messages/chat.db"
 
 # Check FDA by looking at Samara logs for database access
 # This catches when Samara is running but can't read Messages
-critical_check "Samara has FDA (Messages DB access)" "! tail -20 $MIND_PATH/logs/samara.log 2>/dev/null | grep -q 'FATAL.*authorization denied'"
+critical_check "Samara has FDA (Messages DB access)" "! tail -20 $MIND_PATH/system/logs/samara.log 2>/dev/null | grep -q 'FATAL.*authorization denied'"
 check "Samara lock file healthy" "test -f $MIND_PATH/samara.lock && lsof $MIND_PATH/samara.lock > /dev/null 2>&1"
 
 # === SAMARA UNIT TESTS ===
 log "--- Samara Unit Tests ---"
 # Run with --quick to skip if tested recently (saves time during frequent wake cycles)
-check "Samara unit tests" "$MIND_PATH/bin/test-samara --quick 2>&1 | tail -1 | grep -q 'passed\|Skipping'"
+check "Samara unit tests" "$MIND_PATH/system/bin/test-samara --quick 2>&1 | tail -1 | grep -q 'passed\|Skipping'"
 
 # === CLAUDE CLI ===
 log "--- Claude CLI ---"
@@ -158,17 +164,17 @@ critical_check "Claude CLI responds" "timeout 60 $CLAUDE_PATH -p 'respond with j
 # === REQUIRED SCRIPTS ===
 log "--- Required Scripts ---"
 
-check "wake script" "test -x $MIND_PATH/bin/wake"
-check "dream script" "test -x $MIND_PATH/bin/dream"
-critical_check "message-e script" "test -x $MIND_PATH/bin/message-e"
-critical_check "distill-session script" "test -x $MIND_PATH/bin/distill-session"
-check "send-image-e script" "test -x $MIND_PATH/bin/send-image-e"
-check "send-attachment script" "test -x $MIND_PATH/bin/send-attachment"
-check "screenshot-e script" "test -x $MIND_PATH/bin/screenshot-e"
-check "bluesky-post script" "test -x $MIND_PATH/bin/bluesky-post"
-check "bluesky-check script" "test -x $MIND_PATH/bin/bluesky-check"
-check "log-session script" "test -x $MIND_PATH/bin/log-session"
-check "distill-claude-session script" "test -x $MIND_PATH/bin/distill-claude-session"
+check "wake script" "test -x $MIND_PATH/system/bin/wake"
+check "dream script" "test -x $MIND_PATH/system/bin/dream"
+critical_check "message-e script" "test -x $MIND_PATH/system/bin/message-e"
+critical_check "distill-session script" "test -x $MIND_PATH/system/bin/distill-session"
+check "send-image-e script" "test -x $MIND_PATH/system/bin/send-image-e"
+check "send-attachment script" "test -x $MIND_PATH/system/bin/send-attachment"
+check "screenshot-e script" "test -x $MIND_PATH/system/bin/screenshot-e"
+check "bluesky-post script" "test -x $MIND_PATH/system/bin/bluesky-post"
+check "bluesky-check script" "test -x $MIND_PATH/system/bin/bluesky-check"
+check "log-session script" "test -x $MIND_PATH/system/bin/log-session"
+check "distill-claude-session script" "test -x $MIND_PATH/system/bin/distill-claude-session"
 
 # === MESSAGE SENDING (dry run) ===
 log "--- Message Sending ---"
@@ -180,13 +186,13 @@ check "Pictures staging dir" "mkdir -p $HOME/Pictures/.imessage-send && test -d 
 # === LOCATION ===
 log "--- Location ---"
 
-check "Location script exists" "test -x $MIND_PATH/bin/get-e-location"
-check "Location note readable" "$MIND_PATH/bin/get-e-location 2>/dev/null | head -1"
+check "Location script exists" "test -x $MIND_PATH/system/bin/get-e-location"
+check "Location note readable" "$MIND_PATH/system/bin/get-e-location 2>/dev/null | head -1"
 
 # === SHARED NOTES ===
 log "--- Shared Notes ---"
 
-check "Scratchpad readable" "$MIND_PATH/bin/check-scratchpad 2>/dev/null | head -1"
+check "Scratchpad readable" "$MIND_PATH/system/bin/check-scratchpad 2>/dev/null | head -1"
 
 # === Summary ===
 log "--- Summary ---"

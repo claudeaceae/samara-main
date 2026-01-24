@@ -15,19 +15,19 @@ Verify if a specific action is possible and diagnose any blockers.
 
 ## Capability Inventory
 
-Full capabilities documentation: `~/.claude-mind/capabilities/inventory.md`
+Full capabilities documentation: `~/.claude-mind/self/capabilities/inventory.md`
 
 ### Access Patterns
 
 ```bash
 # Read full inventory (comprehensive reference)
-cat ~/.claude-mind/capabilities/inventory.md
+cat ~/.claude-mind/self/capabilities/inventory.md
 
 # Search for specific capability
-grep -ni "search term" ~/.claude-mind/capabilities/inventory.md
+grep -ni "search term" ~/.claude-mind/self/capabilities/inventory.md
 
 # List all sections
-grep "^## " ~/.claude-mind/capabilities/inventory.md
+grep "^## " ~/.claude-mind/self/capabilities/inventory.md
 ```
 
 ## Quick Capability Matrix
@@ -53,7 +53,7 @@ grep "^## " ~/.claude-mind/capabilities/inventory.md
 ### Messaging
 ```bash
 pgrep -q Samara && echo "Samara: OK" || echo "Samara: Not running"
-~/.claude-mind/bin/message "test" --dry-run 2>/dev/null
+~/.claude-mind/system/bin/message "test" --dry-run 2>/dev/null
 ```
 
 ### Calendar
@@ -78,7 +78,7 @@ osascript -e 'tell application "Mail" to get name of first account' 2>&1
 
 ### Bluesky
 ```bash
-grep -q "bluesky" ~/.claude-mind/config.json && echo "Bluesky: Configured" || echo "Bluesky: Not configured"
+grep -q "bluesky" ~/.claude-mind/system/config.json && echo "Bluesky: Configured" || echo "Bluesky: Not configured"
 ```
 
 ### Full Disk Access

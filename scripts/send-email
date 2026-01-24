@@ -8,8 +8,8 @@
 set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-CONFIG_FILE="$MIND_PATH/config.json"
-LOG_FILE="$MIND_PATH/logs/email.log"
+CONFIG_FILE="$MIND_PATH/system/config.json"
+LOG_FILE="$MIND_PATH/system/logs/email.log"
 
 log() {
     mkdir -p "$(dirname "$LOG_FILE")"

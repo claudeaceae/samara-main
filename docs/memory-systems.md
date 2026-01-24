@@ -280,3 +280,80 @@ The 3 AM dream cycle rebuilds/syncs all memory indexes:
 - `chroma-rebuild` — Sync Chroma vector database (curated memory)
 - `memory-index rebuild` — Sync SQLite FTS5 index (curated memory)
 - `archive-index sync-recent` — Incremental sync of transcript archive (last 7 days)
+
+---
+
+## Appendix: Full Directory Structure
+
+```
+~/.claude-mind/
+├── .claude/ → repo/.claude/ # Symlink for hooks, agents, skills
+├── .venv/                   # Python virtual environment
+├── projects.md              # What am I working on (bridge document)
+│
+├── self/                    # WHO I AM — Identity and capabilities
+│   ├── identity.md          # Core self-model
+│   ├── goals.md             # North stars and direction
+│   ├── ritual.md            # Time-contextual guidance
+│   ├── capabilities/        # What I can do
+│   │   └── inventory.md
+│   ├── credentials/         # API keys, avatar images
+│   │   ├── avatar-ref.png
+│   │   └── mirror-refs/
+│   └── media/               # Voice recordings, images
+│
+├── memory/                  # WHAT I KNOW — All accumulated knowledge
+│   ├── episodes/            # Daily logs (YYYY-MM-DD.md)
+│   ├── reflections/         # Dream outputs
+│   ├── people/              # Rich person-modeling
+│   │   ├── {name}/
+│   │   │   ├── profile.md
+│   │   │   └── artifacts/
+│   │   └── README.md
+│   ├── learnings.md
+│   ├── observations.md
+│   ├── questions.md
+│   ├── decisions.md
+│   ├── roundups/            # Weekly/monthly summaries
+│   ├── semantic/            # FTS5 keyword search
+│   │   └── memory.db
+│   ├── chroma/              # Vector embeddings
+│   ├── stream/              # Unified event stream
+│   │   ├── daily/
+│   │   └── distilled-index.jsonl
+│   ├── sessions/            # Claude Code session state
+│   └── archive/             # Historical transcripts
+│
+├── state/                   # WHAT'S HAPPENING NOW — Runtime state
+│   ├── services/            # Service state tracking
+│   │   ├── bluesky-state.json
+│   │   ├── github-seen-ids.json
+│   │   └── mail-seen-ids.json
+│   ├── plans/               # Active implementation plans
+│   │   └── archive/
+│   ├── handoffs/            # Session continuity documents
+│   ├── triggers/            # Context trigger config
+│   ├── projects/            # Project-specific state
+│   ├── proactive-queue/     # Outgoing messages
+│   ├── location.json        # Current location
+│   ├── hot-digest.md        # Cross-surface context
+│   └── message-queue.json   # Pending iMessage
+│
+└── system/                  # HOW IT RUNS — Infrastructure
+    ├── config.json          # Main configuration
+    ├── config/              # Additional configs
+    ├── bin/ → repo/scripts/ # Symlinked scripts (100+)
+    ├── lib/                 # Python utilities
+    ├── instructions/        # Prompt templates
+    ├── launchd/             # Service scheduling
+    ├── senses/              # Incoming sense events
+    ├── logs/                # Service logs
+    ├── cache/               # Ephemeral caches
+    └── skills-manifest.json # Skill registry
+```
+
+**Domain rationale:**
+- **self/** — Portable identity that defines "who Claude is"
+- **memory/** — Comprehensive knowledge including search indices
+- **state/** — Volatile runtime state, instance-specific
+- **system/** — Infrastructure plumbing, rarely touched

@@ -15,8 +15,9 @@ set -e
 # Load config
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 
-source "$MIND_PATH/lib/config.sh" 2>/dev/null || {
-    COLLABORATOR_PHONE="+15206099095"
+source "$MIND_PATH/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
+    echo "Error: config.sh not found" >&2
+    exit 1
 }
 
 # Paths for Samara capture mechanism
@@ -181,7 +182,7 @@ echo "$OUTPUT"
 
 # Send if requested
 if [ "$SEND" = true ]; then
-    "$MIND_PATH/bin/send-image" "$OUTPUT" "Webcam capture"
+    "$MIND_PATH/system/bin/send-image" "$OUTPUT" "Webcam capture"
     echo "Sent to collaborator"
 fi
 
