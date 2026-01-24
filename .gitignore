@@ -43,6 +43,7 @@ node_modules/
 # Local config (contains secrets or organism-specific permissions)
 *.local.md
 .claude/settings.local.json
+evolution.md
 # Build artifacts
 .coverage
 .coverage-node/
