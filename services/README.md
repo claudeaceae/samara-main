@@ -9,7 +9,7 @@ Python services that extend the organism's capabilities through background polli
 | Service | Type | Port | Schedule | Purpose |
 |---------|------|------|----------|---------|
 | `location-receiver` | HTTP | 8081 | Always | Receives GPS from Overland app |
-| `webhook-receiver` | HTTP | 8082 | Always | Receives GitHub/IFTTT webhooks |
+| `webhook-receiver` | HTTP | 8082 | Always | Receives GitHub/IFTTT/browser webhooks |
 | `mcp-memory-bridge` | HTTP | 8765 | Always | Shared memory for Claude Desktop/Web |
 | `bluesky-watcher` | Poller | - | 15 min | Polls Bluesky notifications |
 | `github-watcher` | Poller | - | 15 min | Polls GitHub notifications |
@@ -17,6 +17,12 @@ Python services that extend the organism's capabilities through background polli
 | `wallet-watcher` | Poller | - | 15 min | Monitors crypto wallet balances |
 | `meeting-check` | Poller | - | 15 min | Detects meetings for prep/debrief |
 | `wake-scheduler` | CLI | - | 15 min | Calculates adaptive wake times |
+
+**Client-Side Services** (run on collaborator's devices):
+
+| Service | Location | Schedule | Purpose |
+|---------|----------|----------|---------|
+| `browser-history-exporter` | É's Mac | 15 min | Exports browser history to Claude |
 
 ---
 
@@ -45,6 +51,43 @@ MCP server that allows Claude Desktop/Web to share memory with Claude Code.
 
 - Exposes tools: `log_exchange`, `add_learning`, `search_memory`, etc.
 - Can be exposed via Cloudflare Tunnel for remote access
+
+---
+
+## Client-Side Services
+
+These run on the collaborator's devices and push data to Claude's Mac.
+
+### browser-history-exporter (Client-Side)
+
+Runs on É's Mac, exports browser history to Claude via webhook.
+
+- Reads from Chrome/Dia, Safari, Arc databases
+- Tracks incremental changes (doesn't re-send old history)
+- Deduplicates across browsers
+- POSTs to `webhook-receiver` at `/webhook/browser_history`
+
+**Installation on É's Mac:**
+```bash
+cd clients/browser-history-exporter
+./install.sh
+# Edit ~/.claude-client/config.json with webhook URL and secret
+```
+
+**Server-side setup (Claude's Mac):**
+```bash
+# Add to ~/.claude-mind/self/credentials/webhook-secrets.json:
+{
+  "sources": {
+    "browser_history": {
+      "secret": "your-shared-secret",
+      "rate_limit": "60/minute"
+    }
+  }
+}
+```
+
+See `clients/browser-history-exporter/README.md` for details.
 
 ---
 
@@ -187,5 +230,12 @@ services/
 └── x-watcher/
     ├── server.py
     ├── *.plist.template
+    └── README.md
+
+clients/                      # Services that run on collaborator's devices
+└── browser-history-exporter/
+    ├── exporter.py           # Main script
+    ├── install.sh            # Installer
+    ├── *.plist               # launchd template
     └── README.md
 ```

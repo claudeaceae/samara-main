@@ -19,24 +19,25 @@
 set -eo pipefail
 
 MIND_PATH="${MIND_PATH:-$HOME/.claude-mind}"
-CONFIG_FILE="$MIND_PATH/system/config.json"
+CONFIG_FILE="$MIND_PATH/config.json"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 
 # All known services
-SERVICES="x bluesky github wallet meeting webhook location"
+SERVICES="x bluesky github wallet meeting webhook location browserHistory"
 
 # Get launchd agents for a service
 get_agents() {
     local service="$1"
     case "$service" in
-        x)        echo "com.claude.x-watcher com.claude.x-engage" ;;
-        bluesky)  echo "com.claude.bluesky-watcher com.claude.bluesky-engage" ;;
-        wallet)   echo "com.claude.wallet-watcher" ;;
-        meeting)  echo "com.claude.meeting-check" ;;
-        github)   echo "com.claude.github-watcher" ;;
-        webhook)  echo "com.claude.webhook-receiver" ;;
-        location) echo "co.organelle.location-receiver" ;;
-        *)        echo "" ;;
+        x)              echo "com.claude.x-watcher com.claude.x-engage" ;;
+        bluesky)        echo "com.claude.bluesky-watcher com.claude.bluesky-engage" ;;
+        wallet)         echo "com.claude.wallet-watcher" ;;
+        meeting)        echo "com.claude.meeting-check" ;;
+        github)         echo "com.claude.github-watcher" ;;
+        webhook)        echo "com.claude.webhook-receiver" ;;
+        location)       echo "co.organelle.location-receiver" ;;
+        browserHistory) echo "" ;;  # Client-side only (runs on É's Mac)
+        *)              echo "" ;;
     esac
 }
 

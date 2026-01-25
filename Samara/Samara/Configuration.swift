@@ -170,6 +170,7 @@ struct Configuration: Codable {
         let meeting: Bool?
         let webhook: Bool?
         let location: Bool?
+        let browserHistory: Bool?
 
         /// Check if a service is enabled (defaults to true if not specified)
         func isEnabled(_ service: String) -> Bool {
@@ -181,6 +182,7 @@ struct Configuration: Codable {
             case "meeting", "meeting_prep", "meeting_debrief": return meeting ?? true
             case "webhook": return webhook ?? true
             case "location": return location ?? true
+            case "browserHistory", "browser_history": return browserHistory ?? true
             default: return true  // Unknown services default to enabled
             }
         }
@@ -192,7 +194,8 @@ struct Configuration: Codable {
             wallet: true,
             meeting: true,
             webhook: true,
-            location: true
+            location: true,
+            browserHistory: true
         )
     }
 

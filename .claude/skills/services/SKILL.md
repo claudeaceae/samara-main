@@ -23,12 +23,13 @@ Manage which services are active in the Samara organism. Services can be toggled
 | `meeting` | Calendar meeting prep/debrief | meeting-check |
 | `webhook` | External webhook events | webhook-receiver |
 | `location` | Location tracking | location-receiver |
+| `browserHistory` | Browser history from É's devices | (client-side) |
 
 ## How It Works
 
 The service toggle system has three layers:
 
-### 1. Config (`~/.claude-mind/system/config.json`)
+### 1. Config (`~/.claude-mind/config.json`)
 
 ```json
 {
@@ -39,7 +40,8 @@ The service toggle system has three layers:
     "wallet": true,
     "meeting": true,
     "webhook": true,
-    "location": true
+    "location": true,
+    "browserHistory": true
   }
 }
 ```
@@ -107,7 +109,7 @@ Or use the update-samara script if you also have code changes.
 
 | File | Purpose |
 |------|---------|
-| `~/.claude-mind/system/config.json` | Runtime config with `services` section |
+| `~/.claude-mind/config.json` | Runtime config with `services` section |
 | `Samara/Samara/Configuration.swift` | `ServicesConfig` struct and `isEnabled()` method |
 | `Samara/Samara/Mind/SenseRouter.swift` | Checks config before registering handlers |
 | `scripts/service-toggle` | CLI for toggling services |

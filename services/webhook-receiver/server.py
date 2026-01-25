@@ -194,6 +194,138 @@ def generate_prompt_hint(source_id: str, data: dict) -> str:
     return f"Webhook from {source_id}"
 
 
+# =============================================================================
+# Browser History Webhook Handler (MUST be defined before generic webhook)
+# =============================================================================
+
+def create_browser_history_event(data: dict) -> str:
+    """Create a sense event for browser history data."""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    filename = f"browser-history-{timestamp}.event.json"
+
+    visits = data.get("visits", [])
+    domains = data.get("domains_summary", {})
+    device = data.get("device", "unknown")
+
+    # Determine priority based on browsing patterns
+    priority = "background"
+    suggested_prompt = None
+
+    if domains:
+        # Check for concentrated research (5+ visits to same domain)
+        max_visits = max(domains.values()) if domains else 0
+        top_domains = sorted(domains.items(), key=lambda x: -x[1])[:3]
+
+        if max_visits >= 5:
+            priority = "normal"
+            top_domain = top_domains[0][0] if top_domains else "unknown"
+            suggested_prompt = (
+                f"Browsing pattern detected: {max_visits} visits to {top_domain}. "
+                f"Consider asking what they're researching."
+            )
+
+        # Format domain summary for context
+        domain_summary = ", ".join(f"{d}({c})" for d, c in top_domains[:5])
+    else:
+        domain_summary = "no domains"
+
+    event = {
+        "sense": "browser_history",
+        "timestamp": datetime.now().isoformat(),
+        "priority": priority,
+        "data": {
+            "type": "browsing_update",
+            "device": device,
+            "visit_count": len(visits),
+            "visits": visits[:50],  # Limit to 50 most recent
+            "domains_summary": domains,
+        },
+        "context": {
+            "suggested_prompt": suggested_prompt or f"Browser update: {len(visits)} visits. Top: {domain_summary}",
+            "suppress_response": priority == "background",  # Don't message for background events
+        }
+    }
+
+    event_path = SENSES_DIR / filename
+    event_path.write_text(json.dumps(event, indent=2))
+
+    # Also append to history file for longer-term analysis
+    history_file = STATE_DIR / "browser-history.jsonl"
+    with history_file.open("a") as f:
+        for visit in visits:
+            visit_record = {
+                "timestamp": visit.get("timestamp"),
+                "url": visit.get("url"),
+                "title": visit.get("title"),
+                "browser": visit.get("browser"),
+                "device": device,
+            }
+            f.write(json.dumps(visit_record) + "\n")
+
+    return filename
+
+
+@app.post("/webhook/browser_history")
+async def receive_browser_history(
+    request: Request,
+    x_hub_signature_256: Optional[str] = Header(None),
+):
+    """
+    Receive browser history from client exporter.
+
+    This is a dedicated endpoint for browser history that creates
+    browser_history sense events instead of generic webhook events.
+    """
+    config = load_config()
+
+    # Check if browser_history source is registered
+    source_config = config.get("sources", {}).get("browser_history")
+    if not source_config:
+        # Allow with warning if not explicitly configured
+        source_config = {"secret": "", "rate_limit": "60/minute"}
+
+    # Check rate limit
+    rate_limit = source_config.get("rate_limit", "60/minute")
+    if not check_rate_limit("browser_history", rate_limit):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+    # Get request body
+    body = await request.body()
+
+    # Verify authentication if secret is configured
+    secret = source_config.get("secret", "")
+    if secret and secret != "change-me":
+        if x_hub_signature_256:
+            if not verify_signature(body, x_hub_signature_256, secret):
+                raise HTTPException(status_code=401, detail="Invalid signature")
+        else:
+            raise HTTPException(status_code=401, detail="Missing authentication")
+
+    # Parse body
+    try:
+        data = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    # Validate expected fields
+    if "visits" not in data:
+        raise HTTPException(status_code=400, detail="Missing 'visits' field")
+
+    # Create browser history sense event
+    filename = create_browser_history_event(data)
+
+    return JSONResponse({
+        "status": "accepted",
+        "event_file": filename,
+        "visits_received": len(data.get("visits", [])),
+        "source": "browser_history"
+    })
+
+
+# =============================================================================
+# Generic Webhook Handler
+# =============================================================================
+
 @app.post("/webhook/{source_id}")
 async def receive_webhook(
     source_id: str,
@@ -270,7 +402,7 @@ async def status():
     return {
         "registered_sources": list(config.get("sources", {}).keys()),
         "senses_dir": str(SENSES_DIR),
-        "recent_events": len(list(SENSES_DIR.glob("webhook-*.event.json")))
+        "recent_events": len(list(SENSES_DIR.glob("*.event.json")))
     }
 
 

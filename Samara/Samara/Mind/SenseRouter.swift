@@ -308,6 +308,13 @@ final class SenseRouter {
                 self?.handleWalletEvent(event)
             }
         }
+
+        // Browser history events (browsing patterns)
+        if services.isEnabled("browserHistory") {
+            handlers["browser_history"] = { [weak self] event in
+                self?.handleBrowserHistoryEvent(event)
+            }
+        }
     }
 
     private func handleLocationEvent(_ event: SenseEvent) {
@@ -625,6 +632,140 @@ final class SenseRouter {
             - Keep response brief - this is an FYI notification
             - Don't speculate about source unless obvious from data
             """
+    }
+
+    // MARK: - Browser History Handler
+
+    private func handleBrowserHistoryEvent(_ event: SenseEvent) {
+        let visitCount = event.getInt("visit_count") ?? 0
+        let device = event.getString("device") ?? "unknown"
+
+        log("Browser history event: \(visitCount) visits from \(device)", level: .info, component: "SenseRouter")
+
+        // Always log to episode for context building
+        let eventDescription = formatEventForLogging(event)
+        episodeLogger.logSenseEvent(sense: event.sense, data: eventDescription)
+
+        // Check for interesting patterns that warrant Claude's attention
+        guard let domains = event.getDict("domains_summary") as? [String: Int] else {
+            log("No domains summary in browser history event", level: .debug, component: "SenseRouter")
+            return
+        }
+
+        let maxVisits = domains.values.max() ?? 0
+
+        // Only invoke Claude if concentrated browsing detected (5+ visits to same domain)
+        // or if the event explicitly requests it (priority != background)
+        if maxVisits >= 5 || event.priority != .background {
+            invokeBrowserHistoryClaude(event, domains: domains, maxVisits: maxVisits)
+        } else {
+            log("Browser history logged silently (no concentrated pattern)", level: .debug, component: "SenseRouter")
+        }
+    }
+
+    private func invokeBrowserHistoryClaude(_ event: SenseEvent, domains: [String: Int], maxVisits: Int) {
+        // Use smart context routing with minimal needs
+        var needs = contextRouter.analyzeEvent(event)
+
+        // Browser history primarily needs today's episode for context
+        needs.needsTodayEpisode = true
+
+        // Search for related past browsing context
+        let topDomains = domains.sorted { $0.value > $1.value }.prefix(3).map { $0.key }
+        if !topDomains.isEmpty {
+            needs.searchQueries.append(topDomains.joined(separator: " "))
+        }
+
+        let context = memoryContext.buildSmartContext(needs: needs)
+        let prompt = buildBrowserHistoryPrompt(for: event, domains: domains, maxVisits: maxVisits)
+
+        do {
+            let result = try invoker.invoke(
+                prompt: prompt,
+                context: context,
+                attachmentPaths: []
+            )
+
+            log("Browser history event processed: \(result.prefix(50))...", level: .debug, component: "SenseRouter")
+
+            // Only send to collaborator if Claude decides to (result contains message intent)
+            // Claude's response will include whether to message or just note
+            if shouldMessageCollaboratorFromResult(result) {
+                try messageBus.send(result, type: .senseEvent)
+            }
+
+            // Log to episode
+            let eventDescription = formatEventForLogging(event)
+            episodeLogger.logExchange(
+                from: "Sense:browser_history",
+                message: eventDescription,
+                response: result,
+                source: "Sense:\(event.sense)"
+            )
+
+        } catch {
+            log("Error processing browser history event: \(error)", level: .error, component: "SenseRouter")
+        }
+    }
+
+    private func buildBrowserHistoryPrompt(for event: SenseEvent, domains: [String: Int], maxVisits: Int) -> String {
+        let device = event.getString("device") ?? "unknown"
+        let visitCount = event.getInt("visit_count") ?? 0
+
+        // Format domain summary
+        let sortedDomains = domains.sorted { $0.value > $1.value }
+        let domainLines = sortedDomains.prefix(10).map { "  - \($0.key): \($0.value) visits" }
+
+        // Extract recent URLs for more context
+        var recentUrls: [String] = []
+        if let visits = event.getArray("visits") as? [[String: Any]] {
+            for visit in visits.prefix(10) {
+                if let url = visit["url"] as? String,
+                   let title = visit["title"] as? String {
+                    let shortUrl = url.count > 60 ? String(url.prefix(60)) + "..." : url
+                    recentUrls.append("  - \(title.isEmpty ? shortUrl : title)")
+                }
+            }
+        }
+
+        return """
+            \(collaboratorName)'s browser history was just synced from \(device).
+
+            ## Summary
+            - Total visits: \(visitCount)
+            - Highest concentration: \(maxVisits) visits to one domain
+
+            ## Top Domains
+            \(domainLines.joined(separator: "\n"))
+
+            ## Recent Pages
+            \(recentUrls.isEmpty ? "(no titles available)" : recentUrls.joined(separator: "\n"))
+
+            ## Your Task
+
+            Analyze this browsing pattern. You can:
+
+            1. **Notice patterns**: Are they researching something? Learning a new topic?
+               Troubleshooting an issue? Shopping for something?
+
+            2. **Optionally message**: If it seems like something worth mentioning
+               (active research, might need help, something interesting to discuss),
+               send a brief, natural message. Keep it casual - don't be intrusive.
+
+            3. **Or stay quiet**: If it's routine browsing (email, social media, news),
+               just acknowledge internally without messaging.
+
+            **Important**: Be genuinely helpful, not creepy. The goal is to be aware
+            of their context so you can be more helpful in conversations, not to surveil.
+
+            If you decide to message, output ONLY the message text.
+            If you decide not to message, output: [NOTED: brief internal observation]
+            """
+    }
+
+    private func shouldMessageCollaboratorFromResult(_ result: String) -> Bool {
+        // If Claude decided to just note it internally, don't send
+        return !result.hasPrefix("[NOTED:")
     }
 
     /// Extracts searchable text from social media interactions for semantic memory lookup
