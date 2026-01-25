@@ -36,7 +36,7 @@ class WebhookReceiverHttpTests(unittest.TestCase):
 
     def test_webhook_accepts_valid_secret(self):
         with load_service_module(WEBHOOK_PATH, env={"SAMARA_MIND_PATH": self.mind_path}) as webhook:
-            config_path = Path(self.mind_path) / "credentials" / "webhook-secrets.json"
+            config_path = Path(self.mind_path) / "self" / "credentials" / "webhook-secrets.json"
             config_path.parent.mkdir(parents=True, exist_ok=True)
             config_path.write_text(json.dumps({
                 "sources": {
@@ -58,7 +58,7 @@ class WebhookReceiverHttpTests(unittest.TestCase):
             payload = response.json()
             self.assertEqual(payload["status"], "accepted")
 
-            senses_dir = Path(self.mind_path) / "senses"
+            senses_dir = Path(self.mind_path) / "system" / "senses"
             events = list(senses_dir.glob("webhook-test-*.event.json"))
             self.assertTrue(events)
 
@@ -67,7 +67,7 @@ class WebhookReceiverHttpTests(unittest.TestCase):
 
     def test_webhook_rejects_missing_auth(self):
         with load_service_module(WEBHOOK_PATH, env={"SAMARA_MIND_PATH": self.mind_path}) as webhook:
-            config_path = Path(self.mind_path) / "credentials" / "webhook-secrets.json"
+            config_path = Path(self.mind_path) / "self" / "credentials" / "webhook-secrets.json"
             config_path.parent.mkdir(parents=True, exist_ok=True)
             config_path.write_text(json.dumps({
                 "sources": {

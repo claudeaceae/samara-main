@@ -51,7 +51,7 @@ class WebhookReceiverTests(unittest.TestCase):
     def test_load_config_creates_default_file(self):
         with load_service_module(WEBHOOK_PATH, env={"SAMARA_MIND_PATH": self.mind_path}, stubs=make_fastapi_stubs()) as webhook:
             config = webhook.load_config()
-            config_path = Path(self.mind_path) / "credentials" / "webhook-secrets.json"
+            config_path = Path(self.mind_path) / "self" / "credentials" / "webhook-secrets.json"
 
         self.assertTrue(config_path.exists())
         self.assertIn("test", config["sources"])
@@ -61,7 +61,7 @@ class WebhookReceiverTests(unittest.TestCase):
         with load_service_module(WEBHOOK_PATH, env={"SAMARA_MIND_PATH": self.mind_path}, stubs=make_fastapi_stubs()) as webhook:
             data = {"action": "opened", "repository": {"full_name": "octo/repo"}}
             filename = webhook.create_sense_event("github", data, {"x-test": "1", "content-type": "json"})
-            event_path = Path(self.mind_path) / "senses" / filename
+            event_path = Path(self.mind_path) / "system" / "senses" / filename
             event = json.loads(event_path.read_text())
 
         self.assertEqual(event["sense"], "webhook")
@@ -97,7 +97,7 @@ class WebhookReceiverTests(unittest.TestCase):
             self.assertIn("Webhook from custom", webhook.generate_prompt_hint("custom", {}))
 
     def test_load_config_reads_existing(self):
-        config_path = Path(self.mind_path) / "credentials" / "webhook-secrets.json"
+        config_path = Path(self.mind_path) / "self" / "credentials" / "webhook-secrets.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(json.dumps({"sources": {"custom": {"secret": "abc"}}}))
 
@@ -117,7 +117,7 @@ class WebhookReceiverTests(unittest.TestCase):
     def test_main_sets_config_path(self):
         stubs = make_fastapi_stubs()
         with load_service_module(WEBHOOK_PATH, env={"SAMARA_MIND_PATH": self.mind_path}, stubs=stubs) as webhook:
-            config_path = Path(self.mind_path) / "credentials" / "custom.json"
+            config_path = Path(self.mind_path) / "self" / "credentials" / "custom.json"
             args = ["server.py", "--port", "9090", "--host", "127.0.0.1", "--config", str(config_path)]
             with mock.patch.object(sys, "argv", args):
                 called = {}

@@ -62,7 +62,7 @@ fi
 echo -e "${GREEN}✓${NC} jq installed"
 
 # Clone the repo
-SAMARA_DIR="$HOME/Developer/samara"
+SAMARA_DIR="$HOME/Developer/samara-main"
 
 if [[ -d "$SAMARA_DIR" ]]; then
     echo -e "${GREEN}✓${NC} Samara directory exists at $SAMARA_DIR"
@@ -79,9 +79,15 @@ echo -e "${CYAN}╭────────────────────�
 echo -e "${CYAN}│        ${NC}Prerequisites complete!${CYAN}       │${NC}"
 echo -e "${CYAN}╰─────────────────────────────────────╯${NC}"
 echo ""
-echo "Launching the setup wizard..."
+echo "Choose your setup method:"
 echo ""
-
-# Run the CLI wizard
-cd "$SAMARA_DIR"
-npx create-samara
+echo -e "${GREEN}Option 1: Interactive wizard (recommended)${NC}"
+echo "  cd $SAMARA_DIR/create-samara && npm install && npm run build && node dist/index.js"
+echo ""
+echo -e "${GREEN}Option 2: Manual setup${NC}"
+echo "  1. cp $SAMARA_DIR/config.example.json $SAMARA_DIR/my-config.json"
+echo "  2. Edit my-config.json with your details"
+echo "  3. $SAMARA_DIR/birth.sh $SAMARA_DIR/my-config.json"
+echo ""
+echo "See $SAMARA_DIR/readme.md for full instructions."
+echo ""

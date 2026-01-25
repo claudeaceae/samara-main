@@ -247,7 +247,7 @@ class LocationReceiverTests(unittest.TestCase):
             with mock.patch.object(location.trip_segmenter, "process_location", return_value=trip):
                 handler.do_POST()
 
-            event_path = Path(self.mind_path) / "senses" / "location.event.json"
+            event_path = Path(self.mind_path) / "system" / "senses" / "location.event.json"
             self.assertTrue(event_path.exists())
 
             bad_handler = DummyHandler(b"{bad json}")

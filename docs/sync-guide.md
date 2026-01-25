@@ -20,7 +20,7 @@ The repo and runtime can drift apart:
 ### Scripts are symlinked from runtime to repo:
 
 ```
-~/.claude-mind/bin/wake → ~/Developer/samara-main/scripts/wake
+~/.claude-mind/system/bin/wake → ~/Developer/samara-main/scripts/wake
 ```
 
 This means:
@@ -64,7 +64,7 @@ This means:
 │  │   ├── skills/     ←──┼──── ~/.claude/skills/* (global)   │   │
 │  │   └── settings.json  └──── ~/.claude-mind/.claude (runtime)│  │
 │  │                                                           │   │
-│  │ scripts/          ←────── ~/.claude-mind/bin/* (runtime)  │   │
+│  │ scripts/          ←────── ~/.claude-mind/system/bin/* (runtime) │
 │  │ CLAUDE.md         ←────── ~/.claude-mind/CLAUDE.md        │   │
 │  └──────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
@@ -135,7 +135,7 @@ This means:
 
 1. Create script in repo: `~/Developer/samara-main/scripts/my-script`
 2. Make executable: `chmod +x ~/Developer/samara-main/scripts/my-script`
-3. Create symlink: `ln -s ~/Developer/samara-main/scripts/my-script ~/.claude-mind/bin/`
+3. Create symlink: `ln -s ~/Developer/samara-main/scripts/my-script ~/.claude-mind/system/bin/`
    - Or run: `symlink-scripts --apply`
 
 ---
@@ -147,7 +147,7 @@ This means:
 vim ~/Developer/samara-main/scripts/wake
 
 # Test it
-~/.claude-mind/bin/wake
+~/.claude-mind/system/bin/wake
 
 # Commit when satisfied
 cd ~/Developer/samara-main
@@ -163,14 +163,14 @@ If wake cycles or `/sync` report drift:
 
 ```bash
 # See what's different
-~/.claude-mind/bin/sync-organism
+~/.claude-mind/system/bin/sync-organism
 
 # If scripts differ, sync runtime → repo
-cp ~/.claude-mind/bin/SCRIPT ~/Developer/samara-main/scripts/
+cp ~/.claude-mind/system/bin/SCRIPT ~/Developer/samara-main/scripts/
 
 # If new scripts in runtime, add to repo
-cp ~/.claude-mind/bin/NEW_SCRIPT ~/Developer/samara-main/scripts/
+cp ~/.claude-mind/system/bin/NEW_SCRIPT ~/Developer/samara-main/scripts/
 
 # Rebuild symlinks if needed
-~/.claude-mind/bin/symlink-scripts --apply
+~/.claude-mind/system/bin/symlink-scripts --apply
 ```

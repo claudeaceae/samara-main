@@ -4,8 +4,8 @@
       "command": "npx",
       "args": [
         "@playwright/mcp@latest",
-        "--user-data-dir", "/Users/claude/.claude-mind/playwright/user-data",
-        "--output-dir", "/Users/claude/.claude-mind/playwright/output",
+        "--user-data-dir", "~/.claude-mind/playwright/user-data",
+        "--output-dir", "~/.claude-mind/playwright/output",
         "--save-session"
       ]
     }

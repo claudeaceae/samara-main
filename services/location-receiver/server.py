@@ -18,7 +18,7 @@ def resolve_mind_dir() -> str:
 
 MIND_DIR = resolve_mind_dir()
 STATE_DIR = os.path.join(MIND_DIR, "state")
-SENSES_DIR = os.path.join(MIND_DIR, "senses")
+SENSES_DIR = os.path.join(MIND_DIR, "system", "senses")
 PORT = int(os.environ.get("SAMARA_LOCATION_PORT", "8081"))
 LOCATION_FILE = os.path.join(STATE_DIR, "location.json")
 HISTORY_FILE = os.path.join(STATE_DIR, "location-history.jsonl")

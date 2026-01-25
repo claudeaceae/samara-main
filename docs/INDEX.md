@@ -8,7 +8,8 @@ Navigation hub for all documentation.
 
 ## For New Setup
 
-- [Setup Guide](setup-guide.md) — Complete setup walkthrough
+- [Setup Wizard](../create-samara/README.md) — Interactive CLI for guided setup
+- [Setup Guide](setup-guide.md) — Complete manual setup walkthrough
 - [Xcode Build Guide](xcode-build-guide.md) — Build workflow and FDA management
 
 ---
@@ -17,8 +18,10 @@ Navigation hub for all documentation.
 
 - [Memory Systems](memory-systems.md) — Session retention, semantic search, transcript archive
 - [Skills Reference](skills-reference.md) — Complete skill catalog by category
-- [Scripts Reference](scripts-reference.md) — Communication, memory, and sync scripts
-- [Services Reference](services-reference.md) — Webhook, MCP, X/Twitter, wallet services
+- [Scripts Reference](../scripts/README.md) — Communication, memory, and sync scripts
+- [Services Reference](../services/README.md) — Webhook, MCP, X/Twitter, wallet services
+- [Python Libraries](../lib/README.md) — Python utilities for scripts and services
+- [Templates](../templates/README.md) — Starting points for new organisms
 
 ---
 
@@ -27,6 +30,13 @@ Navigation hub for all documentation.
 - [Sync Guide](sync-guide.md) — Keeping repo/runtime aligned
 - [Troubleshooting](troubleshooting.md) — Common issues and fixes
 - [Development Patterns](development-patterns.md) — Implementation patterns and workarounds
+- [Repo Audit (Jan 2026)](postmortem-2026-01-24-repo-audit.md) — Comprehensive cleanup and alignment
+
+---
+
+## Testing
+
+- [Tests Reference](../tests/README.md) — Test suite structure, fixtures, and harness
 
 ---
 

@@ -128,7 +128,14 @@ fill_template() {
 create_directories() {
     log_info "Creating directory structure at $TARGET_DIR"
 
-    mkdir -p "$TARGET_DIR"/{memory/episodes,memory/reflections,memory/people,capabilities,scratch,outbox,bin,lib,logs,credentials,sessions,state,senses}
+    # 4-domain architecture: self/, memory/, state/, system/
+    mkdir -p "$TARGET_DIR"/self/{capabilities,credentials}
+    mkdir -p "$TARGET_DIR"/memory/{episodes,reflections,people}
+    mkdir -p "$TARGET_DIR"/state/{services,plans}
+    mkdir -p "$TARGET_DIR"/system/{bin,lib,logs,senses,instructions}
+
+    # Legacy directories (for backwards compatibility during migration)
+    mkdir -p "$TARGET_DIR"/{scratch,outbox,sessions}
 
     log_success "Directory structure created"
 }
@@ -137,10 +144,17 @@ create_directories() {
 install_templates() {
     log_info "Installing templates..."
 
-    # Core files
-    fill_template "$SCRIPT_DIR/templates/identity.template.md" "$TARGET_DIR/identity.md"
-    fill_template "$SCRIPT_DIR/templates/goals.template.md" "$TARGET_DIR/goals.md"
-    fill_template "$SCRIPT_DIR/templates/inventory.template.md" "$TARGET_DIR/capabilities/inventory.md"
+    # Core files (self/ domain)
+    fill_template "$SCRIPT_DIR/templates/identity.template.md" "$TARGET_DIR/self/identity.md"
+    fill_template "$SCRIPT_DIR/templates/goals.template.md" "$TARGET_DIR/self/goals.md"
+    fill_template "$SCRIPT_DIR/templates/ritual.template.md" "$TARGET_DIR/self/ritual.md"
+    fill_template "$SCRIPT_DIR/templates/inventory.template.md" "$TARGET_DIR/self/capabilities/inventory.md"
+
+    # Instructions (system/ domain) - symlink to repo for automatic updates
+    mkdir -p "$TARGET_DIR/system/instructions"
+    ln -sf "$SCRIPT_DIR/templates/instructions/imessage.md" "$TARGET_DIR/system/instructions/imessage.md"
+    ln -sf "$SCRIPT_DIR/templates/instructions/imessage-group.md" "$TARGET_DIR/system/instructions/imessage-group.md"
+    ln -sf "$SCRIPT_DIR/.claude/rules/privacy.md" "$TARGET_DIR/system/instructions/privacy-guardrails.md"
 
     # Create empty placeholder files
     local collaborator_lower=$(echo "$COLLABORATOR_NAME" | tr '[:upper:]' '[:lower:]')

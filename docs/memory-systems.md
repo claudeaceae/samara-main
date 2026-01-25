@@ -36,7 +36,7 @@ Key touchpoints:
 - Dream cycle distills the stream into episode logs and marks events as distilled
 
 Full design, schema, and extension guidance:
-`docs/contiguous-memory-system.md`
+`~/.claude-mind/state/plans/contiguous-memory-system.md`
 
 ## Claude Code Session Retention
 

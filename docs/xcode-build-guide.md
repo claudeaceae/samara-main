@@ -104,7 +104,7 @@ Run `SamaraTests/SanitizationTests.swift` to verify sanitization logic.
 ### The ONLY correct way to rebuild Samara:
 
 ```bash
-~/.claude-mind/bin/update-samara
+~/.claude-mind/system/bin/update-samara
 ```
 
 This script handles:

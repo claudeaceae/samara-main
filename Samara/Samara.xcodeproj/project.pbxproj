@@ -6,7 +6,6 @@
 	objectVersion = 77;
 	objects = {
 
-
 /* Begin PBXFileReference section */
 		517B8C802EF3C2640097C359 /* Samara.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Samara.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		517B8C8F2EF3C6AE0097C359 /* Samara.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Samara.entitlements; sourceTree = "<group>"; };
@@ -205,7 +204,6 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
-
 /* Begin XCBuildConfiguration section */
 		517B8C892EF3C2650097C359 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -342,8 +340,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Samara/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "";
-				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_CFBundleDisplayName = Samara;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSBackgroundOnly = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -379,8 +377,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Samara/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "";
-				INFOPLIST_KEY_LSApplicationCategoryType = "";
+				INFOPLIST_KEY_CFBundleDisplayName = Samara;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_LSBackgroundOnly = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (

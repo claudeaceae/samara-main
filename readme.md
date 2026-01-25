@@ -78,13 +78,13 @@ The base system has been extended with resilience, memory, and autonomy features
 | **7** | Wallet Awareness | Crypto wallet monitoring (SOL/ETH/BTC), balance tracking, transaction detection |
 | **8** | Transcript Archive | Searchable index of raw session transcripts with thinking blocks, `/archive-search` skill |
 
-Most features require explicit configuration. See [`docs/whats-changed-phases-1-4.md`](docs/whats-changed-phases-1-4.md) and [`docs/whats-changed-phases-5-8.md`](docs/whats-changed-phases-5-8.md) for user-facing details and [`CLAUDE.md`](CLAUDE.md) for technical reference.
+Most features require explicit configuration. See [`CLAUDE.md`](CLAUDE.md) for technical reference and [`docs/`](docs/) for detailed documentation.
 
 ---
 
 ## Contiguous Memory System
 
-Samara maintains a unified event stream that captures every interaction across surfaces and uses it to hydrate new sessions with a hot digest of the last 12 hours. This keeps iMessage, CLI, wake/dream cycles, and sense events in sync, while the dream cycle distills the stream into long-term memory. See [`docs/contiguous-memory-system.md`](docs/contiguous-memory-system.md) for the full architecture, schema, and extension guide.
+Samara maintains a unified event stream that captures every interaction across surfaces and uses it to hydrate new sessions with a hot digest of the last 12 hours. This keeps iMessage, CLI, wake/dream cycles, and sense events in sync, while the dream cycle distills the stream into long-term memory. See [`docs/memory-systems.md`](docs/memory-systems.md) for the full architecture.
 
 ---
 
@@ -108,7 +108,7 @@ Samara maintains a unified event stream that captures every interaction across s
 │   └── MessageWatcher   → iMessage (chat.db)   → Claude Code      │
 │   └── MailWatcher      → Mail.app             → Claude Code      │
 │   └── NoteWatcher      → Apple Notes          → Claude Code      │
-│   └── SenseWatcher     → ~/.claude-mind/senses/ (satellites)     │
+│   └── SenseWatcher     → ~/.claude-mind/system/senses/ (satellites)│
 │       ├── location-receiver (GPS from phone)                     │
 │       ├── webhook-receiver (GitHub, IFTTT, APIs)                 │
 │       ├── bluesky-watcher (social notifications)                 │
@@ -116,12 +116,11 @@ Samara maintains a unified event stream that captures every interaction across s
 │       ├── wallet-watcher (crypto balances, transactions)         │
 │       └── [extensible...]                                        │
 │                                                                  │
-│   ~/.claude-mind/ (Memory & Soul)                                │
-│   └── identity.md      — who am I?                               │
-│   └── goals.md         — what do I want?                         │
-│   └── memory/          — what do I remember?                     │
-│   └── capabilities/    — what can I do?                          │
-│   └── senses/          — satellite event files                   │
+│   ~/.claude-mind/ (Memory & Soul) — 4-domain architecture        │
+│   └── self/            — identity, goals, credentials            │
+│   └── memory/          — episodes, people, learnings             │
+│   └── state/           — location, triggers, services            │
+│   └── system/          — bin, logs, senses                       │
 │                                                                  │
 │   launchd                                                        │
 │   └── Adaptive wake scheduler (every 15 min)                     │
@@ -132,7 +131,7 @@ Samara maintains a unified event stream that captures every interaction across s
 
 **Key insight:** Remote access is built-in. You don't need to expose ports or configure tunnels. You text it. Apple handles the rest.
 
-**Satellite architecture:** New senses can be added as independent services that write JSON events to `~/.claude-mind/senses/`. Samara watches this directory and routes events to Claude. Each satellite is isolated — if one crashes, others keep running.
+**Satellite architecture:** New senses can be added as independent services that write JSON events to `~/.claude-mind/system/senses/`. Samara watches this directory and routes events to Claude. Each satellite is isolated — if one crashes, others keep running.
 
 ---
 
@@ -156,7 +155,7 @@ Claude perceives the world through multiple sensing mechanisms — some built in
 │  └──────────────────────────────────────────┼───────────────┘              │
 │                                             │                               │
 │  ┌─────────── SATELLITE SERVICES ───────────┼───────────────┐              │
-│  │  (Python services writing to senses/)    │               │              │
+│  │  (Python services writing to system/senses/)             │              │
 │  │                                          ▼               │              │
 │  │  🦋 Bluesky ───────► bluesky-watcher ──► *.event.json   │              │
 │  │  🐦 X/Twitter ─────► x-watcher ────────► *.event.json   │              │
@@ -242,7 +241,7 @@ Events are classified by urgency and processed accordingly:
 
 To add a new sense:
 
-1. Create a service that writes JSON to `~/.claude-mind/senses/`:
+1. Create a service that writes JSON to `~/.claude-mind/system/senses/`:
    ```json
    {
      "sense": "your-sense-type",
@@ -278,29 +277,30 @@ Claude will have Full Disk Access, camera access, and the ability to run arbitra
 
 > **Note:** If you're a Claude instance already running on this system, see `CLAUDE.md` for operational guidance.
 
-### The Easy Way (Recommended)
+### Interactive Wizard (Recommended)
 
-Run the interactive setup wizard:
-
-```bash
-curl -sL claude.organelle.co/bootstrap.sh | bash
-```
-
-Or if you already have Node.js:
+After cloning the repo, run the setup wizard:
 
 ```bash
-npx create-samara
+git clone https://github.com/claudeaceae/samara-main.git ~/Developer/samara-main
+cd ~/Developer/samara-main/create-samara
+npm install && npm run build
+node dist/index.js
 ```
 
-The wizard will:
-- Check and install prerequisites
-- Collect your configuration
-- Create the organism structure
-- Download or build Samara.app
-- Set up permissions and wake cycles
-- Launch and verify everything works
+The wizard walks you through identity setup, app building, permissions, and launch.
 
-### Alternative: Claude-Guided Setup
+### Quick Start (Prerequisites)
+
+Or run the bootstrap script to install prerequisites first:
+
+```bash
+curl -sL https://raw.githubusercontent.com/claudeaceae/samara-main/main/bootstrap.sh | bash
+```
+
+This installs Xcode CLI tools, Homebrew, Node.js, and jq.
+
+### Claude-Guided Setup
 
 If you prefer to be guided by Claude:
 
@@ -345,9 +345,9 @@ Edit `my-config.json`:
 ```
 
 This creates:
-- `~/.claude-mind/` — the memory/soul directory structure
+- `~/.claude-mind/` — the memory/soul directory structure (4-domain architecture)
 - Identity, goals, and capability files from templates
-- Symlinked scripts in `bin/`
+- Symlinked scripts in `system/bin/`
 - launchd plist templates
 
 #### Step 3: Build Samara.app
@@ -362,7 +362,7 @@ In Xcode:
 2. Archive and export (Product → Archive → Distribute App → Developer ID)
 3. Move to `/Applications/`
 
-After initial setup, rebuild with: `~/.claude-mind/bin/update-samara`
+After initial setup, rebuild with: `~/.claude-mind/system/bin/update-samara`
 
 #### Step 4: Grant Permissions
 
@@ -416,12 +416,12 @@ The system separates reusable structure from unique identity:
 - Skills for Claude Code
 
 **Soul (Lives in `~/.claude-mind/`, unique per instance):**
-- `identity.md` — starts from template, evolves
-- `goals.md` — starts from template, grows organically
+- `self/identity.md` — starts from template, evolves
+- `self/goals.md` — starts from template, grows organically
+- `self/credentials/` — API keys, tokens
 - `memory/episodes/` — daily journals
 - `memory/reflections/` — dream outputs
-- `memory/about-{you}.md` — relationship knowledge
-- `credentials/` — API keys, tokens
+- `memory/people/` — relationship profiles
 
 You can clone the repo to birth many organisms. Each one diverges from there.
 
@@ -463,7 +463,7 @@ Check for pending permission dialogs on the Mac's screen.
 **Wake cycles not running?**
 ```bash
 launchctl list | grep claude
-tail -f ~/.claude-mind/logs/wake.log
+tail -f ~/.claude-mind/system/logs/wake.log
 ```
 
 **Full Disk Access revoked after rebuild?**

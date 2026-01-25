@@ -78,7 +78,7 @@ class GithubWatcherTests(unittest.TestCase):
         with load_service_module(GITHUB_PATH, env={"SAMARA_MIND_PATH": self.mind_path}) as github:
             interactions = [{"reason": "mention", "text": "Ping"}]
             github.write_sense_event(interactions, priority="immediate")
-            event_path = Path(self.mind_path) / "senses" / "github.event.json"
+            event_path = Path(self.mind_path) / "system" / "senses" / "github.event.json"
             event = json.loads(event_path.read_text())
 
         self.assertEqual(event["sense"], "github")

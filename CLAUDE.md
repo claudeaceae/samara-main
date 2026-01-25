@@ -15,7 +15,7 @@ Samara is a bootstrap specification for giving Claude a persistent body, memory,
 
 This is not a traditional software project. It's an experiment in AI autonomy.
 
-> **Key capabilities:** Model fallback chain, semantic memory search, proactive messaging, adaptive wake scheduling, meeting awareness, wallet awareness. See [Memory Systems](docs/memory-systems.md) and [Services Reference](docs/services-reference.md).
+> **Key capabilities:** Model fallback chain, semantic memory search, proactive messaging, adaptive wake scheduling, meeting awareness, wallet awareness. See [Memory Systems](docs/memory-systems.md) and [Services Reference](services/README.md).
 
 ---
 
@@ -230,8 +230,8 @@ ollama pull llama3.1:8b
 | Topic | Document |
 |-------|----------|
 | Memory architecture | [Memory Systems](docs/memory-systems.md) |
-| Script catalog | [Scripts Reference](docs/scripts-reference.md) |
-| Services (webhook, X, wallet) | [Services Reference](docs/services-reference.md) |
+| Script catalog | [Scripts Reference](scripts/README.md) |
+| Services (webhook, X, wallet) | [Services Reference](services/README.md) |
 | Xcode build, FDA, sanitization | [Xcode Build Guide](docs/xcode-build-guide.md) |
 | Repo/runtime sync | [Sync Guide](docs/sync-guide.md) |
 | Common issues | [Troubleshooting](docs/troubleshooting.md) |
@@ -240,6 +240,14 @@ ollama pull llama3.1:8b
 ---
 
 ## Development Notes
+
+### Path Safety
+
+**ALWAYS use absolute paths** when writing to runtime directories:
+- ✅ `~/.claude-mind/state/...` or `/Users/claude/.claude-mind/...`
+- ❌ `.claude-mind/state/...` (creates directory in current working directory)
+
+**Automated safeguard:** The `block-wrong-path-writes.sh` hook blocks Write operations that would create `.claude-mind` outside of the home directory.
 
 ### Plan Management (Immutable Plans)
 

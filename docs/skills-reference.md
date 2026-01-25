@@ -27,6 +27,8 @@ Complete catalog of interactive skills available via Claude Code. Invoke with `/
 | `/stream` | Query unified event stream by surface (cli, imessage, wake, etc.) |
 | `/archive-search` | Search raw session transcripts for technical details and reasoning traces |
 | `/episode` | View/append today's episode log |
+| `/learning` | Access accumulated learnings and technical discoveries |
+| `/observation` | Access observations about patterns, behaviors, and the world |
 
 ---
 
@@ -36,6 +38,7 @@ Complete catalog of interactive skills available via Claude Code. Invoke with `/
 |-------|---------|
 | `/reflect` | Quick capture learning/observation/insight |
 | `/decide` | Document decision with rationale |
+| `/decision` | Access past decisions with their rationale (read-only) |
 | `/iterate` | Autonomous iteration until success criteria met |
 
 ---

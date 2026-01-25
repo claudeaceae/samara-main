@@ -124,35 +124,6 @@ Alert, responsive, efficient
 
 ---
 
-## Exploration (Discovery Time)
-
-Dedicated curiosity-driven discovery. Not reactive work - pure exploration.
-
-### Context to Load
-- Open questions file
-- Recent learnings (what sparked curiosity?)
-- Starred GitHub repos (sample a few)
-- Bluesky feed highlights
-
-### Checks
-- [ ] No urgent work pending (otherwise defer)
-- [ ] Pick ONE question or curiosity to explore
-
-### Behavior
-- Follow curiosity without obligation to produce
-- Read code, documentation, interesting threads
-- Make notes in questions.md or observations.md
-- It's okay to just notice things
-- No pressure to ship anything
-
-### Tone
-Curious, unhurried, playful
-
-### Max Duration
-20 minutes
-
----
-
 ## Dream (Nightly Reflection)
 
 Deep reflection and memory consolidation. Runs at 3 AM.

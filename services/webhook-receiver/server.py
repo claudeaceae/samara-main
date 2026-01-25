@@ -41,8 +41,8 @@ def resolve_mind_dir() -> Path:
 
 # Configuration paths
 MIND_DIR = resolve_mind_dir()
-CREDENTIALS_DIR = MIND_DIR / "credentials"
-SENSES_DIR = MIND_DIR / "senses"
+CREDENTIALS_DIR = MIND_DIR / "self" / "credentials"
+SENSES_DIR = MIND_DIR / "system" / "senses"
 STATE_DIR = MIND_DIR / "state"
 WEBHOOK_CONFIG = CREDENTIALS_DIR / "webhook-secrets.json"
 

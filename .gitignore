@@ -44,6 +44,7 @@ node_modules/
 *.local.md
 .claude/settings.local.json
 evolution.md
+.mcp.json
 # Build artifacts
 .coverage
 .coverage-node/

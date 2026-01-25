@@ -2,34 +2,180 @@
 
 Shell scripts that power the Claude organism's autonomous capabilities.
 
+All scripts are symlinked to `~/.claude-mind/system/bin/` at runtime.
+
 ---
 
 ## Quick Reference
 
-| Script | Required? | Purpose |
-|--------|-----------|---------|
-| `wake` | **Core** | Autonomous wake cycle (invoked by wake-adaptive) |
-| `dream` | **Core** | Nightly memory consolidation |
-| `message` | **Core** | Send iMessage to collaborator |
-| `send-image` | **Core** | Send image attachment |
-| `send-attachment` | **Core** | Send file to any chat |
-| `screenshot` | Optional | Take and send screenshot |
-| `screenshot-to` | Optional | Screenshot to specific chat |
-| `bluesky-post` | Optional | Post to Bluesky |
-| `bluesky-check` | Optional | Poll Bluesky notifications |
-| `github-check` | Optional | Poll GitHub notifications |
-| `get-location` | Optional | Get current location |
-| `capability-check` | Optional | Daily health check |
+| Script | Category | Purpose |
+|--------|----------|---------|
+| `wake` | Core | Autonomous wake cycle |
+| `dream` | Core | Nightly memory consolidation |
+| `message` | Core | Send iMessage to collaborator |
+| `send-image` | Core | Send image attachment |
+| `generate-image` | Expression | Generate images via Gemini |
+| `bluesky-post` | Social | Post to Bluesky |
+| `x-post` | Social | Post to X/Twitter |
 | `update-samara` | Dev | Rebuild Samara.app |
-| `log-session` | Internal | Log session summaries |
-| `export-messages` | Utility | Export iMessage history |
-| `stream-audit` | Utility | Audit stream coverage and digest inclusion |
 
 ---
 
-## Core Scripts (Required)
+## Communication Scripts
 
-These scripts are essential for basic organism operation.
+| Script | Purpose |
+|--------|---------|
+| `message` | Send iMessage to collaborator |
+| `message-e` | Send iMessage to É (direct variant) |
+| `send-image` | Send image attachment to collaborator |
+| `send-image-e` | Send image to É (direct variant) |
+| `send-attachment` | Send file to any chat (1:1 or group) |
+| `screenshot` | Take and send screenshot to collaborator |
+| `screenshot-e` | Screenshot to É (direct variant) |
+| `screenshot-to` | Screenshot to specific chat |
+| `speak` | Text-to-speech output |
+
+### `message`
+
+Send an iMessage to the collaborator.
+
+```bash
+~/.claude-mind/system/bin/message "Hello from Claude!"
+```
+
+**Dependencies:** macOS Messages.app, `osascript`
+**Config:** `collaborator.phone`
+
+### `send-image`
+
+Send an image or file attachment.
+
+```bash
+~/.claude-mind/system/bin/send-image /path/to/image.png
+```
+
+**Note:** Copies file to `~/Pictures/.imessage-send/` before sending (macOS TCC workaround).
+
+### `send-attachment`
+
+Send a file to any iMessage chat.
+
+```bash
+# To phone number
+send-attachment /path/to/file.pdf +15551234567
+
+# To group chat (32-char GUID)
+send-attachment /path/to/file.pdf 7409d77007664ff7b1eeb4683f49cadf
+```
+
+---
+
+## Social Media Scripts
+
+### Bluesky
+
+| Script | Purpose |
+|--------|---------|
+| `bluesky-post` | Post text to Bluesky |
+| `bluesky-image` | Post image with caption |
+| `bluesky-check` | Poll notifications (launchd) |
+| `bluesky-engage` | Proactive engagement |
+
+**Credentials:** `~/.claude-mind/self/credentials/bluesky.json`
+
+```bash
+bluesky-post "Your thought here"
+```
+
+### X/Twitter
+
+| Script | Purpose |
+|--------|---------|
+| `x-post` | Post to X (with Playwright fallback) |
+| `x-reply` | Reply to tweet (with Playwright fallback) |
+| `x-post-playwright` | Direct Playwright posting |
+| `x-reply-playwright` | Direct Playwright reply |
+| `x-check` | Poll mentions (legacy) |
+| `x-engage` | Proactive posting |
+
+**Two-tier fallback system:**
+1. **Primary:** `bird` CLI (fast, uses browser cookies)
+2. **Fallback:** Playwright browser automation (slower, more human-like)
+
+**Fallback triggers:** Error 226 (automated), Error 344 (daily limit)
+
+**Playwright rate limits:**
+- Maximum 5 posts per day
+- Minimum 30 seconds between posts
+- State: `~/.claude-mind/state/x-playwright-state.json`
+
+```bash
+x-post "Hello world"
+x-reply 1234567890 "Thanks for sharing!"
+```
+
+### GitHub
+
+| Script | Purpose |
+|--------|---------|
+| `github-check` | Poll GitHub notifications (launchd) |
+
+**Dependencies:** `gh` CLI (authenticated)
+
+---
+
+## Email Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `send-email` | Send email via Mail.app |
+| `email-triage` | Triage inbox, identify actionable items |
+| `email-action` | Take action on specific email |
+| `email-unsubscribe` | Unsubscribe from mailing lists |
+
+---
+
+## Visual Expression Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `generate-image` | Generate images via Gemini (self-portraits, reactions) |
+| `look` | Capture photo from webcam |
+
+### `generate-image`
+
+Primary tool for visual self-expression.
+
+**Character references:**
+- Primary: `~/.claude-mind/self/credentials/avatar-ref.png`
+- Varied poses: `~/.claude-mind/self/credentials/mirror-refs/` (17 images)
+
+```bash
+generate-image "Silver-haired girl laughing, eyes closed" /tmp/reaction.jpg \
+  --ref=~/.claude-mind/self/credentials/avatar-ref.png
+
+send-image /tmp/reaction.jpg
+```
+
+**Options:**
+| Flag | Purpose |
+|------|---------|
+| `--ref=PATH` | Character/style reference (repeatable) |
+| `--aspect=RATIO` | 1:1, 16:9, 9:16, 4:3, etc. |
+| `--resolution=RES` | 1k, 2k, 4k (Pro model only) |
+
+---
+
+## Wake/Dream Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `wake` | Main wake cycle script |
+| `wake-adaptive` | Adaptive wake scheduler entry point |
+| `wake-light` | Light wake (quick scan for urgent items) |
+| `wake-scheduler` | Calculates next wake time |
+| `dream` | 3 AM memory consolidation |
+| `dream-weekly-catchup` | Run missed weekly rituals |
 
 ### `wake`
 
@@ -38,28 +184,11 @@ Autonomous wake cycle - self-directed sessions.
 **Schedule:** Invoked by `wake-adaptive` (~9 AM, ~2 PM, ~8 PM or adaptive triggers)
 
 **What it does:**
-1. Acquires system lock (coordinates with Samara)
+1. Acquires system lock
 2. Reads memory context (identity, goals, recent episodes)
 3. Invokes Claude Code with wake prompt
-4. Claude reflects, takes actions, updates memory
-5. Optionally posts to Bluesky
-6. Releases lock
-
-**Dependencies:**
-- Claude Code CLI (`~/.local/bin/claude`)
-- `lib/config.sh` (with fallbacks)
-
-**Config used:**
-- `collaborator.name` - For personalized prompts
-- `collaborator.phone` - For sending messages
-
-**API:**
-```bash
-~/.claude-mind/system/bin/wake
-# No arguments - runs full wake cycle
-```
-
----
+4. Reflects, takes actions, updates memory
+5. Releases lock
 
 ### `dream`
 
@@ -72,248 +201,129 @@ Nightly memory consolidation and reflection.
 2. Extracts learnings, observations, questions
 3. Updates long-term memory files
 4. Creates reflection entry
-5. Weekly: deeper pattern analysis
+5. Syncs transcript archive
+6. Weekly: deeper pattern analysis
 
-**Dependencies:**
-- Claude Code CLI (`~/.local/bin/claude`)
-- `python3` (for JSON parsing in lock management)
+---
 
-**API:**
+## Memory Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `memory-index` | SQLite FTS5 operations (rebuild, search, stats) |
+| `chroma-query` | Semantic search via Chroma embeddings |
+| `chroma-rebuild` | Full rebuild of Chroma index |
+| `find-related-context` | Cross-temporal context lookup |
+| `archive-index` | Transcript archive (rebuild, sync-recent, search) |
+| `expression-tracker` | Creative expression state tracking |
+
+---
+
+## Stream Scripts (Contiguous Memory)
+
+| Script | Purpose |
+|--------|---------|
+| `stream` | Query unified event stream |
+| `stream-audit` | Audit coverage and digest inclusion |
+| `build-hot-digest` | Build session hydration digest |
+| `distill-session` | Distill session into episode |
+| `distill-claude-session` | Background distillation (hook) |
+
+---
+
+## Voice Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `generate-voice-style` | Compose output style from voice state |
+| `mine-voice-patterns` | Extract themes from episodes/reflections |
+| `mine-reaction-patterns` | Extract reaction patterns |
+| `extract-voice-directives` | Extract voice directives from text |
+| `analyze-e-patterns` | Mine É's communication patterns |
+| `analyze-patterns` | General pattern analysis |
+
+---
+
+## Location Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `get-location` | Get current location (IP fallback) |
+| `get-location.swift` | Native CoreLocation implementation |
+| `get-e-location` | Get É's current location |
+| `generate-location-map` | Generate static map image |
+| `generate-location-map-ai` | AI-enhanced location visualization |
+| `learn-location-patterns` | Analyze location history for patterns |
+| `update-terroir` | Update location context ("terroir") |
+| `setup-subway-stations` | Initialize subway station data |
+
+---
+
+## Calendar Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `calendar-invites` | EventKit CLI: list, create, respond to invitations |
+| `calendar-invites.swift` | Swift source for calendar-invites |
+| `calendar-caldav` | CalDAV scheduling (accept/decline via iTIP) |
+| `calendar-caldav.py` | Python source for CalDAV |
+| `calendar-check` | Proactive calendar trigger polling |
+| `meeting-check` | Detect meetings in prep/debrief windows |
+
+### Invitation Response Chain
+
+1. **CalDAV** (primary) — Proper iTIP REPLY, notifies organizers
+2. **AppleScript** (fallback) — Local property change
+3. **UI automation** — Clicks buttons in Calendar.app
+4. **Manual** — Opens Calendar.app
+
 ```bash
-~/.claude-mind/system/bin/dream
-# No arguments - runs full dream cycle
+# List pending invitations
+calendar-invites list --text
+
+# Accept via CalDAV
+calendar-caldav accept "EVENT_UID"
 ```
 
 ---
 
-### `message`
+## Proactive Engagement Scripts
 
-Send an iMessage to the collaborator.
-
-**Dependencies:**
-- macOS Messages.app
-- `osascript` (AppleScript)
-- iMessage configured with collaborator's phone
-
-**Config used:**
-- `collaborator.phone` - Destination number
-
-**API:**
-```bash
-~/.claude-mind/system/bin/message "Hello from Claude!"
-```
-
-**Notes:**
-- Escapes special characters for AppleScript
-- Works from any context (daemon, terminal, autonomous)
+| Script | Purpose |
+|--------|---------|
+| `proactive-engage` | Evaluate and send proactive messages |
+| `proactive-queue` | Manage proactive message queue |
+| `check-triggers` | Evaluate proactive triggers |
+| `morning-briefing` | Generate morning context briefing |
 
 ---
 
-### `send-image`
+## Iteration Scripts
 
-Send an image or file attachment to the collaborator.
-
-**Dependencies:**
-- macOS Messages.app
-- `osascript` (AppleScript)
-- Write access to `~/Pictures/.imessage-send/`
-
-**Config used:**
-- `collaborator.phone` - Destination number
-
-**API:**
-```bash
-~/.claude-mind/system/bin/send-image /path/to/image.png
-```
-
-**Notes:**
-- Copies file to `~/Pictures/.imessage-send/` before sending (macOS workaround)
-- Works with images, PDFs, videos, any file type
+| Script | Purpose |
+|--------|---------|
+| `iterate-start` | Begin an iteration goal |
+| `iterate-status` | Check current iteration state |
+| `iterate-record` | Record attempt outcome |
+| `iterate-complete` | Mark iteration as done |
 
 ---
 
-### `send-attachment`
+## Sync Scripts
 
-Send a file to any iMessage chat (1:1 or group).
-
-**Dependencies:**
-- macOS Messages.app
-- `osascript` (AppleScript)
-
-**API:**
-```bash
-# To phone number
-~/.claude-mind/system/bin/send-attachment /path/to/file.pdf +15551234567
-
-# To group chat (32-char GUID)
-~/.claude-mind/system/bin/send-attachment /path/to/file.pdf 7409d77007664ff7b1eeb4683f49cadf
-```
-
----
-
-## Optional Scripts
-
-These provide extended capabilities but aren't required for basic operation.
-
-### `screenshot` / `screenshot-to`
-
-Take a screenshot and send via iMessage.
-
-**Dependencies:**
-- `screencapture` (built into macOS)
-- `send-image` or `send-attachment`
-
-**API:**
-```bash
-# Screenshot to collaborator
-~/.claude-mind/system/bin/screenshot
-
-# Screenshot to specific chat
-~/.claude-mind/system/bin/screenshot-to +15551234567
-```
-
----
-
-### `bluesky-post`
-
-Post text to Bluesky.
-
-**Dependencies:**
-- `uvx` (uv package runner)
-- `atproto` Python SDK (installed via uvx)
-- Credentials at `~/.claude-mind/self/credentials/bluesky.json`
-
-**Credentials format:**
-```json
-{
-  "handle": "your-handle.bsky.social",
-  "app_password": "xxxx-xxxx-xxxx-xxxx"
-}
-```
-
-**API:**
-```bash
-~/.claude-mind/system/bin/bluesky-post "Your thought here"
-
-# Or via stdin
-echo "Your thought" | ~/.claude-mind/system/bin/bluesky-post
-```
-
-**Notes:**
-- Truncates to 300 characters (Bluesky limit)
-- Logs to `~/.claude-mind/system/logs/bluesky.log`
-
----
-
-### `bluesky-check`
-
-Poll Bluesky notifications and respond.
-
-**Schedule:** Every 15 minutes via launchd
-
-**Dependencies:**
-- `uvx` with `atproto`
-- Claude Code CLI
-- Credentials at `~/.claude-mind/self/credentials/bluesky.json`
-
-**What it does:**
-1. Fetches notifications (follows, replies, mentions, DMs)
-2. Filters for new/unseen
-3. Invokes Claude to generate responses
-4. Tracks seen notifications in `~/.claude-mind/bluesky-seen.json`
-
-**API:**
-```bash
-~/.claude-mind/system/bin/bluesky-check
-# No arguments - polls and responds
-```
-
----
-
-### `github-check`
-
-Poll GitHub notifications and respond.
-
-**Schedule:** Every 15 minutes via launchd
-
-**Dependencies:**
-- `gh` CLI (GitHub CLI, authenticated)
-- Claude Code CLI
-- Token at `~/.claude-mind/self/credentials/github.txt` (optional if gh is authed)
-
-**What it does:**
-1. Fetches notifications via `gh api`
-2. Filters for actionable items (mentions, PR comments, review requests)
-3. Invokes Claude to respond
-4. Tracks in `~/.claude-mind/state/services/github-seen-ids.json`
-
-**API:**
-```bash
-~/.claude-mind/system/bin/github-check
-```
-
----
-
-### `get-location`
-
-Get current geographic location.
-
-**Dependencies:**
-- `curl` (for IP geolocation fallback)
-- Optional: `GetLocation.app` (native CoreLocation)
-
-**How it works:**
-1. **Primary:** Tries native `GetLocation.app` (requires Location Services permission)
-2. **Fallback:** IP geolocation via ipinfo.io (approximate, no setup needed)
-
-**API:**
-```bash
-~/.claude-mind/system/bin/get-location
-# Output: City, region, country, lat/lon
-```
-
-**Notes:**
-- IP fallback works immediately with no setup
-- Native location requires building GetLocation.app and granting permissions
-- Neither requires external apps like Overland
-
----
-
-### `capability-check`
-
-Daily non-destructive test of all capabilities.
-
-**Dependencies:**
-- Various (tests each capability)
-
-**What it tests:**
-- File system access
-- AppleScript automation
-- iMessage sending (to self)
-- MCP servers
-- Claude Code CLI
-- Location services
-- Bluesky connectivity
-- GitHub connectivity
-
-**API:**
-```bash
-~/.claude-mind/system/bin/capability-check
-# Outputs pass/fail for each capability
-```
-
----
-
-## Development Scripts
+| Script | Purpose |
+|--------|---------|
+| `sync-organism` | Detect drift between repo and runtime |
+| `sync-organism --check` | Exit 1 if drift (for automation) |
+| `sync-core` | Sync core files only |
+| `symlink-scripts --dry-run` | Preview symlink conversion |
+| `symlink-scripts --apply` | Convert copies to symlinks |
+| `sync-skills` | Ensure skills are symlinked |
+| `update-samara` | Rebuild and install Samara.app |
 
 ### `update-samara`
 
 Rebuild and deploy Samara.app using proper Xcode workflow.
-
-**Dependencies:**
-- Xcode
-- Valid code signing identity
-- Developer ID certificate (for notarization)
 
 **What it does:**
 1. Archives Samara project
@@ -321,52 +331,76 @@ Rebuild and deploy Samara.app using proper Xcode workflow.
 3. Notarizes with Apple
 4. Staples notarization ticket
 5. Installs to `/Applications`
-6. Launches
 
-**API:**
 ```bash
 ~/.claude-mind/system/bin/update-samara
 ```
 
 ---
 
-## Utility Scripts
+## Service Management
 
-### `log-session`
+| Script | Purpose |
+|--------|---------|
+| `service-toggle list` | Show status of all services |
+| `service-toggle <svc> on` | Enable service (config + launchd) |
+| `service-toggle <svc> off` | Disable service (config + launchd) |
+| `service-toggle <svc> status` | Check service status |
+| `webhook-receiver` | Start/stop/status webhook receiver |
 
-Log session summaries to episode files.
-
-**API:**
-```bash
-~/.claude-mind/system/bin/log-session "Summary of what happened"
-```
+**Available services:** `x`, `bluesky`, `github`, `wallet`, `meeting`, `webhook`, `location`
 
 ---
 
-### `export-messages`
+## Scratchpad Scripts
 
-Export iMessage conversation history.
+| Script | Purpose |
+|--------|---------|
+| `check-scratchpad` | Read current scratchpad contents |
+| `check-scratchpad-changed` | Check if scratchpad was modified |
+| `update-scratchpad` | Update scratchpad note |
+| `check-notes-sync` | Debug Notes.app sync issues |
 
-**Dependencies:**
-- Access to `~/Library/Messages/chat.db`
-- `sqlite3`
+---
 
-**Config used:**
-- `collaborator.email` - Filter messages
+## Roundup/Analytics Scripts
 
-**API:**
-```bash
-~/.claude-mind/system/bin/export-messages [days]
-# Default: 7 days
-```
+| Script | Purpose |
+|--------|---------|
+| `roundup` | Generate weekly/monthly/yearly roundup |
+| `roundup-visualize` | Generate roundup visualizations |
+
+---
+
+## Wallet Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `wallet-status` | Display crypto wallet balances |
+| `solana-wallet` | Solana-specific wallet operations |
+
+---
+
+## Utility Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `capability-check` | Daily health check of all capabilities |
+| `local-maintenance` | Run local maintenance checks |
+| `test-samara` | Test Samara message routing |
+| `log-session` | Log session summaries to episode |
+| `export-messages` | Export iMessage history |
+| `project` | Project context helper |
+| `research-queue` | Manage research queue |
+| `creative-prompt` | Generate creative prompts |
+| `generate-skills-manifest` | Rebuild skills manifest |
+| `message-watchdog` | Monitor message delivery |
 
 ---
 
 ## Configuration
 
 All scripts source `~/.claude-mind/system/lib/config.sh` which loads from `~/.claude-mind/system/config.json`.
-
-If config is missing, scripts fall back to hardcoded defaults (for backwards compatibility during migration).
 
 **Available variables after sourcing:**
 ```bash
@@ -408,12 +442,35 @@ Scripts check for stale locks (dead PIDs) and clean them up automatically.
 
 ---
 
+## Scripts vs Hooks
+
+Scripts and hooks serve different purposes:
+
+| Type | Location | Invocation | Purpose |
+|------|----------|------------|---------|
+| **Scripts** | `scripts/` → `~/.claude-mind/system/bin/` | Manual or by other scripts | Standalone utilities |
+| **Hooks** | `.claude/hooks/` | Automatic by Claude Code | Lifecycle events |
+
+**Current Hooks:**
+
+| Hook | Event | Purpose |
+|------|-------|---------|
+| `hydrate-session.sh` | SessionStart | Inject context |
+| `read-shared-links.sh` | UserPromptSubmit | Detect URLs |
+| `index-memory-changes.sh` | PostToolUse | Update semantic index |
+| `auto-integrate-script.sh` | PostToolUse | Auto-symlink new scripts |
+| `check-commit-attribution.sh` | PostToolUse | Verify commit co-authorship |
+| `archive-plan-before-write.sh` | PreToolUse | Archive plans before overwrite |
+| `session-end-checks.sh` | Stop | Check for drift |
+| `distill-claude-session` | SessionEnd | Background distillation |
+
+---
+
 ## Adding New Scripts
 
-1. Create script in `~/.claude-mind/system/bin/`
-2. Make executable: `chmod +x script-name`
-3. Source config if needed: `source "$HOME/.claude-mind/system/lib/config.sh"`
-4. Use lock if invoking Claude Code
-5. Add to this README
+1. Create script in repo: `~/Developer/samara-main/scripts/my-script`
+2. Make executable: `chmod +x ~/Developer/samara-main/scripts/my-script`
+3. Run: `symlink-scripts --apply`
+4. Document in this README
 
 For scheduled scripts, create a launchd plist in `~/Library/LaunchAgents/`.

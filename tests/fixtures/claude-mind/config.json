@@ -3,13 +3,15 @@
     "name": "TestClaude",
     "icloud": "test-claude@icloud.com",
     "bluesky": "@test-claude.bsky.social",
+    "x": "@test-claude",
     "github": "test-claude"
   },
   "collaborator": {
     "name": "Tester",
     "phone": "+15555550123",
     "email": "tester@example.com",
-    "bluesky": "@tester.bsky.social"
+    "bluesky": "@tester.bsky.social",
+    "x": "@tester"
   },
   "notes": {
     "location": "Test Location Log",
@@ -17,5 +19,17 @@
   },
   "mail": {
     "account": "iCloud"
+  },
+  "features": {
+    "smartContext": true,
+    "smartContextTimeout": 5.0
+  },
+  "services": {
+    "x": true,
+    "bluesky": true,
+    "github": true,
+    "wallet": true,
+    "location": true,
+    "webhook": true
   }
 }

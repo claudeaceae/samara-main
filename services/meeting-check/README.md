@@ -7,7 +7,7 @@ Detects upcoming and recently ended calendar events, generating sense events for
 This service runs every 15 minutes via launchd and:
 1. Checks for meetings starting in 10-20 minutes (prep window)
 2. Checks for meetings that ended 0-30 minutes ago (debrief window)
-3. Writes sense events to `~/.claude-mind/senses/` for SenseRouter to process
+3. Writes sense events to `~/.claude-mind/system/senses/` for SenseRouter to process
 
 ## Installation
 
@@ -89,21 +89,21 @@ Generated 0-30 minutes after a meeting ends:
 
 ## Logs
 
-- Log file: `~/.claude-mind/logs/meeting-check.log`
-- stdout: `~/.claude-mind/logs/meeting-check.stdout.log`
-- stderr: `~/.claude-mind/logs/meeting-check.stderr.log`
+- Log file: `~/.claude-mind/system/logs/meeting-check.log`
+- stdout: `~/.claude-mind/system/logs/meeting-check.stdout.log`
+- stderr: `~/.claude-mind/system/logs/meeting-check.stderr.log`
 
 ## Manual Testing
 
 ```bash
 # Run manually
-~/.claude-mind/bin/meeting-check
+~/.claude-mind/system/bin/meeting-check
 
 # Check logs
-tail -f ~/.claude-mind/logs/meeting-check.log
+tail -f ~/.claude-mind/system/logs/meeting-check.log
 
 # Check for generated sense events
-ls -la ~/.claude-mind/senses/meeting_*.event.json
+ls -la ~/.claude-mind/system/senses/meeting_*.event.json
 ```
 
 ## Dependencies

@@ -362,8 +362,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=output)]
 
     elif name == "get_identity":
-        identity = read_file_safe(MIND_DIR / "identity.md") or "Identity file not found"
-        goals = read_file_safe(MIND_DIR / "goals.md") or "Goals file not found"
+        identity = read_file_safe(MIND_DIR / "self" / "identity.md") or "Identity file not found"
+        goals = read_file_safe(MIND_DIR / "self" / "goals.md") or "Goals file not found"
 
         return [TextContent(type="text", text=f"# Identity\n\n{identity}\n\n# Goals\n\n{goals}")]
 

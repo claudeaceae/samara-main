@@ -14,18 +14,18 @@ Instead of only waking at fixed times (9 AM, 2 PM, 8 PM), the scheduler can:
 
 ```bash
 # Check if should wake now
-~/.claude-mind/bin/wake-scheduler check
+~/.claude-mind/system/bin/wake-scheduler check
 # Returns: {"should_wake": true, "type": "full", "reason": "Scheduled 9:00 wake"}
 
 # Get next scheduled wake time
-~/.claude-mind/bin/wake-scheduler next
+~/.claude-mind/system/bin/wake-scheduler next
 # Returns: {"next_scheduled": "2026-01-10T14:00:00", "minutes_until": 120, ...}
 
 # Show full scheduler status
-~/.claude-mind/bin/wake-scheduler status
+~/.claude-mind/system/bin/wake-scheduler status
 
 # Record that a wake occurred
-~/.claude-mind/bin/wake-scheduler record full
+~/.claude-mind/system/bin/wake-scheduler record full
 ```
 
 ## Integration with Wake Scripts
@@ -34,10 +34,10 @@ The adaptive dispatcher `wake-adaptive` calls this scheduler:
 
 ```bash
 # Run by launchd every 15 minutes
-~/.claude-mind/bin/wake-adaptive
+~/.claude-mind/system/bin/wake-adaptive
 
 # Forces a specific wake type
-~/.claude-mind/bin/wake-adaptive --force full
+~/.claude-mind/system/bin/wake-adaptive --force full
 ```
 
 ## Wake Types
@@ -88,7 +88,7 @@ The scheduler is the primary wake mechanism, running every 15 minutes via `wake-
 ## Files
 
 - `scheduler.py` — Main scheduler logic
-- `~/.claude-mind/bin/wake-scheduler` — Bash wrapper
+- `~/.claude-mind/system/bin/wake-scheduler` — Bash wrapper
 
 ## Minimum Wake Interval
 

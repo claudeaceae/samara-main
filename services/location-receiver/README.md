@@ -69,5 +69,5 @@ Overland sends GeoJSON. The server extracts:
 cat ~/.claude-mind/state/location.json
 
 # Or use the helper script
-~/.claude-mind/bin/get-e-location
+~/.claude-mind/system/bin/get-e-location
 ```

@@ -43,7 +43,7 @@ class BlueskyWatcherTests(unittest.TestCase):
         with load_service_module(BLUESKY_PATH, env={"SAMARA_MIND_PATH": self.mind_path}) as bluesky:
             interactions = [{"type": "FOLLOW", "author": "alice"}]
             bluesky.write_sense_event(interactions, priority="background")
-            event_path = Path(self.mind_path) / "senses" / "bluesky.event.json"
+            event_path = Path(self.mind_path) / "system" / "senses" / "bluesky.event.json"
             event = json.loads(event_path.read_text())
 
         self.assertEqual(event["sense"], "bluesky")

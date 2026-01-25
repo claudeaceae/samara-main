@@ -10,16 +10,16 @@ External services can POST webhooks to trigger Samara's attention. Events are co
 
 ```bash
 # Start the service
-~/.claude-mind/bin/webhook-receiver start
+~/.claude-mind/system/bin/webhook-receiver start
 
 # Check status
-~/.claude-mind/bin/webhook-receiver status
+~/.claude-mind/system/bin/webhook-receiver status
 
 # View logs
-~/.claude-mind/bin/webhook-receiver logs
+~/.claude-mind/system/bin/webhook-receiver logs
 
 # Stop the service
-~/.claude-mind/bin/webhook-receiver stop
+~/.claude-mind/system/bin/webhook-receiver stop
 ```
 
 ## Endpoints
@@ -32,7 +32,7 @@ External services can POST webhooks to trigger Samara's attention. Events are co
 
 ## Configuration
 
-Create `~/.claude-mind/credentials/webhook-secrets.json`:
+Create `~/.claude-mind/self/credentials/webhook-secrets.json`:
 
 ```json
 {
@@ -140,7 +140,7 @@ Note: Your Mac needs to be accessible from GitHub (port forwarding, Cloudflare T
 
 - `server.py` — FastAPI webhook server
 - `requirements.txt` — Python dependencies (fastapi, uvicorn)
-- `~/.claude-mind/bin/webhook-receiver` — Management script
+- `~/.claude-mind/system/bin/webhook-receiver` — Management script
 
 ## Dependencies
 
@@ -154,8 +154,8 @@ Or the management script will install them automatically on first start.
 
 Default: 8082
 
-Change with: `~/.claude-mind/bin/webhook-receiver start --port 8083`
+Change with: `~/.claude-mind/system/bin/webhook-receiver start --port 8083`
 
 ## Logs
 
-Logs written to `~/.claude-mind/logs/webhook-receiver.log`
+Logs written to `~/.claude-mind/system/logs/webhook-receiver.log`
