@@ -61,6 +61,42 @@ for t in triggers:
         ;;
 esac
 
+# Get location context
+LOCATION_CONTEXT=""
+if [ -f "$MIND_PATH/state/location.json" ]; then
+    LOCATION_CONTEXT=$(jq -r '.address // "unknown"' "$MIND_PATH/state/location.json" 2>/dev/null || echo "")
+    if [ -n "$LOCATION_CONTEXT" ] && [ "$LOCATION_CONTEXT" != "unknown" ]; then
+        LOCATION_CONTEXT="Current location: $LOCATION_CONTEXT"
+    else
+        LOCATION_CONTEXT=""
+    fi
+fi
+
+# Get browser context (top domains from recent history)
+BROWSER_CONTEXT=""
+BROWSER_FILE="$MIND_PATH/state/browser-history.jsonl"
+if [ -f "$BROWSER_FILE" ]; then
+    # Get top 3 domains from recent browsing
+    BROWSER_CONTEXT=$(tail -100 "$BROWSER_FILE" 2>/dev/null | \
+        python3 -c "
+import sys, json
+from collections import Counter
+domains = []
+for line in sys.stdin:
+    try:
+        entry = json.loads(line.strip())
+        url = entry.get('url', '')
+        if '://' in url:
+            domain = url.split('://')[1].split('/')[0].replace('www.', '')
+            if domain not in ['google.com', 'localhost']:
+                domains.append(domain)
+    except: pass
+top = Counter(domains).most_common(3)
+if top:
+    print('Recent browsing: ' + ', '.join(d[0] for d in top))
+" 2>/dev/null) || BROWSER_CONTEXT=""
+fi
+
 # Read core identity files
 IDENTITY=$(cat "$MIND_PATH/self/identity.md" 2>/dev/null || echo "")
 DECISIONS=$(cat "$MIND_PATH/memory/decisions.md" 2>/dev/null || echo "")
@@ -85,6 +121,10 @@ From your decisions file: Be helpful but not intrusive. 1-hour cooldown between 
 
 ## Additional Context
 $EXTRA_CONTEXT
+
+## Environment
+$LOCATION_CONTEXT
+$BROWSER_CONTEXT
 
 ## Recent Activity
 $RECENT_EPISODE

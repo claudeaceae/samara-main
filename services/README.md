@@ -17,6 +17,7 @@ Python services that extend the organism's capabilities through background polli
 | `wallet-watcher` | Poller | - | 15 min | Monitors crypto wallet balances |
 | `meeting-check` | Poller | - | 15 min | Detects meetings for prep/debrief |
 | `wake-scheduler` | CLI | - | 15 min | Calculates adaptive wake times |
+| `proactive` | Integrated | - | 15 min | Evaluates triggers for proactive messaging |
 
 **Client-Side Services** (run on collaborator's devices):
 
@@ -110,6 +111,22 @@ These run every 15 minutes via launchd, check for new activity, and write sense 
 | `wallet-watcher` | Monitors SOL/ETH/BTC balances for changes |
 | `meeting-check` | Detects meetings starting soon or just ended |
 | `wake-scheduler` | Decides whether to trigger wake cycles |
+
+### Proactive Messaging
+
+Runs as part of `wake-adaptive` (not a separate launchd job). Evaluates multiple trigger sources to decide when Claude should reach out:
+
+- **Pattern triggers** — Conversation rhythm anomalies
+- **Calendar triggers** — Upcoming/ended meetings
+- **Browser triggers** — Research dives, search patterns
+- **Location triggers** — Arrival/departure events
+- **Anomaly triggers** — Unusual silence
+
+When confidence exceeds 0.8 and safeguards pass (quiet hours, cooldown, etc.), generates a contextual message via Claude and sends via iMessage.
+
+Toggle: `service-toggle proactive on/off`
+
+See [Proactive Messaging](../docs/proactive-messaging.md) for full documentation.
 
 ---
 

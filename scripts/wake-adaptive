@@ -57,6 +57,17 @@ fi
 
 log "Decision: should_wake=$SHOULD_WAKE, type=$WAKE_TYPE, reason=$REASON"
 
+# Evaluate triggers for proactive messaging (only if service is enabled)
+PROACTIVE_ENABLED=$(jq -r '.services.proactive // true' "$MIND_PATH/config.json" 2>/dev/null || echo "true")
+
+if [ "$PROACTIVE_ENABLED" = "true" ]; then
+    log "Evaluating triggers for proactive engagement..."
+    TRIGGER_RESULT=$("$MIND_PATH/system/bin/check-triggers" 2>&1) || true
+    log "Trigger evaluation complete"
+else
+    log "Proactive messaging disabled, skipping trigger evaluation"
+fi
+
 if [ "$SHOULD_WAKE" = "true" ]; then
     case "$WAKE_TYPE" in
         full)

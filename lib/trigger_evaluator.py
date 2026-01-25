@@ -76,6 +76,8 @@ try:
 except ImportError:
     QUESTIONS_AVAILABLE = False
 
+from collections import Counter
+
 MIND_PATH = get_mind_path()
 STATE_PATH = MIND_PATH / "state"
 EPISODES_PATH = MIND_PATH / "memory" / "episodes"
@@ -188,6 +190,10 @@ class TriggerEvaluator:
         if self.question_synthesizer:
             question_triggers = self._get_question_triggers()
             triggers.extend(question_triggers)
+
+        # Browser history triggers
+        browser_triggers = self._get_browser_triggers()
+        triggers.extend(browser_triggers)
 
         if not triggers:
             return {
@@ -545,6 +551,116 @@ class TriggerEvaluator:
                     "suggested_message": result.get("question"),
                     "question_context": result
                 })
+
+        except Exception as e:
+            pass
+
+        return triggers
+
+    def _get_browser_triggers(self) -> list:
+        """Get triggers based on browser history patterns."""
+        triggers = []
+
+        # Read browser history from JSONL file
+        history_file = STATE_PATH / "browser-history.jsonl"
+        if not history_file.exists():
+            return triggers
+
+        try:
+            # Read recent entries (last 24 hours)
+            now = datetime.now()
+            cutoff = now - timedelta(hours=24)
+            recent_entries = []
+
+            with open(history_file) as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        entry = json.loads(line)
+                        # Parse timestamp
+                        ts_str = entry.get("timestamp", "")
+                        if ts_str:
+                            # Handle various timestamp formats
+                            ts_str = ts_str.replace("Z", "+00:00")
+                            try:
+                                ts = datetime.fromisoformat(ts_str)
+                                # Convert to local time for comparison
+                                if ts.tzinfo:
+                                    ts = ts.replace(tzinfo=None)
+                                if ts > cutoff:
+                                    recent_entries.append(entry)
+                            except:
+                                pass
+                    except json.JSONDecodeError:
+                        continue
+
+            if not recent_entries:
+                return triggers
+
+            # Extract domains from URLs
+            domains = []
+            search_queries = []
+            for entry in recent_entries:
+                url = entry.get("url", "")
+                title = entry.get("title", "")
+
+                # Extract domain
+                if "://" in url:
+                    domain = url.split("://")[1].split("/")[0]
+                    domain = domain.replace("www.", "")
+                    domains.append(domain)
+
+                # Look for search queries
+                if "google.com/search" in url and "q=" in url:
+                    try:
+                        query_part = url.split("q=")[1].split("&")[0]
+                        # URL decode
+                        import urllib.parse
+                        query = urllib.parse.unquote_plus(query_part)
+                        search_queries.append(query)
+                    except:
+                        pass
+
+            # Analyze patterns
+            domain_counts = Counter(domains)
+            top_domains = domain_counts.most_common(5)
+
+            # Look for research patterns (many visits to same domain)
+            for domain, count in top_domains:
+                if count >= 5 and domain not in ["google.com", "localhost"]:
+                    triggers.append({
+                        "type": "browser",
+                        "subtype": "research_dive",
+                        "confidence": min(0.4 + (count - 5) * 0.05, 0.7),
+                        "reason": f"Deep dive: {count} visits to {domain} today",
+                        "suggested_message": f"I noticed you've been exploring {domain} quite a bit. Find anything interesting?",
+                        "domain": domain,
+                        "visit_count": count
+                    })
+
+            # Look for search patterns
+            if len(search_queries) >= 3:
+                # Check for related searches (simple keyword overlap)
+                all_words = []
+                for q in search_queries[-10:]:  # Last 10 searches
+                    all_words.extend(q.lower().split())
+
+                word_counts = Counter(all_words)
+                # Filter out common words
+                common_words = {"the", "a", "an", "is", "in", "on", "at", "to", "for", "of", "and", "or", "how", "what", "why"}
+                topic_words = [(w, c) for w, c in word_counts.most_common(5) if w not in common_words and len(w) > 2]
+
+                if topic_words and topic_words[0][1] >= 3:
+                    topic = topic_words[0][0]
+                    triggers.append({
+                        "type": "browser",
+                        "subtype": "search_pattern",
+                        "confidence": 0.5,
+                        "reason": f"Research topic: '{topic}' appears in multiple searches",
+                        "suggested_message": f"Looks like you're researching something about {topic}. How's it going?",
+                        "topic": topic
+                    })
 
         except Exception as e:
             pass

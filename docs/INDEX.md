@@ -17,6 +17,7 @@ Navigation hub for all documentation.
 ## System Reference
 
 - [Memory Systems](memory-systems.md) — Session retention, semantic search, transcript archive
+- [Proactive Messaging](proactive-messaging.md) — Autonomous outreach based on triggers
 - [Skills Reference](skills-reference.md) — Complete skill catalog by category
 - [Scripts Reference](../scripts/README.md) — Communication, memory, and sync scripts
 - [Services Reference](../services/README.md) — Webhook, MCP, X/Twitter, wallet services
