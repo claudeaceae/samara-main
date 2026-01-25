@@ -176,7 +176,7 @@ log "Parsed image prompt ($(echo "$IMAGE_PROMPT" | wc -c | tr -d ' ') chars)"
 
 # Generate the accompanying image
 IMAGE_FILE="/tmp/morning-briefing-$(date +%s).jpg"
-AVATAR_REF="$MIND_PATH/self/credentials/avatar-ref.png"
+AVATAR_REF="$MIND_PATH/self/avatar-ref.png"
 
 if [ -n "$IMAGE_PROMPT" ]; then
     log "Generating morning briefing image..."

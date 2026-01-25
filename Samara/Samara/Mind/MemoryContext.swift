@@ -370,7 +370,7 @@ final class MemoryContext {
 
             These resources are available but not loaded. Reference them when needed:
 
-            - **Capabilities:** Full inventory at ~/.claude-mind/capabilities/inventory.md
+            - **Capabilities:** Full inventory at ~/.claude-mind/self/capabilities/inventory.md
               Use /capability skill to check if something is possible
 
             - **Memory Search:** Use /recall for semantic memory lookup

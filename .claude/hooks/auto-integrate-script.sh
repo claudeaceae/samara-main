@@ -64,7 +64,7 @@ else
 fi
 
 # 3. Append to capabilities changelog
-CHANGELOG="$MIND_PATH/capabilities/changelog.md"
+CHANGELOG="$MIND_PATH/self/capabilities/changelog.md"
 if [ -f "$CHANGELOG" ]; then
     TODAY=$(date +%Y-%m-%d)
     # Check if we already logged this script today

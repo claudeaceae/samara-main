@@ -16,8 +16,8 @@ final class ContextSelectorTests: SamaraTestCase {
     }
 
     func testSmartContextIncludesCoreHeading() throws {
-        try ensureMindFile("identity.md", contents: "# Identity\n\nSmart context identity.\n")
-        try ensureMindFile("goals.md", contents: "# Goals\n\n- Keep context lean.\n")
+        try ensureMindFile("self/identity.md", contents: "# Identity\n\nSmart context identity.\n")
+        try ensureMindFile("self/goals.md", contents: "# Goals\n\n- Keep context lean.\n")
 
         let selector = makeSelector(smartContext: true)
 
@@ -28,8 +28,8 @@ final class ContextSelectorTests: SamaraTestCase {
     }
 
     func testLegacyContextKeepsIdentitySection() throws {
-        try ensureMindFile("identity.md", contents: "# Identity\n\nLegacy context identity.\n")
-        try ensureMindFile("goals.md", contents: "# Goals\n\n- Keep context lean.\n")
+        try ensureMindFile("self/identity.md", contents: "# Identity\n\nLegacy context identity.\n")
+        try ensureMindFile("self/goals.md", contents: "# Goals\n\n- Keep context lean.\n")
 
         let selector = makeSelector(smartContext: false)
 
@@ -39,8 +39,8 @@ final class ContextSelectorTests: SamaraTestCase {
     }
 
     func testSmartContextForIMessagesUsesSmartContext() throws {
-        try ensureMindFile("identity.md", contents: "# Identity\n\nSmart context identity.\n")
-        try ensureMindFile("goals.md", contents: "# Goals\n\n- Keep context lean.\n")
+        try ensureMindFile("self/identity.md", contents: "# Identity\n\nSmart context identity.\n")
+        try ensureMindFile("self/goals.md", contents: "# Goals\n\n- Keep context lean.\n")
 
         let selector = makeSelector(smartContext: true)
         let message = Message(
@@ -64,8 +64,8 @@ final class ContextSelectorTests: SamaraTestCase {
     }
 
     func testSmartContextForEmailFlowUsesSmartContext() throws {
-        try ensureMindFile("identity.md", contents: "# Identity\n\nSmart context identity.\n")
-        try ensureMindFile("goals.md", contents: "# Goals\n\n- Keep context lean.\n")
+        try ensureMindFile("self/identity.md", contents: "# Identity\n\nSmart context identity.\n")
+        try ensureMindFile("self/goals.md", contents: "# Goals\n\n- Keep context lean.\n")
 
         let selector = makeSelector(smartContext: true)
         let emailText = """
@@ -86,8 +86,8 @@ final class ContextSelectorTests: SamaraTestCase {
     }
 
     func testSmartContextForScratchpadFlowUsesSmartContext() throws {
-        try ensureMindFile("identity.md", contents: "# Identity\n\nSmart context identity.\n")
-        try ensureMindFile("goals.md", contents: "# Goals\n\n- Keep context lean.\n")
+        try ensureMindFile("self/identity.md", contents: "# Identity\n\nSmart context identity.\n")
+        try ensureMindFile("self/goals.md", contents: "# Goals\n\n- Keep context lean.\n")
 
         let selector = makeSelector(smartContext: true)
         let scratchpadText = "Scratchpad update: keep testing smart context."

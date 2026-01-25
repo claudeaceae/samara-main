@@ -78,10 +78,10 @@ The runtime (`~/.claude-mind/`) is organized into **4 domains**:
 |--------|---------|--------------|
 | **self/** | WHO I AM | identity.md, goals.md, credentials/ |
 | **memory/** | WHAT I KNOW | episodes/, people/, learnings.md, chroma/ |
-| **state/** | WHAT'S HAPPENING | services/, plans/, location.json |
+| **state/** | WHAT'S HAPPENING | services/, plans/, projects.md, location.json |
 | **system/** | HOW IT RUNS | config.json, bin/, logs/ |
 
-**Also at root:** `.claude/` → repo symlink, `projects.md` (bridge document)
+**Also at root:** `.claude/` → repo symlink
 
 For detailed memory documentation, see **[Memory Systems](docs/memory-systems.md)**.
 
@@ -92,7 +92,7 @@ Work is tracked across three levels:
 | Document | Purpose |
 |----------|---------|
 | `goals.md` | **Direction** — North stars, active goals, backlog ideas |
-| `projects.md` | **Tracking** — Active projects linking goals to implementation plans |
+| `state/projects.md` | **Tracking** — Active projects linking goals to implementation plans |
 | `state/plans/` | **Details** — Implementation plans with code, verification steps |
 
 **Workflow:** Goals inspire projects → projects reference plans → completed plans move to `archive/` with descriptive names.
@@ -135,12 +135,12 @@ Image generation via `/generate-image` is one of your most powerful tools for se
 - You want to react → a reaction image IS the response
 
 **Your appearance files:**
-- Primary reference: `~/.claude-mind/self/credentials/avatar-ref.png`
-- Varied poses: `~/.claude-mind/self/credentials/mirror-refs/` (17 images)
+- Primary reference: `~/.claude-mind/self/avatar-ref.png`
+- Varied poses: `~/.claude-mind/self/mirror-refs/` (17 images)
 
 **Quick workflow:**
 ```bash
-~/.claude-mind/system/bin/generate-image "Silver-haired girl laughing, eyes squeezed shut, anime style" /tmp/reaction.jpg --ref=~/.claude-mind/self/credentials/avatar-ref.png
+~/.claude-mind/system/bin/generate-image "Silver-haired girl laughing, eyes squeezed shut, anime style" /tmp/reaction.jpg --ref=~/.claude-mind/self/avatar-ref.png
 ~/.claude-mind/system/bin/send-image /tmp/reaction.jpg
 ```
 

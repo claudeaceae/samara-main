@@ -9,8 +9,8 @@ final class MemoryContextTests: SamaraTestCase {
     }
 
     func testBuildContextIncludesIdentityAndGoals() {
-        try? ensureMindFile("identity.md", contents: "# Identity\n\nTest fixture identity for Samara.\n")
-        try? ensureMindFile("goals.md", contents: "# Goals\n\n- Validate the test harness in an isolated environment.\n")
+        try? ensureMindFile("self/identity.md", contents: "# Identity\n\nTest fixture identity for Samara.\n")
+        try? ensureMindFile("self/goals.md", contents: "# Goals\n\n- Validate the test harness in an isolated environment.\n")
 
         let contextBuilder = MemoryContext()
         let context = contextBuilder.buildContext()
@@ -111,8 +111,8 @@ final class MemoryContextTests: SamaraTestCase {
     }
 
     func testBuildSmartContextLoadsRequestedModules() throws {
-        try ensureMindFile("identity.md", contents: "# Identity\n\nSmart context tests.\n")
-        try ensureMindFile("goals.md", contents: "# Goals\n\n- Test smart context modules.\n")
+        try ensureMindFile("self/identity.md", contents: "# Identity\n\nSmart context tests.\n")
+        try ensureMindFile("self/goals.md", contents: "# Goals\n\n- Test smart context modules.\n")
         try ensureMindFile("memory/decisions.md", contents: "Decision: Prefer smart context.\n")
         try ensureMindFile("memory/learnings.md", contents: "Learning: Reduce prompt size.\n")
         try ensureMindFile("memory/observations.md", contents: "Observation: Context was bloated.\n")

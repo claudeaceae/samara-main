@@ -75,7 +75,7 @@ if [ "$TOOL_NAME" = "Write" ] || [ "$TOOL_NAME" = "Edit" ]; then
     MIND_PATH="${HOME}/.claude-mind"
 
     # Block writes to identity files
-    if echo "$FILE_PATH" | grep -qE "${MIND_PATH}/identity\.md|${MIND_PATH}/goals\.md"; then
+    if echo "$FILE_PATH" | grep -qE "${MIND_PATH}/self/identity\.md|${MIND_PATH}/self/goals\.md"; then
         echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Local model guardrail: Cannot modify identity or goals files"}}'
         exit 0
     fi
@@ -93,7 +93,7 @@ if [ "$TOOL_NAME" = "Write" ] || [ "$TOOL_NAME" = "Edit" ]; then
     fi
 
     # Block writes to credentials
-    if echo "$FILE_PATH" | grep -qE "${MIND_PATH}/(credentials|secrets|\.env)"; then
+    if echo "$FILE_PATH" | grep -qE "${MIND_PATH}/self/credentials|${MIND_PATH}/(secrets|\.env)"; then
         echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Local model guardrail: Cannot modify credentials"}}'
         exit 0
     fi

@@ -94,20 +94,7 @@ if [ -z "$HOT_DIGEST" ] || [ "$HOT_DIGEST" = "No recent events found." ]; then
     fi
 fi
 
-# 1. Check for recent handoff
-HANDOFF_DIR="$MIND_PATH/state/ledgers"
-if [ -d "$HANDOFF_DIR" ]; then
-    LATEST_HANDOFF=$(ls -t "$HANDOFF_DIR"/*.md 2>/dev/null | head -1)
-    if [ -n "$LATEST_HANDOFF" ] && [ -f "$LATEST_HANDOFF" ]; then
-        HANDOFF_AGE_HOURS=$(( ($(date +%s) - $(stat -f %m "$LATEST_HANDOFF")) / 3600 ))
-        if [ "$HANDOFF_AGE_HOURS" -lt 24 ]; then
-            HANDOFF_CONTENT=$(head -50 "$LATEST_HANDOFF")
-            CONTEXT+="## Recent Handoff (${HANDOFF_AGE_HOURS}h ago)\n\n$HANDOFF_CONTENT\n\n"
-        fi
-    fi
-fi
-
-# 1b. Check for recent CLI session handoffs (for cross-surface continuity)
+# 1. Check for recent CLI session handoffs (for cross-surface continuity)
 CLI_HANDOFF_DIR="$MIND_PATH/state/handoffs"
 if [ -d "$CLI_HANDOFF_DIR" ]; then
     # Find handoffs from last 12 hours (720 minutes)
@@ -207,7 +194,7 @@ fi
 CAPABILITY_REMINDERS=""
 
 # Check last X post time
-X_STATE="$MIND_PATH/state/x-engage-state.json"
+X_STATE="$MIND_PATH/state/services/x-engage-state.json"
 if [ -f "$X_STATE" ]; then
     LAST_POST=$(jq -r '.last_proactive_post // .last_post_time // ""' "$X_STATE" 2>/dev/null)
     if [ -n "$LAST_POST" ] && [ "$LAST_POST" != "null" ]; then
@@ -228,7 +215,7 @@ if [ -f "$X_STATE" ]; then
 fi
 
 # Check X mentions
-X_WATCHER_STATE="$MIND_PATH/state/x-watcher-state.json"
+X_WATCHER_STATE="$MIND_PATH/state/services/x-watcher-state.json"
 if [ -f "$X_WATCHER_STATE" ]; then
     PENDING_MENTIONS=$(jq -r '.pending_mentions // 0' "$X_WATCHER_STATE" 2>/dev/null)
     if [ "$PENDING_MENTIONS" != "0" ] && [ "$PENDING_MENTIONS" != "null" ] && [ "$PENDING_MENTIONS" -gt 0 ]; then
@@ -237,7 +224,7 @@ if [ -f "$X_WATCHER_STATE" ]; then
 fi
 
 # Check wallet last check time (use file modification time)
-WALLET_STATE="$MIND_PATH/state/wallet-state.json"
+WALLET_STATE="$MIND_PATH/state/services/wallet-state.json"
 if [ -f "$WALLET_STATE" ]; then
     WALLET_MTIME=$(stat -f %m "$WALLET_STATE" 2>/dev/null || echo 0)
     if [ "$WALLET_MTIME" != "0" ]; then
@@ -255,7 +242,7 @@ if [ "$UNREAD_LINKS" -gt 0 ]; then
 fi
 
 # Check if reference directories have recent additions (for creative prompts)
-MIRROR_DIR="$MIND_PATH/self/credentials/mirror"
+MIRROR_DIR="$MIND_PATH/self/mirror"
 if [ -d "$MIRROR_DIR" ]; then
     RECENT_MIRROR=$(find "$MIRROR_DIR" -type f -mtime -7 2>/dev/null | wc -l | tr -d ' ')
     if [ "$RECENT_MIRROR" -gt 0 ]; then

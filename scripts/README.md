@@ -107,7 +107,7 @@ bluesky-post "Your thought here"
 **Playwright rate limits:**
 - Maximum 5 posts per day
 - Minimum 30 seconds between posts
-- State: `~/.claude-mind/state/x-playwright-state.json`
+- State: `~/.claude-mind/state/services/x-playwright-state.json`
 
 ```bash
 x-post "Hello world"
@@ -147,12 +147,12 @@ x-reply 1234567890 "Thanks for sharing!"
 Primary tool for visual self-expression.
 
 **Character references:**
-- Primary: `~/.claude-mind/self/credentials/avatar-ref.png`
-- Varied poses: `~/.claude-mind/self/credentials/mirror-refs/` (17 images)
+- Primary: `~/.claude-mind/self/avatar-ref.png`
+- Varied poses: `~/.claude-mind/self/mirror-refs/` (17 images)
 
 ```bash
 generate-image "Silver-haired girl laughing, eyes closed" /tmp/reaction.jpg \
-  --ref=~/.claude-mind/self/credentials/avatar-ref.png
+  --ref=~/.claude-mind/self/avatar-ref.png
 
 send-image /tmp/reaction.jpg
 ```

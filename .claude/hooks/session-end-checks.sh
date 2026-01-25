@@ -61,7 +61,7 @@ fi
 cd "$REPO_DIR" 2>/dev/null || true
 
 NEW_CAPABILITIES=""
-INVENTORY="$MIND_PATH/capabilities/inventory.md"
+INVENTORY="$MIND_PATH/self/capabilities/inventory.md"
 
 for dir in scripts .claude/skills services; do
     if [ -d "$dir" ]; then
@@ -86,7 +86,7 @@ fi
 # "I can build infrastructure without understanding what it's for"
 # Check if new scripts were created this session without changelog entries
 
-CHANGELOG="$MIND_PATH/capabilities/changelog.md"
+CHANGELOG="$MIND_PATH/self/capabilities/changelog.md"
 TODAY=$(date +%Y-%m-%d)
 
 # Get scripts modified today (created or changed)
