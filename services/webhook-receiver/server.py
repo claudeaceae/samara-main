@@ -24,7 +24,7 @@ import json
 import os
 import time
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -231,7 +231,7 @@ def create_browser_history_event(data: dict) -> str:
 
     event = {
         "sense": "browser_history",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "priority": priority,
         "data": {
             "type": "browsing_update",
