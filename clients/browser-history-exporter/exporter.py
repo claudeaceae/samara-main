@@ -39,7 +39,7 @@ STATE_PATH = Path.home() / ".claude-client" / "browser-history-state.json"
 
 # Browser history database locations
 BROWSER_PATHS = {
-    "dia": Path.home() / "Library/Application Support/Dia/Default/History",
+    "dia": Path.home() / "Library/Application Support/Dia/User Data/Default/History",
     "chrome": Path.home() / "Library/Application Support/Google/Chrome/Default/History",
     "safari": Path.home() / "Library/Safari/History.db",
     "arc": Path.home() / "Library/Application Support/Arc/User Data/Default/History",
