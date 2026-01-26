@@ -5,8 +5,9 @@
 set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-STATE_FILE="$MIND_PATH/state/wallet-state.json"
-CREDS_FILE="$MIND_PATH/self/credentials/wallet-apis.json"
+STATE_FILE="$MIND_PATH/state/services/wallet-state.json"
+CREDENTIAL="$MIND_PATH/system/bin/credential"
+export WALLET_CREDS_JSON=$("$CREDENTIAL" get wallet-apis 2>/dev/null || true)
 
 # Check for JSON output flag
 if [ "$1" = "--json" ]; then
@@ -31,8 +32,8 @@ import json
 import os
 from datetime import datetime
 
-state_file = os.environ.get('STATE_FILE', os.path.expanduser('~/.claude-mind/state/wallet-state.json'))
-creds_file = os.environ.get('CREDS_FILE', os.path.expanduser('~/.claude-mind/self/credentials/wallet-apis.json'))
+state_file = os.environ.get('STATE_FILE', os.path.expanduser('~/.claude-mind/state/services/wallet-state.json'))
+wallet_creds_json = os.environ.get('WALLET_CREDS_JSON', '{}')
 
 with open(state_file) as f:
     state = json.load(f)
@@ -40,10 +41,9 @@ with open(state_file) as f:
 # Load addresses from creds
 addresses = {}
 try:
-    with open(creds_file) as f:
-        creds = json.load(f)
-        for chain in ['solana', 'ethereum', 'bitcoin']:
-            addresses[chain] = creds.get(chain, {}).get('address', '')
+    creds = json.loads(wallet_creds_json)
+    for chain in ['solana', 'ethereum', 'bitcoin']:
+        addresses[chain] = creds.get(chain, {}).get('address', '')
 except:
     pass
 

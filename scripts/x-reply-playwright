@@ -10,7 +10,7 @@ set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="$MIND_PATH/system/logs/x-playwright.log"
-STATE_FILE="$MIND_PATH/state/x-playwright-state.json"
+STATE_FILE="$MIND_PATH/state/services/x-playwright-state.json"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 
 # Rate limits (shared with x-post-playwright)
@@ -141,11 +141,12 @@ if ! check_rate_limit; then
     exit 1
 fi
 
-# Load X cookies for authentication
-CREDS_FILE="$MIND_PATH/self/credentials/x-cookies.json"
-if [ -f "$CREDS_FILE" ]; then
-    AUTH_TOKEN=$(jq -r '.auth_token' "$CREDS_FILE" 2>/dev/null || echo "")
-    CT0=$(jq -r '.ct0' "$CREDS_FILE" 2>/dev/null || echo "")
+# Load X cookies from Keychain
+CREDENTIAL="$MIND_PATH/system/bin/credential"
+CREDS_JSON=$("$CREDENTIAL" get x-cookies 2>/dev/null || true)
+if [ -n "$CREDS_JSON" ]; then
+    AUTH_TOKEN=$(echo "$CREDS_JSON" | jq -r '.auth_token' 2>/dev/null || echo "")
+    CT0=$(echo "$CREDS_JSON" | jq -r '.ct0' 2>/dev/null || echo "")
     if [ -n "$AUTH_TOKEN" ] && [ "$AUTH_TOKEN" != "null" ] && [ -n "$CT0" ] && [ "$CT0" != "null" ]; then
         COOKIE_INJECTION="
 CRITICAL FIRST STEP - Inject authentication cookies:

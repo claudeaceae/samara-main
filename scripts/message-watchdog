@@ -36,7 +36,7 @@ test_messages_send_responsiveness() {
 
 # Check if Bluesky is available as fallback
 test_bluesky() {
-    [ -x "$BLUESKY_SCRIPT" ] && [ -f "$MIND_DIR/credentials/bluesky.json" ]
+    [ -x "$BLUESKY_SCRIPT" ] && "$MIND_DIR/system/bin/credential" get bluesky >/dev/null 2>&1
 }
 
 # Get current status

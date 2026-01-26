@@ -25,7 +25,7 @@ def resolve_mind_dir() -> str:
 
 
 MIND_DIR = resolve_mind_dir()
-CREDS_FILE = os.path.join(MIND_DIR, 'self', 'credentials', 'wallet-apis.json')
+CREDENTIAL_BIN = os.path.join(MIND_DIR, 'system', 'bin', 'credential')
 STATE_FILE = os.path.join(MIND_DIR, 'state', 'wallet-state.json')
 SENSES_DIR = os.path.join(MIND_DIR, 'system', 'senses')
 LOG_FILE = os.path.join(MIND_DIR, 'system', 'logs', 'wallet-watcher.log')
@@ -105,15 +105,22 @@ def http_get_json(url: str) -> Optional[Dict]:
 
 
 def load_credentials() -> Optional[Dict]:
-    """Load wallet API configuration."""
+    """Load wallet API configuration from macOS Keychain."""
     try:
-        with open(CREDS_FILE, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        log(f"Credentials file not found: {CREDS_FILE}")
-        return None
+        import subprocess
+        result = subprocess.run(
+            [CREDENTIAL_BIN, 'get', 'wallet-apis'],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            log("Credentials not found in Keychain")
+            return None
+        return json.loads(result.stdout)
     except json.JSONDecodeError as e:
-        log(f"Invalid JSON in credentials file: {e}")
+        log(f"Invalid JSON in credentials: {e}")
+        return None
+    except Exception as e:
+        log(f"Error loading credentials: {e}")
         return None
 
 

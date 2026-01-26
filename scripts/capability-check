@@ -16,7 +16,7 @@ OSASCRIPT_BIN="${OSASCRIPT_BIN:-osascript}"
 CLAUDE_PATH="${CLAUDE_PATH:-$HOME/.local/bin/claude}"
 
 # Load config (required)
-source "$MIND_PATH/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
+source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
     echo "Error: config.sh not found" >&2
     exit 1
 }

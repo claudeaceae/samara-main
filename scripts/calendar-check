@@ -35,7 +35,7 @@ fi
 source "$VENV_PATH/bin/activate"
 
 # Check for triggers
-cd "$MIND_PATH/lib"
+cd "$MIND_PATH/system/lib"
 TRIGGERS=$(python3 -c "
 from calendar_analyzer import CalendarAnalyzer
 import json

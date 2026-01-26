@@ -248,7 +248,7 @@ def test_something(self):
 ### Path Conventions
 
 Always use 4-domain paths in tests:
-- `self/credentials/` not `credentials/`
+- Credentials via macOS Keychain (`credential get <name>`), not files
 - `system/senses/` not `senses/`
 - `system/logs/` not `logs/`
 

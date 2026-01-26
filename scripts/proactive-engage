@@ -30,14 +30,14 @@ source "$VENV_PATH/bin/activate"
 EXTRA_CONTEXT=""
 case "$TRIGGER_TYPE" in
     "calendar")
-        EXTRA_CONTEXT=$(cd "$MIND_PATH/lib" && python3 -c "
+        EXTRA_CONTEXT=$(cd "$MIND_PATH/system/lib" && python3 -c "
 from calendar_analyzer import CalendarAnalyzer
 analyzer = CalendarAnalyzer()
 print(analyzer.get_calendar_summary())
 " 2>/dev/null) || EXTRA_CONTEXT=""
         ;;
     "pattern")
-        EXTRA_CONTEXT=$(cd "$MIND_PATH/lib" && python3 -c "
+        EXTRA_CONTEXT=$(cd "$MIND_PATH/system/lib" && python3 -c "
 from pattern_analyzer import PatternAnalyzer
 analyzer = PatternAnalyzer()
 print(analyzer.get_pattern_summary())
@@ -195,7 +195,7 @@ log "Generated message: $MESSAGE"
 log "Message sent successfully"
 
 # Record engagement (for cooldown)
-cd "$MIND_PATH/lib"
+cd "$MIND_PATH/system/lib"
 python3 -c "
 from trigger_evaluator import TriggerEvaluator
 evaluator = TriggerEvaluator()

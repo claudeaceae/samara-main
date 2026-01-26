@@ -33,7 +33,7 @@ source "$VENV_PATH/bin/activate"
 # Default to full analysis if no command given
 COMMAND="${1:-analyze}"
 
-cd "$MIND_PATH/lib"
+cd "$MIND_PATH/system/lib"
 
 log "Running pattern analysis: $COMMAND"
 

@@ -19,7 +19,7 @@
 set -eo pipefail
 
 MIND_PATH="${MIND_PATH:-$HOME/.claude-mind}"
-CONFIG_FILE="$MIND_PATH/config.json"
+CONFIG_FILE="$MIND_PATH/system/config.json"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 
 # All known services

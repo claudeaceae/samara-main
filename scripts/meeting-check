@@ -61,7 +61,7 @@ fi
 source "$VENV_PATH/bin/activate"
 
 # Change to lib directory for imports
-cd "$MIND_PATH/lib" 2>/dev/null || cd "$(dirname "$0")/../lib"
+cd "$MIND_PATH/system/lib" 2>/dev/null || cd "$(dirname "$0")/../lib"
 
 # Check for meetings needing prep
 log "Checking for meetings needing prep..."

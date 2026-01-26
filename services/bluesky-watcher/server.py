@@ -24,7 +24,7 @@ def resolve_mind_dir() -> str:
 MIND_DIR = resolve_mind_dir()
 STATE_DIR = os.path.join(MIND_DIR, 'state')
 SENSES_DIR = os.path.join(MIND_DIR, 'system', 'senses')
-CREDS_FILE = os.path.join(MIND_DIR, 'self', 'credentials', 'bluesky.json')
+CREDENTIAL_BIN = os.path.join(MIND_DIR, 'system', 'bin', 'credential')
 STATE_FILE = os.path.join(STATE_DIR, 'services', 'bluesky-state.json')
 LOG_FILE = os.path.join(MIND_DIR, 'system', 'logs', 'bluesky-watcher.log')
 
@@ -56,10 +56,17 @@ def save_state(state: Dict):
 
 
 def load_credentials() -> Optional[Dict]:
-    """Load Bluesky credentials."""
+    """Load Bluesky credentials from macOS Keychain."""
     try:
-        with open(CREDS_FILE) as f:
-            return json.load(f)
+        import subprocess
+        result = subprocess.run(
+            [CREDENTIAL_BIN, 'get', 'bluesky'],
+            capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            log("Credentials not found in Keychain")
+            return None
+        return json.loads(result.stdout)
     except Exception as e:
         log(f"Error loading credentials: {e}")
         return None

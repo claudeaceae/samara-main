@@ -242,11 +242,11 @@ if [ "$UNREAD_LINKS" -gt 0 ]; then
 fi
 
 # Check if reference directories have recent additions (for creative prompts)
-MIRROR_DIR="$MIND_PATH/self/mirror"
-if [ -d "$MIRROR_DIR" ]; then
-    RECENT_MIRROR=$(find "$MIRROR_DIR" -type f -mtime -7 2>/dev/null | wc -l | tr -d ' ')
-    if [ "$RECENT_MIRROR" -gt 0 ]; then
-        CAPABILITY_REMINDERS+="- Mirror dir: $RECENT_MIRROR recent reference images\n"
+IMAGES_DIR="$MIND_PATH/self/images"
+if [ -d "$IMAGES_DIR" ]; then
+    RECENT_IMAGES=$(find "$IMAGES_DIR" -type f -mtime -7 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$RECENT_IMAGES" -gt 0 ]; then
+        CAPABILITY_REMINDERS+="- Images dir: $RECENT_IMAGES recent reference images\n"
     fi
 fi
 

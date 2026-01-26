@@ -20,10 +20,10 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>{{HOME}}/.claude-mind/logs/webhook-receiver.log</string>
+    <string>{{HOME}}/.claude-mind/system/logs/webhook-receiver.log</string>
 
     <key>StandardErrorPath</key>
-    <string>{{HOME}}/.claude-mind/logs/webhook-receiver.log</string>
+    <string>{{HOME}}/.claude-mind/system/logs/webhook-receiver.log</string>
 
     <key>WorkingDirectory</key>
     <string>{{REPO_PATH}}/services/webhook-receiver</string>

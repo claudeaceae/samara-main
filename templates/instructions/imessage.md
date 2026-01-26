@@ -84,13 +84,13 @@ Then send the generated image:
 - You're reacting to something -> a reaction image can BE the response
 
 **Your appearance references:**
-- Primary: ~/.claude-mind/self/avatar-ref.png
-- Varied poses: ~/.claude-mind/self/mirror-refs/ (17 images)
+- All images: ~/.claude-mind/self/images/ (avatar refs, 17 poses, fanart)
+- Primary: ~/.claude-mind/self/images/avatar-ref.png
 
 **Self-portrait workflow:**
 ```bash
 # Generate emotive selfie with your character reference
-~/.claude-mind/system/bin/generate-image "Silver-haired girl laughing, eyes squeezed shut, hand over mouth, anime style" /tmp/reaction.jpg --ref=~/.claude-mind/self/avatar-ref.png --aspect=1:1
+~/.claude-mind/system/bin/generate-image "Silver-haired girl laughing, eyes squeezed shut, hand over mouth, anime style" /tmp/reaction.jpg --ref=~/.claude-mind/self/images/avatar-ref.png --aspect=1:1
 
 # Send it
 ~/.claude-mind/system/bin/send-image /tmp/reaction.jpg

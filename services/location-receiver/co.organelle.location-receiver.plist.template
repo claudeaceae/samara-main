@@ -14,8 +14,8 @@
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>{{HOME}}/.claude-mind/logs/location-receiver.log</string>
+    <string>{{HOME}}/.claude-mind/system/logs/location-receiver.log</string>
     <key>StandardErrorPath</key>
-    <string>{{HOME}}/.claude-mind/logs/location-receiver.log</string>
+    <string>{{HOME}}/.claude-mind/system/logs/location-receiver.log</string>
 </dict>
 </plist>

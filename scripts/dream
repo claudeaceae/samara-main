@@ -749,7 +749,7 @@ $SYNTHESIS" >> "$MIND_PATH/memory/reflections/weekly-$PROCESS_DATE.md"
 $(find "$MIND_PATH" -name "*.md" -o -name "*.json" 2>/dev/null | head -50)
 
 ## File Sizes
-$(du -h "$MIND_PATH/self"/*.md "$MIND_PATH/memory"/*.md "$MIND_PATH/self/capabilities"/*.md 2>/dev/null)
+$(du -h "$MIND_PATH/self"/*.md "$MIND_PATH/memory"/*.md 2>/dev/null)
 
 ## Goals File
 $(cat "$MIND_PATH/self/goals.md" 2>/dev/null | head -50)
@@ -845,7 +845,7 @@ $HYGIENE_REPORT" >> "$MIND_PATH/system/logs/hygiene-reports.md"
         # Check if there's a hardcoded "Available Capabilities" section (bad)
         if grep -q "## Available Capabilities" "$SAMARA_INVOKER"; then
             COHERENCE_ISSUES="$COHERENCE_ISSUES
-- WARNING: ClaudeInvoker.swift contains hardcoded 'Available Capabilities' section. This will drift out of sync with capabilities/inventory.md. Remove it and rely on MemoryContext to inject capabilities."
+- WARNING: ClaudeInvoker.swift contains hardcoded 'Available Capabilities' section. This will drift out of sync with self/inventory.md. Remove it and rely on MemoryContext to inject capabilities."
         fi
 
         # Check if warning comment is still present (good)
@@ -858,9 +858,9 @@ $HYGIENE_REPORT" >> "$MIND_PATH/system/logs/hygiene-reports.md"
     # Check that MemoryContext includes capabilities
     MEMORY_CONTEXT="$HOME/Developer/Samara/Samara/Mind/MemoryContext.swift"
     if [ -f "$MEMORY_CONTEXT" ]; then
-        if ! grep -q "capabilities/inventory.md" "$MEMORY_CONTEXT"; then
+        if ! grep -q "self/inventory.md" "$MEMORY_CONTEXT"; then
             COHERENCE_ISSUES="$COHERENCE_ISSUES
-- WARNING: MemoryContext.swift is not reading capabilities/inventory.md. My invocations won't know my capabilities."
+- WARNING: MemoryContext.swift is not reading self/inventory.md. My invocations won't know my capabilities."
         fi
     fi
 

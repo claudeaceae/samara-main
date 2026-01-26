@@ -13,9 +13,9 @@
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>{{HOME}}/.claude-mind/logs/meeting-check.stdout.log</string>
+    <string>{{HOME}}/.claude-mind/system/logs/meeting-check.stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>{{HOME}}/.claude-mind/logs/meeting-check.stderr.log</string>
+    <string>{{HOME}}/.claude-mind/system/logs/meeting-check.stderr.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>

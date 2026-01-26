@@ -24,7 +24,7 @@ Monitors Solana, Ethereum, and Bitcoin wallet balances for changes and transacti
 
 ### 1. Configure Wallets (Optional)
 
-The wallet addresses are configured in `~/.claude-mind/self/credentials/wallet-apis.json`:
+The wallet addresses are stored in macOS Keychain (`credential get wallet-apis`). Format:
 
 ```json
 {
@@ -81,7 +81,7 @@ When balance changes are detected:
 
 ## State Files
 
-- `~/.claude-mind/state/wallet-state.json` — Tracked balances and last seen state
+- `~/.claude-mind/state/services/wallet-state.json` — Tracked balances and last seen state
 
 ## Logs
 

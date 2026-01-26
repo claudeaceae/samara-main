@@ -35,9 +35,6 @@ final class ClaudeInvoker {
     /// Tracks context window usage and provides tiered warnings
     private let contextTracker: ContextTracker
 
-    /// Manages session ledgers for structured handoffs
-    private let ledgerManager: LedgerManager
-
     /// JSON schema for iMessage responses - enforces structural separation of message from reasoning
     /// This provides deterministic extraction vs brittle pattern-matching sanitization
     private static let iMessageResponseSchema = """
@@ -51,51 +48,6 @@ final class ClaudeInvoker {
         "reasoning": {
           "type": "string",
           "description": "Internal thinking and reasoning about the response (this field is NOT sent to the user)"
-        },
-        "ledger": {
-          "type": "object",
-          "properties": {
-            "summary": {
-              "type": "string",
-              "description": "Optional short summary for the session ledger"
-            },
-            "goals": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "description": { "type": "string" },
-                  "status": { "type": "string", "enum": ["pending", "in_progress", "completed", "blocked"] },
-                  "progress": { "type": "string" }
-                },
-                "required": ["description"]
-              }
-            },
-            "decisions": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "description": { "type": "string" },
-                  "rationale": { "type": "string" }
-                },
-                "required": ["description", "rationale"]
-              }
-            },
-            "next_steps": {
-              "type": "array",
-              "items": { "type": "string" }
-            },
-            "open_questions": {
-              "type": "array",
-              "items": { "type": "string" }
-            },
-            "handoff_reason": {
-              "type": "string",
-              "enum": ["context_threshold", "session_timeout", "user_requested", "task_complete", "error"]
-            }
-          },
-          "additionalProperties": false
         }
       },
       "required": ["message"],
@@ -123,9 +75,6 @@ final class ClaudeInvoker {
 
         // Initialize context tracking (200K tokens for Claude 4)
         self.contextTracker = ContextTracker(maxTokens: 200_000)
-
-        // Initialize ledger manager
-        self.ledgerManager = LedgerManager()
 
         log("ClaudeInvoker initialized (fallback=\(useFallbackChain), localEndpoint=\(localEndpoint))",
             level: .info, component: "ClaudeInvoker")
@@ -225,53 +174,6 @@ final class ClaudeInvoker {
     }
 
     // MARK: - Context Management
-
-    /// Get the current context level for a chat
-    /// Returns nil if no metrics have been calculated yet
-    func getContextLevel(forChat chatId: String) -> ContextTracker.ContextLevel? {
-        // The ledger stores the last known context percentage
-        let ledger = ledgerManager.getLedger(forChat: chatId, sessionId: UUID().uuidString)
-        guard ledger.contextPercentage > 0 else { return nil }
-        return contextTracker.level(forPercentage: ledger.contextPercentage)
-    }
-
-    /// Check if handoff is recommended for a chat
-    func shouldHandoff(forChat chatId: String) -> Bool {
-        guard let level = getContextLevel(forChat: chatId) else { return false }
-        return level.shouldHandoff
-    }
-
-    /// Create a handoff document for a chat (for session transitions)
-    /// - Parameters:
-    ///   - chatId: The chat identifier
-    ///   - reason: Why the handoff is being created
-    /// - Returns: The handoff document, or nil if no ledger exists
-    func createHandoff(forChat chatId: String, reason: LedgerManager.Handoff.HandoffReason) -> LedgerManager.Handoff? {
-        return ledgerManager.createHandoff(forChat: chatId, reason: reason)
-    }
-
-    /// Get context for session continuation from a previous handoff
-    func getContinuationContext(forChat chatId: String) -> String? {
-        guard let handoff = ledgerManager.getMostRecentHandoff(forChat: chatId) else {
-            return nil
-        }
-        return ledgerManager.contextFromHandoff(handoff)
-    }
-
-    /// Record a goal in the current session ledger
-    func recordGoal(chatId: String, description: String, status: LedgerManager.Ledger.GoalStatus = .pending) {
-        ledgerManager.addGoal(chatId: chatId, description: description, status: status)
-    }
-
-    /// Record a decision in the current session ledger
-    func recordDecision(chatId: String, description: String, rationale: String) {
-        ledgerManager.recordDecision(chatId: chatId, description: description, rationale: rationale)
-    }
-
-    /// Record a file change in the current session ledger
-    func recordFileChange(chatId: String, path: String, action: LedgerManager.Ledger.FileAction, summary: String) {
-        ledgerManager.recordFileChange(chatId: chatId, path: path, action: action, summary: summary)
-    }
 
     /// Get summary of context usage during current session
     func getContextSessionSummary() -> String {
@@ -650,9 +552,6 @@ final class ClaudeInvoker {
                 if useStructuredOutput,
                    let structuredOutput = json["structured_output"] as? [String: Any],
                    let message = structuredOutput["message"] as? String {
-                    if let chatIdentifier = chatIdentifier, !chatIdentifier.isEmpty {
-                        applyLedgerUpdates(from: structuredOutput, chatIdentifier: chatIdentifier, sessionId: sessionId)
-                    }
                     // Direct extraction - the API schema enforcement guarantees this is the user-facing message
                     // No sanitization needed because the schema structurally separates message from reasoning
                     log("Extracted message from structured_output (deterministic path)", level: .debug, component: "ClaudeInvoker")
@@ -722,104 +621,6 @@ final class ClaudeInvoker {
         log("Raw output was: \(truncatedOutput)\(wasTruncated ? "... [truncated]" : "")", level: .warn, component: "ClaudeInvoker")
 
         return ClaudeInvocationResult(response: "[Processing error - please try again]", sessionId: nil)
-    }
-
-    private func applyLedgerUpdates(from structuredOutput: [String: Any], chatIdentifier: String, sessionId: String?) {
-        guard let ledgerPayload = structuredOutput["ledger"] as? [String: Any] else { return }
-
-        let sessionValue = sessionId ?? UUID().uuidString
-        let ledger = ledgerManager.getLedger(forChat: chatIdentifier, sessionId: sessionValue)
-        if let sessionId = sessionId, ledger.sessionId != sessionId {
-            var updated = ledger
-            updated.sessionId = sessionId
-            ledgerManager.updateLedger(updated)
-        }
-
-        if let summary = ledgerPayload["summary"] as? String {
-            let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                ledgerManager.setSummary(chatId: chatIdentifier, summary: trimmed)
-            }
-        }
-
-        if let goals = ledgerPayload["goals"] as? [[String: Any]] {
-            for goal in goals {
-                guard let description = goal["description"] as? String else { continue }
-                let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.isEmpty { continue }
-
-                let statusRaw = (goal["status"] as? String ?? "pending")
-                    .lowercased()
-                    .replacingOccurrences(of: " ", with: "_")
-                let status: LedgerManager.Ledger.GoalStatus
-                switch statusRaw {
-                case "in_progress":
-                    status = .inProgress
-                case "completed":
-                    status = .completed
-                case "blocked":
-                    status = .blocked
-                default:
-                    status = .pending
-                }
-
-                let progress = (goal["progress"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                let normalizedProgress = progress?.isEmpty == true ? nil : progress
-                ledgerManager.addGoal(chatId: chatIdentifier, description: trimmed, status: status, progress: normalizedProgress)
-            }
-        }
-
-        if let decisions = ledgerPayload["decisions"] as? [[String: Any]] {
-            for decision in decisions {
-                guard let description = decision["description"] as? String,
-                      let rationale = decision["rationale"] as? String else { continue }
-                let trimmedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
-                let trimmedRationale = rationale.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmedDescription.isEmpty || trimmedRationale.isEmpty { continue }
-                ledgerManager.recordDecision(chatId: chatIdentifier, description: trimmedDescription, rationale: trimmedRationale)
-            }
-        }
-
-        if let nextSteps = ledgerPayload["next_steps"] as? [String] {
-            let steps = nextSteps
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            if !steps.isEmpty {
-                ledgerManager.addNextSteps(chatId: chatIdentifier, steps: steps)
-            }
-        }
-
-        if let openQuestions = ledgerPayload["open_questions"] as? [String] {
-            let questions = openQuestions
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            if !questions.isEmpty {
-                ledgerManager.addOpenQuestions(chatId: chatIdentifier, questions: questions)
-            }
-        }
-
-        if let reason = ledgerPayload["handoff_reason"] as? String {
-            let normalized = reason.lowercased()
-            let handoffReason: LedgerManager.Handoff.HandoffReason?
-            switch normalized {
-            case "context_threshold":
-                handoffReason = .contextThreshold
-            case "session_timeout":
-                handoffReason = .sessionTimeout
-            case "user_requested":
-                handoffReason = .userRequested
-            case "task_complete":
-                handoffReason = .taskComplete
-            case "error":
-                handoffReason = .error
-            default:
-                handoffReason = nil
-            }
-
-            if let handoffReason = handoffReason {
-                _ = ledgerManager.createHandoff(forChat: chatIdentifier, reason: handoffReason)
-            }
-        }
     }
 
     /// Builds prompt for a batch of messages
@@ -1029,9 +830,6 @@ final class ClaudeInvoker {
         // Calculate context metrics for the full prompt
         let metrics = contextTracker.calculateMetrics(for: basePrompt)
 
-        // Update ledger with context percentage
-        ledgerManager.updateContextPercentage(chatId: chatIdentifier, percentage: metrics.percentage)
-
         // Log context status
         log("Context: \(metrics.level.emoji) \(Int(metrics.percentage * 100))% (\(metrics.estimatedTokens)/\(metrics.maxTokens) tokens)",
             level: metrics.level >= .orange ? .warn : .info, component: "ClaudeInvoker")
@@ -1073,7 +871,7 @@ final class ClaudeInvoker {
 
             \(basePrompt)
             """
-            // Note: Capabilities are included via MemoryContext reading capabilities/inventory.md
+            // Note: Capabilities are included via MemoryContext reading self/inventory.md
             // Do NOT add hardcoded capability lists here - they will drift out of sync
     }
 

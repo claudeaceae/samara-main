@@ -137,12 +137,12 @@ class StreamWriter:
         Initialize StreamWriter.
 
         Args:
-            stream_dir: Override stream directory (default: ~/.claude-mind/stream)
+            stream_dir: Override stream directory (default: ~/.claude-mind/memory/stream)
         """
         if stream_dir:
             self.stream_dir = Path(stream_dir)
         else:
-            self.stream_dir = get_mind_path() / "stream"
+            self.stream_dir = get_mind_path() / "memory" / "stream"
 
         # Ensure directories exist
         self.stream_dir.mkdir(parents=True, exist_ok=True)

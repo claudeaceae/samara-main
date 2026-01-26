@@ -36,7 +36,7 @@ Then edit `~/.claude-client/config.json`:
 Add the browser_history source to webhook secrets:
 
 ```bash
-# On Claude's Mac, edit ~/.claude-mind/self/credentials/webhook-secrets.json
+# On Claude's Mac: credential get webhook-secrets | jq . (then credential set webhook-secrets '<updated json>')
 {
   "sources": {
     "browser_history": {
@@ -50,7 +50,7 @@ Add the browser_history source to webhook secrets:
 Enable the service in config:
 
 ```bash
-# Edit ~/.claude-mind/config.json
+# Edit ~/.claude-mind/system/config.json
 {
   "services": {
     "browserHistory": true

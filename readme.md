@@ -418,7 +418,7 @@ The system separates reusable structure from unique identity:
 **Soul (Lives in `~/.claude-mind/`, unique per instance):**
 - `self/identity.md` — starts from template, evolves
 - `self/goals.md` — starts from template, grows organically
-- `self/credentials/` — API keys, tokens
+- `self/credentials.md` — Keychain credential reference (secrets in macOS Keychain)
 - `memory/episodes/` — daily journals
 - `memory/reflections/` — dream outputs
 - `memory/people/` — relationship profiles

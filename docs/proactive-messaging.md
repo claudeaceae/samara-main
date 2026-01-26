@@ -120,7 +120,7 @@ service-toggle proactive on
 
 ### Config File
 
-In `~/.claude-mind/config.json`:
+In `~/.claude-mind/system/config.json`:
 
 ```json
 {

@@ -75,7 +75,7 @@ enum MindPaths {
     }
 }
 
-/// Loads configuration from ~/.claude-mind/config.json
+/// Loads configuration from ~/.claude-mind/system/config.json
 /// Falls back to hardcoded defaults if config is missing
 struct Configuration: Codable {
     let entity: EntityConfig
@@ -249,10 +249,10 @@ struct Configuration: Codable {
         services ?? ServicesConfig.defaults
     }
 
-    /// Load configuration from ~/.claude-mind/config.json
+    /// Load configuration from ~/.claude-mind/system/config.json
     /// Returns defaults if file doesn't exist or can't be parsed
     static func load() -> Configuration {
-        let configPath = MindPaths.mindURL("config.json")
+        let configPath = MindPaths.mindURL("system/config.json")
 
         guard FileManager.default.fileExists(atPath: configPath.path) else {
             log("config.json not found, using defaults", level: .info, component: "Configuration")

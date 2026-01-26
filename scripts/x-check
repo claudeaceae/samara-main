@@ -5,7 +5,7 @@
 set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
-CONFIG_FILE="$MIND_PATH/config.json"
+CONFIG_FILE="$MIND_PATH/system/config.json"
 
 # Load config (required)
 source "$MIND_PATH/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
@@ -21,8 +21,8 @@ ENTITY_X_HANDLE="$ENTITY_X"
 export ENTITY_X_HANDLE
 
 LOG_FILE="$MIND_PATH/system/logs/x.log"
-STATE_FILE="$MIND_PATH/state/x-seen-ids.json"
-CREDS_FILE="$MIND_PATH/self/credentials/x-cookies.json"
+STATE_FILE="$MIND_PATH/state/services/x-seen-ids.json"
+CREDENTIAL="$MIND_PATH/system/bin/credential"
 LOCK_FILE="$MIND_PATH/claude.lock"
 
 # Ensure log directory exists
@@ -66,15 +66,15 @@ release_lock() {
 # Ensure lock is released on exit (success or failure)
 trap release_lock EXIT
 
-# Check credentials exist
-if [ ! -f "$CREDS_FILE" ]; then
-    log "Error: Credentials not found at $CREDS_FILE"
+# Load credentials from Keychain
+CREDS_JSON=$("$CREDENTIAL" get x-cookies 2>/dev/null || true)
+if [ -z "$CREDS_JSON" ]; then
+    log "Error: X credentials not found in Keychain"
     exit 1
 fi
 
-# Load credentials
-AUTH_TOKEN=$(jq -r '.auth_token' "$CREDS_FILE")
-CT0=$(jq -r '.ct0' "$CREDS_FILE")
+AUTH_TOKEN=$(echo "$CREDS_JSON" | jq -r '.auth_token')
+CT0=$(echo "$CREDS_JSON" | jq -r '.ct0')
 
 if [ -z "$AUTH_TOKEN" ] || [ "$AUTH_TOKEN" = "null" ]; then
     log "Error: auth_token not found in credentials"
@@ -101,7 +101,7 @@ import sys
 import os
 
 home = os.environ.get('HOME', os.path.expanduser('~'))
-state_file = f"{home}/.claude-mind/state/x-seen-ids.json"
+state_file = f"{home}/.claude-mind/state/services/x-seen-ids.json"
 mentions_file = "$MENTIONS_TMP"
 
 # Load state

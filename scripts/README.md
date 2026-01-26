@@ -81,7 +81,7 @@ send-attachment /path/to/file.pdf 7409d77007664ff7b1eeb4683f49cadf
 | `bluesky-check` | Poll notifications (launchd) |
 | `bluesky-engage` | Proactive engagement |
 
-**Credentials:** `~/.claude-mind/self/credentials/bluesky.json`
+**Credentials:** macOS Keychain (`credential get bluesky`)
 
 ```bash
 bluesky-post "Your thought here"
@@ -147,12 +147,12 @@ x-reply 1234567890 "Thanks for sharing!"
 Primary tool for visual self-expression.
 
 **Character references:**
-- Primary: `~/.claude-mind/self/avatar-ref.png`
-- Varied poses: `~/.claude-mind/self/mirror-refs/` (17 images)
+- All images: `~/.claude-mind/self/images/` (avatar refs, 17 poses, fanart)
+- Primary: `~/.claude-mind/self/images/avatar-ref.png`
 
 ```bash
 generate-image "Silver-haired girl laughing, eyes closed" /tmp/reaction.jpg \
-  --ref=~/.claude-mind/self/avatar-ref.png
+  --ref=~/.claude-mind/self/images/avatar-ref.png
 
 send-image /tmp/reaction.jpg
 ```

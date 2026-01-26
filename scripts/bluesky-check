@@ -13,7 +13,7 @@ source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
 
 LOG_FILE="$MIND_PATH/system/logs/bluesky.log"
 STATE_FILE="$MIND_PATH/state/services/bluesky-state.json"
-CREDS_FILE="$MIND_PATH/self/credentials/bluesky.json"
+CREDENTIAL="$MIND_PATH/system/bin/credential"
 LOCK_FILE="$MIND_PATH/claude.lock"
 
 log() {
@@ -53,9 +53,10 @@ release_lock() {
 # Ensure lock is released on exit (success or failure)
 trap release_lock EXIT
 
-# Check credentials exist
-if [ ! -f "$CREDS_FILE" ]; then
-    log "Error: Credentials not found at $CREDS_FILE"
+# Load credentials from Keychain and export for embedded Python
+export BSKY_CREDS_JSON=$("$CREDENTIAL" get bluesky 2>/dev/null || true)
+if [ -z "$BSKY_CREDS_JSON" ]; then
+    log "Error: Bluesky credentials not found in Keychain"
     exit 1
 fi
 
@@ -75,13 +76,14 @@ except ImportError:
     sys.exit(0)
 
 home = os.environ.get('HOME', os.path.expanduser('~'))
-creds_file = f"{home}/.claude-mind/self/credentials/bluesky.json"
 state_file = f"{home}/.claude-mind/state/services/bluesky-state.json"
 
-# Load credentials
+# Load credentials from environment (set by bash wrapper from Keychain)
 try:
-    with open(creds_file) as f:
-        creds = json.load(f)
+    creds = json.loads(os.environ.get('BSKY_CREDS_JSON', '{}'))
+    if not creds.get('handle'):
+        print("[]")
+        sys.exit(0)
 except Exception as e:
     print("[]")
     sys.exit(0)
@@ -298,11 +300,7 @@ try:
     from atproto import Client
     from atproto import models
 
-    home = os.environ.get('HOME', os.path.expanduser('~'))
-    creds_file = f"{home}/.claude-mind/self/credentials/bluesky.json"
-
-    with open(creds_file) as f:
-        creds = json.load(f)
+    creds = json.loads(os.environ.get('BSKY_CREDS_JSON', '{}'))
 
     client = Client()
     client.login(creds['handle'], creds['app_password'])
@@ -357,11 +355,7 @@ import os
 try:
     from atproto import Client
 
-    home = os.environ.get('HOME', os.path.expanduser('~'))
-    creds_file = f"{home}/.claude-mind/self/credentials/bluesky.json"
-
-    with open(creds_file) as f:
-        creds = json.load(f)
+    creds = json.loads(os.environ.get('BSKY_CREDS_JSON', '{}'))
 
     client = Client()
     client.login(creds['handle'], creds['app_password'])

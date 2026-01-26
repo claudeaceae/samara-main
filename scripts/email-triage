@@ -12,7 +12,7 @@ set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 LOG_FILE="$MIND_PATH/system/logs/email-triage.log"
-STATE_FILE="$MIND_PATH/state/email-seen-ids.json"
+STATE_FILE="$MIND_PATH/state/services/email-seen-ids.json"
 
 log() {
     mkdir -p "$(dirname "$LOG_FILE")"
@@ -35,7 +35,7 @@ from datetime import datetime
 from html import unescape
 
 home = os.environ.get('HOME', os.path.expanduser('~'))
-state_file = f"{home}/.claude-mind/state/email-seen-ids.json"
+state_file = f"{home}/.claude-mind/state/services/email-seen-ids.json"
 log_file = f"{home}/.claude-mind/system/logs/email-triage.log"
 
 def log(msg):

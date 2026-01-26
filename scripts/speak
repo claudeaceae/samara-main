@@ -20,7 +20,7 @@ set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 
 # Configuration
-CREDS_FILE="$MIND_PATH/self/credentials/elevenlabs.txt"
+CREDENTIAL="$MIND_PATH/system/bin/credential"
 VOICE_CONFIG="$MIND_PATH/state/voice-config.json"
 DEFAULT_MODEL="eleven_multilingual_v2"
 DEFAULT_VOICE_ID="21m00Tcm4TlvDq8ikWAM"  # Rachel (ElevenLabs default)
@@ -64,17 +64,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Load API key
-if [ ! -f "$CREDS_FILE" ]; then
-    echo "Error: ElevenLabs API key not found at $CREDS_FILE"
+# Load API key from Keychain
+API_KEY=$("$CREDENTIAL" get elevenlabs 2>/dev/null | tr -d '\n')
+if [ -z "$API_KEY" ]; then
+    echo "Error: ElevenLabs API key not found in Keychain"
     echo ""
     echo "To set up:"
     echo "  1. Get an API key from https://elevenlabs.io/api"
-    echo "  2. Save it: echo 'your-api-key' > $CREDS_FILE && chmod 600 $CREDS_FILE"
+    echo "  2. Save it: credential set elevenlabs 'your-api-key'"
     exit 1
 fi
-
-API_KEY=$(cat "$CREDS_FILE" | tr -d '\n')
 
 # List voices if requested
 if [ "$LIST_VOICES" = true ]; then
@@ -107,8 +106,8 @@ VOICE_ID="${VOICE_ID:-$DEFAULT_VOICE_ID}"
 # Generate output filename if not specified
 if [ -z "$OUTPUT_FILE" ]; then
     TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-    OUTPUT_FILE="$MIND_PATH/media/voice-${TIMESTAMP}.mp3"
-    mkdir -p "$MIND_PATH/media"
+    OUTPUT_FILE="$MIND_PATH/state/media/voice-${TIMESTAMP}.mp3"
+    mkdir -p "$MIND_PATH/state/media"
 fi
 
 # Call ElevenLabs API

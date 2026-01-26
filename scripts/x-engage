@@ -10,7 +10,7 @@
 
 set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-CONFIG_FILE="$MIND_PATH/config.json"
+CONFIG_FILE="$MIND_PATH/system/config.json"
 
 # Load config (required)
 source "$MIND_PATH/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
@@ -26,7 +26,7 @@ ENTITY_X_HANDLE="$ENTITY_X"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 
 LOG_FILE="$MIND_PATH/system/logs/x-engage.log"
-STATE_FILE="$MIND_PATH/state/x-engage-state.json"
+STATE_FILE="$MIND_PATH/state/services/x-engage-state.json"
 LOCK_FILE="$MIND_PATH/claude.lock"
 IDENTITY_FILE="$MIND_PATH/self/identity.md"
 

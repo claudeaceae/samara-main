@@ -47,5 +47,5 @@ Default voice can be set in `~/.claude-mind/state/voice-config.json`:
 
 ## Requirements
 
-- ElevenLabs API key in `~/.claude-mind/self/credentials/elevenlabs.txt`
+- ElevenLabs API key in macOS Keychain (`credential get elevenlabs`)
 - Get one at: https://elevenlabs.io/api

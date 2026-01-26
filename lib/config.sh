@@ -3,7 +3,7 @@
 # Source this file to get config values with fallbacks
 #
 # Usage:
-#   source "$HOME/.claude-mind/lib/config.sh"
+#   source "$HOME/.claude-mind/system/lib/config.sh"
 #   echo "Collaborator phone: $COLLABORATOR_PHONE"
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"

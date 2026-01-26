@@ -417,12 +417,14 @@ The 3 AM dream cycle rebuilds/syncs all memory indexes:
 │   ├── identity.md          # Core self-model
 │   ├── goals.md             # North stars and direction
 │   ├── ritual.md            # Time-contextual guidance
-│   ├── capabilities/        # What I can do
-│   │   └── inventory.md
-│   ├── credentials/         # API keys, avatar images
-│   │   ├── avatar-ref.png
-│   │   └── mirror-refs/
-│   └── media/               # Voice recordings, images
+│   ├── inventory.md         # Available capabilities and tools
+│   ├── changelog.md         # Capability change log
+│   ├── credentials.md       # Keychain credential reference
+│   ├── images/              # All visual self-references
+│   │   ├── avatar-ref.png   # Primary reference
+│   │   ├── pose-NN.png      # 17 varied poses
+│   │   └── fanart-NN.jpeg   # Fan art collection
+│   └── media/               # Voice recordings, other media
 │
 ├── memory/                  # WHAT I KNOW — All accumulated knowledge
 │   ├── episodes/            # Daily logs (YYYY-MM-DD.md)

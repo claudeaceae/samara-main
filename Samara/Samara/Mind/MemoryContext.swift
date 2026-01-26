@@ -105,7 +105,7 @@ final class MemoryContext {
 
         // Capabilities - abbreviated (file can be 800KB+, only load summary)
         // Full capabilities can be referenced on-demand via /capability skill
-        if let capabilities = readFile("self/capabilities/inventory.md") {
+        if let capabilities = readFile("self/inventory.md") {
             let abbreviated = abbreviate(capabilities, maxLines: 100)
             sections.append("### Capabilities (summary)\n\(abbreviated)")
         }
@@ -173,7 +173,7 @@ final class MemoryContext {
         }
 
         // Capabilities - optional, useful for knowing what actions are possible
-        if includeCapabilities, let capabilities = readFile("self/capabilities/inventory.md") {
+        if includeCapabilities, let capabilities = readFile("self/inventory.md") {
             // Abbreviated - just the key sections
             let abbreviated = abbreviate(capabilities, maxLines: 100)
             sections.append("### Capabilities\n\(abbreviated)")
@@ -370,7 +370,7 @@ final class MemoryContext {
 
             These resources are available but not loaded. Reference them when needed:
 
-            - **Capabilities:** Full inventory at ~/.claude-mind/self/capabilities/inventory.md
+            - **Capabilities:** Full inventory at ~/.claude-mind/self/inventory.md
               Use /capability skill to check if something is possible
 
             - **Memory Search:** Use /recall for semantic memory lookup
@@ -475,9 +475,9 @@ final class MemoryContext {
     private func loadCapabilitiesModule() -> String? {
         loadCachedSection(
             key: ContextCache.Key.capabilitiesSummary,
-            source: fullPath("self/capabilities/inventory.md"),
+            source: fullPath("self/inventory.md"),
             build: {
-                guard let capabilities = readFile("self/capabilities/inventory.md") else { return nil }
+                guard let capabilities = readFile("self/inventory.md") else { return nil }
                 let abbreviated = abbreviate(capabilities, maxLines: 100)
                 return "## Capabilities\n\(abbreviated)"
             }

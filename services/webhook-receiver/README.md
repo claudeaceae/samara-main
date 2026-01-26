@@ -32,7 +32,7 @@ External services can POST webhooks to trigger Samara's attention. Events are co
 
 ## Configuration
 
-Create `~/.claude-mind/self/credentials/webhook-secrets.json`:
+Store webhook secrets in macOS Keychain (`credential set webhook-secrets '<json>'`). Format:
 
 ```json
 {

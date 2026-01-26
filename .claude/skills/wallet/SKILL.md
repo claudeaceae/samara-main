@@ -21,7 +21,7 @@ Check your crypto wallet status across Solana, Ethereum, and Bitcoin.
 Read the wallet state file and display current balances:
 
 ```bash
-STATE_FILE="$HOME/.claude-mind/state/wallet-state.json"
+STATE_FILE="$HOME/.claude-mind/state/services/wallet-state.json"
 
 if [ -f "$STATE_FILE" ]; then
     python3 -c "
@@ -57,16 +57,16 @@ fi
 
 ### Address Display
 
-Read wallet addresses from the credentials file:
+Read wallet addresses from Keychain:
 
 ```bash
-CREDS_FILE="$HOME/.claude-mind/self/credentials/wallet-apis.json"
+CREDENTIAL="$HOME/.claude-mind/system/bin/credential"
+WALLET_JSON=$("$CREDENTIAL" get wallet-apis 2>/dev/null)
 
-if [ -f "$CREDS_FILE" ]; then
+if [ -n "$WALLET_JSON" ]; then
     python3 -c "
-import json
-with open('$CREDS_FILE') as f:
-    creds = json.load(f)
+import json, os
+creds = json.loads(os.environ['WALLET_JSON'])
 
 print('**Wallet Addresses**')
 print()
@@ -86,7 +86,7 @@ fi
 Show recent transaction signatures from state:
 
 ```bash
-STATE_FILE="$HOME/.claude-mind/state/wallet-state.json"
+STATE_FILE="$HOME/.claude-mind/state/services/wallet-state.json"
 
 python3 -c "
 import json

@@ -7,13 +7,13 @@ Usage:
   generate-location-map --type today --output /tmp/today-map.png
   generate-location-map --type trip <trip_id> --output /tmp/trip-map.png
 
-Requires: Mapbox API token in ~/.claude-mind/self/credentials/mapbox.txt
+Requires: Mapbox API token in macOS Keychain (credential set mapbox 'your-token')
 
 To get a token:
 1. Sign up at https://account.mapbox.com/auth/signup/
 2. Go to https://account.mapbox.com/access-tokens/
 3. Copy your default public token
-4. Save it to ~/.claude-mind/self/credentials/mapbox.txt
+4. Store it: credential set mapbox 'pk.your-token-here'
 """
 
 import argparse
@@ -26,22 +26,28 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Tuple
 
 STATE_DIR = os.path.expanduser("~/.claude-mind/state")
-CREDENTIALS_DIR = os.path.expanduser("~/.claude-mind/self/credentials")
+CREDENTIAL_BIN = os.path.expanduser("~/.claude-mind/system/bin/credential")
 TRIPS_FILE = os.path.join(STATE_DIR, "trips.jsonl")
 HISTORY_FILE = os.path.join(STATE_DIR, "location-history.jsonl")
 PLACES_FILE = os.path.join(STATE_DIR, "places.json")
-TOKEN_FILE = os.path.join(CREDENTIALS_DIR, "mapbox.txt")
 
 # Mapbox Static Images API
 MAPBOX_BASE = "https://api.mapbox.com/styles/v1/mapbox/streets-v12/static"
 
 
 def load_token() -> Optional[str]:
-    """Load Mapbox token from credentials file."""
-    if not os.path.exists(TOKEN_FILE):
-        return None
-    with open(TOKEN_FILE) as f:
-        return f.read().strip()
+    """Load Mapbox token from macOS Keychain."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            [CREDENTIAL_BIN, 'get', 'mapbox'],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
 
 
 def load_trips(days: int = 7) -> List[Dict]:
@@ -277,10 +283,7 @@ def main():
         print(f"1. Sign up at https://account.mapbox.com/auth/signup/", file=sys.stderr)
         print(f"2. Go to https://account.mapbox.com/access-tokens/", file=sys.stderr)
         print(f"3. Copy your default public token", file=sys.stderr)
-        print(f"4. Save it to {TOKEN_FILE}", file=sys.stderr)
-        print(f"\nExample:", file=sys.stderr)
-        print(f"  mkdir -p {CREDENTIALS_DIR}", file=sys.stderr)
-        print(f"  echo 'pk.your_token_here' > {TOKEN_FILE}", file=sys.stderr)
+        print(f"4. Store it: credential set mapbox 'pk.your_token_here'", file=sys.stderr)
         sys.exit(1)
 
     # Ensure output directory exists

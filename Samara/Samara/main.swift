@@ -11,7 +11,7 @@ if lockFileDescriptor == -1 || flock(lockFileDescriptor, LOCK_EX | LOCK_NB) != 0
 }
 // Lock acquired - we're the only instance
 
-// Configuration - loaded from ~/.claude-mind/config.json (see Configuration.swift)
+// Configuration - loaded from ~/.claude-mind/system/config.json (see Configuration.swift)
 let targetPhone = config.collaborator.phone
 let targetEmail = config.collaborator.email
 let collaboratorName = config.collaborator.name

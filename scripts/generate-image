@@ -17,13 +17,12 @@ ASPECT=""
 RESOLUTION=""
 WITH_TEXT=false
 REFERENCE_IMAGES=()
-# Load API key from local credentials (not in repo)
+# Load API key from macOS Keychain (falls back to credential file)
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-CREDENTIALS_FILE="$MIND_PATH/self/credentials/gemini.txt"
-if [ -f "$CREDENTIALS_FILE" ]; then
-    API_KEY=$(cat "$CREDENTIALS_FILE" | tr -d '[:space:]')
-else
-    echo "Error: Gemini API key not found at $CREDENTIALS_FILE" >&2
+CREDENTIAL="$MIND_PATH/system/bin/credential"
+API_KEY=$("$CREDENTIAL" get gemini 2>/dev/null | tr -d '[:space:]')
+if [ -z "$API_KEY" ]; then
+    echo "Error: Gemini API key not found in Keychain or credentials" >&2
     exit 1
 fi
 

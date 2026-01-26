@@ -92,9 +92,9 @@ if [ "$TOOL_NAME" = "Write" ] || [ "$TOOL_NAME" = "Edit" ]; then
         exit 0
     fi
 
-    # Block writes to credentials
-    if echo "$FILE_PATH" | grep -qE "${MIND_PATH}/self/credentials|${MIND_PATH}/(secrets|\.env)"; then
-        echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Local model guardrail: Cannot modify credentials"}}'
+    # Block writes to sensitive paths (credentials are in macOS Keychain now)
+    if echo "$FILE_PATH" | grep -qE "${MIND_PATH}/(secrets|\.env)"; then
+        echo '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "Local model guardrail: Cannot modify secrets"}}'
         exit 0
     fi
 fi

@@ -27,7 +27,7 @@ Manage the webhook receiver system. Use this skill to add new webhook sources, t
 ### Webhook Receiver
 
 - **Public URL**: `https://webhooks.organelle.co`
-- **Config file**: `~/.claude-mind/self/credentials/webhook-secrets.json`
+- **Config**: macOS Keychain (`credential get webhook-secrets`)
 - **Events directory**: `~/.claude-mind/system/senses/`
 
 ### Endpoints
@@ -45,7 +45,7 @@ Manage the webhook receiver system. Use this skill to add new webhook sources, t
 Read and display the webhook configuration:
 
 ```bash
-cat ~/.claude-mind/self/credentials/webhook-secrets.json | jq .
+~/.claude-mind/system/bin/credential get webhook-secrets | jq .
 ```
 
 Also check service status:
@@ -84,7 +84,7 @@ Generate and send a signed test webhook:
 
 ```bash
 SOURCE="<source-name>"
-SECRET=$(cat ~/.claude-mind/self/credentials/webhook-secrets.json | jq -r ".sources.\"$SOURCE\".secret")
+SECRET=$(~/.claude-mind/system/bin/credential get webhook-secrets | jq -r ".sources.\"$SOURCE\".secret")
 PAYLOAD='{"event":"test","message":"Test webhook from skill","timestamp":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}'
 SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$SECRET" | cut -d' ' -f2)
 

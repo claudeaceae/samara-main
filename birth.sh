@@ -148,7 +148,7 @@ install_templates() {
     fill_template "$SCRIPT_DIR/templates/identity.template.md" "$TARGET_DIR/self/identity.md"
     fill_template "$SCRIPT_DIR/templates/goals.template.md" "$TARGET_DIR/self/goals.md"
     fill_template "$SCRIPT_DIR/templates/ritual.template.md" "$TARGET_DIR/self/ritual.md"
-    fill_template "$SCRIPT_DIR/templates/inventory.template.md" "$TARGET_DIR/self/capabilities/inventory.md"
+    fill_template "$SCRIPT_DIR/templates/inventory.template.md" "$TARGET_DIR/self/inventory.md"
 
     # Instructions (system/ domain) - symlink to repo for automatic updates
     mkdir -p "$TARGET_DIR/system/instructions"

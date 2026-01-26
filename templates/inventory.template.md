@@ -139,8 +139,8 @@ See `scripts/README.md` for full catalog (~90 scripts).
 
 ### Image Generation
 - **Script**: `~/.claude-mind/system/bin/generate-image`
-- **Avatar reference**: `~/.claude-mind/self/avatar-ref.png`
-- **Mirror poses**: `~/.claude-mind/self/mirror-refs/`
+- **Images directory**: `~/.claude-mind/self/images/` (avatar-ref, poses, fanart)
+- **Primary avatar**: `~/.claude-mind/self/images/avatar-ref.png`
 
 ---
 

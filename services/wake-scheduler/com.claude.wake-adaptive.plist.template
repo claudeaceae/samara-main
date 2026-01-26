@@ -14,10 +14,10 @@
     <integer>900</integer>
 
     <key>StandardOutPath</key>
-    <string>{{HOME}}/.claude-mind/logs/wake-adaptive.log</string>
+    <string>{{HOME}}/.claude-mind/system/logs/wake-adaptive.log</string>
 
     <key>StandardErrorPath</key>
-    <string>{{HOME}}/.claude-mind/logs/wake-adaptive.log</string>
+    <string>{{HOME}}/.claude-mind/system/logs/wake-adaptive.log</string>
 
     <key>RunAtLoad</key>
     <false/>

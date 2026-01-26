@@ -30,7 +30,7 @@ fi
 source "$VENV_PATH/bin/activate"
 
 # Query Chroma and format results
-cd "$MIND_PATH/lib"
+cd "$MIND_PATH/system/lib"
 python3 << EOF
 import sys
 sys.path.insert(0, '.')

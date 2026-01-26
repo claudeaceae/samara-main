@@ -202,7 +202,7 @@ VENV_PATH="$MIND_PATH/.venv"
 CALENDAR_CONTEXT=""
 if [ -d "$VENV_PATH" ] && [ -f "$MIND_PATH/system/lib/calendar_analyzer.py" ]; then
     source "$VENV_PATH/bin/activate"
-    CALENDAR_CONTEXT=$(cd "$MIND_PATH/lib" && python3 -c "
+    CALENDAR_CONTEXT=$(cd "$MIND_PATH/system/lib" && python3 -c "
 from calendar_analyzer import CalendarAnalyzer
 analyzer = CalendarAnalyzer()
 print(analyzer.get_calendar_summary())
@@ -252,7 +252,7 @@ log "Getting question context..."
 QUESTION_CONTEXT=""
 if [ -d "$VENV_PATH" ] && [ -f "$MIND_PATH/system/lib/question_synthesizer.py" ]; then
     source "$VENV_PATH/bin/activate"
-    QUESTION_CONTEXT=$(cd "$MIND_PATH/lib" && python3 -c "
+    QUESTION_CONTEXT=$(cd "$MIND_PATH/system/lib" && python3 -c "
 from question_synthesizer import QuestionSynthesizer
 synth = QuestionSynthesizer()
 print(synth.get_context_summary())
@@ -688,7 +688,7 @@ if [ -n "$MESSAGE_TO_E" ] && [ "$MESSAGE_TO_E" != "NONE" ]; then
         log "Logging proactive question..."
         if [ -d "$VENV_PATH" ] && [ -f "$MIND_PATH/system/lib/question_synthesizer.py" ]; then
             source "$VENV_PATH/bin/activate"
-            cd "$MIND_PATH/lib" && python3 -c "
+            cd "$MIND_PATH/system/lib" && python3 -c "
 from question_synthesizer import QuestionSynthesizer
 synth = QuestionSynthesizer()
 synth.log_question_asked(
@@ -753,7 +753,7 @@ fi
 # To re-enable, uncomment the following block:
 # if [ -n "$BLUESKY_POST" ] && [ "$BLUESKY_POST" != "NONE" ]; then
 #     log "Posting to Bluesky..."
-#     if [ -f "$MIND_PATH/self/credentials/bluesky.json" ]; then
+#     if "$MIND_PATH/system/bin/credential" get bluesky >/dev/null 2>&1; then
 #         "$MIND_PATH/system/bin/bluesky-post" "$BLUESKY_POST" >> "$LOG_FILE" 2>&1 && \
 #             log "Posted to Bluesky: ${BLUESKY_POST:0:50}..." || \
 #             log "Failed to post to Bluesky"

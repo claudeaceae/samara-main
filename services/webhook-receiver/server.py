@@ -41,10 +41,9 @@ def resolve_mind_dir() -> Path:
 
 # Configuration paths
 MIND_DIR = resolve_mind_dir()
-CREDENTIALS_DIR = MIND_DIR / "self" / "credentials"
+CREDENTIAL_BIN = str(MIND_DIR / "system" / "bin" / "credential")
 SENSES_DIR = MIND_DIR / "system" / "senses"
 STATE_DIR = MIND_DIR / "state"
-WEBHOOK_CONFIG = CREDENTIALS_DIR / "webhook-secrets.json"
 
 # Ensure directories exist
 SENSES_DIR.mkdir(parents=True, exist_ok=True)
@@ -57,33 +56,38 @@ rate_limits: dict[str, list[float]] = defaultdict(list)
 
 
 def load_config() -> dict:
-    """Load webhook configuration."""
-    if not WEBHOOK_CONFIG.exists():
-        # Create default config
-        default_config = {
-            "sources": {
-                "github": {
-                    "secret": os.environ.get("WEBHOOK_SECRET_GITHUB", "change-me"),
-                    "allowed_ips": None,
-                    "rate_limit": "30/minute"
-                },
-                "ifttt": {
-                    "secret": os.environ.get("WEBHOOK_SECRET_IFTTT", "change-me"),
-                    "allowed_ips": None,
-                    "rate_limit": "10/minute"
-                },
-                "test": {
-                    "secret": "test-secret",
-                    "allowed_ips": ["127.0.0.1", "::1"],
-                    "rate_limit": "60/minute"
-                }
+    """Load webhook configuration from macOS Keychain."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            [CREDENTIAL_BIN, 'get', 'webhook-secrets'],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+    except Exception:
+        pass
+
+    # Fallback: return default config
+    return {
+        "sources": {
+            "github": {
+                "secret": os.environ.get("WEBHOOK_SECRET_GITHUB", "change-me"),
+                "allowed_ips": None,
+                "rate_limit": "30/minute"
+            },
+            "ifttt": {
+                "secret": os.environ.get("WEBHOOK_SECRET_IFTTT", "change-me"),
+                "allowed_ips": None,
+                "rate_limit": "10/minute"
+            },
+            "test": {
+                "secret": "test-secret",
+                "allowed_ips": ["127.0.0.1", "::1"],
+                "rate_limit": "60/minute"
             }
         }
-        CREDENTIALS_DIR.mkdir(parents=True, exist_ok=True)
-        WEBHOOK_CONFIG.write_text(json.dumps(default_config, indent=2))
-        return default_config
-
-    return json.loads(WEBHOOK_CONFIG.read_text())
+    }
 
 
 def verify_signature(payload: bytes, signature: str, secret: str) -> bool:
@@ -148,7 +152,7 @@ def create_sense_event(source_id: str, data: dict, headers: dict) -> str:
 
     event = {
         "sense": "webhook",
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "priority": determine_priority(source_id, data),
         "data": {
             "source": source_id,

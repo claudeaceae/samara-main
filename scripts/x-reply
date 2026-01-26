@@ -9,7 +9,7 @@ set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_FILE="$MIND_PATH/system/logs/x.log"
-CREDS_FILE="$MIND_PATH/self/credentials/x-cookies.json"
+CREDENTIAL="$MIND_PATH/system/bin/credential"
 
 # Ensure log directory exists
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -47,16 +47,16 @@ fi
 
 log "Replying to $TWEET_ID: ${TEXT:0:50}..."
 
-# Check credentials exist for bird
-if [ ! -f "$CREDS_FILE" ]; then
+# Load credentials from Keychain
+CREDS_JSON=$("$CREDENTIAL" get x-cookies 2>/dev/null || true)
+if [ -z "$CREDS_JSON" ]; then
     log "Credentials not found, skipping bird, trying Playwright directly"
     "$SCRIPT_DIR/x-reply-playwright" "$TWEET_ID" "$TEXT"
     exit $?
 fi
 
-# Load credentials for bird
-AUTH_TOKEN=$(jq -r '.auth_token' "$CREDS_FILE" 2>/dev/null)
-CT0=$(jq -r '.ct0' "$CREDS_FILE" 2>/dev/null)
+AUTH_TOKEN=$(echo "$CREDS_JSON" | jq -r '.auth_token' 2>/dev/null)
+CT0=$(echo "$CREDS_JSON" | jq -r '.ct0' 2>/dev/null)
 
 if [ -z "$AUTH_TOKEN" ] || [ "$AUTH_TOKEN" = "null" ] || [ -z "$CT0" ] || [ "$CT0" = "null" ]; then
     log "Invalid credentials, skipping bird, trying Playwright directly"

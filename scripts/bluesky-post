@@ -6,7 +6,7 @@
 set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-CREDS_FILE="$MIND_PATH/self/credentials/bluesky.json"
+CREDENTIAL="$MIND_PATH/system/bin/credential"
 LOG_FILE="$MIND_PATH/system/logs/bluesky.log"
 
 log() {
@@ -14,10 +14,11 @@ log() {
     echo "$1"
 }
 
-# Check credentials exist
-if [ ! -f "$CREDS_FILE" ]; then
-    echo "Error: Credentials not found at $CREDS_FILE"
-    echo "Create a JSON file with: {\"handle\": \"your.handle\", \"app_password\": \"xxxx-xxxx-xxxx-xxxx\"}"
+# Load credentials from Keychain
+BSKY_CREDS_JSON=$("$CREDENTIAL" get bluesky 2>/dev/null || true)
+if [ -z "$BSKY_CREDS_JSON" ]; then
+    echo "Error: Bluesky credentials not found in Keychain"
+    echo "Store with: credential set bluesky '{\"handle\": \"your.handle\", \"app_password\": \"xxxx\"}'"
     exit 1
 fi
 
@@ -56,17 +57,18 @@ for pattern in "${INTERNAL_PATTERNS[@]}"; do
 done
 
 # Post using Python atproto SDK (via uvx)
+export BSKY_CREDS_JSON
 uvx --with atproto python << PYEOF
 import json
 import sys
 from atproto import Client
 
-creds_file = "$CREDS_FILE"
+import os
+creds_json = os.environ.get('BSKY_CREDS_JSON', '')
 text = """$TEXT"""
 
 try:
-    with open(creds_file) as f:
-        creds = json.load(f)
+    creds = json.loads(creds_json)
 
     client = Client()
     client.login(creds['handle'], creds['app_password'])
@@ -78,11 +80,8 @@ try:
     post = client.send_post(text)
     print(f"Posted successfully: {post.uri}")
 
-except FileNotFoundError:
-    print(f"Error: Credentials file not found: {creds_file}")
-    sys.exit(1)
 except json.JSONDecodeError:
-    print(f"Error: Invalid JSON in credentials file")
+    print(f"Error: Invalid credentials JSON")
     sys.exit(1)
 except Exception as e:
     print(f"Error posting: {e}")

@@ -26,7 +26,7 @@ fi
 source "$VENV_PATH/bin/activate"
 
 # Run evaluation
-cd "$MIND_PATH/lib"
+cd "$MIND_PATH/system/lib"
 RESULT=$(python3 -c "
 from trigger_evaluator import TriggerEvaluator
 import json

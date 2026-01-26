@@ -15,7 +15,7 @@ Satellite service that polls Bluesky for notifications and DMs, writing sense ev
 
 ### 1. Create Credentials
 
-Create `~/.claude-mind/self/credentials/bluesky.json`:
+Store Bluesky credentials in macOS Keychain (`credential set bluesky '<json>'`). Format:
 
 ```json
 {

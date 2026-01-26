@@ -5,11 +5,13 @@ const { getAssociatedTokenAddressSync, getAccount, TOKEN_PROGRAM_ID } = require(
 const fs = require('fs');
 const path = require('path');
 
-const KEYPAIR_PATH = path.join(process.env.HOME, '.claude-mind/self/credentials/solana-wallet.json');
+const { execSync } = require('child_process');
+const CREDENTIAL_BIN = path.join(process.env.HOME, '.claude-mind/system/bin/credential');
 const RPC_URL = 'https://api.mainnet-beta.solana.com';
 
 function loadKeypair() {
-    const keypairData = JSON.parse(fs.readFileSync(KEYPAIR_PATH));
+    const raw = execSync(`"${CREDENTIAL_BIN}" get solana-keypair`, { encoding: 'utf8' }).trim();
+    const keypairData = JSON.parse(raw);
     return Keypair.fromSecretKey(Uint8Array.from(keypairData));
 }
 

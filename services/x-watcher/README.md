@@ -72,7 +72,7 @@ When new mentions are detected:
 
 ## State Files
 
-- `~/.claude-mind/state/x-watcher-state.json` — Tracks seen tweet IDs
+- `~/.claude-mind/state/services/x-watcher-state.json` — Tracks seen tweet IDs
 
 ## Logs
 
@@ -96,7 +96,7 @@ The posting scripts (`x-post`, `x-reply`) use a two-tier system:
 1. **Primary:** `bird` CLI (fast)
 2. **Fallback:** Playwright browser automation (when bird hits rate limits)
 
-Fallback state tracked in: `~/.claude-mind/state/x-playwright-state.json`
+Fallback state tracked in: `~/.claude-mind/state/services/x-playwright-state.json`
 
 ## Plist Templates
 

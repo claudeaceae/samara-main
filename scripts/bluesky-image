@@ -6,12 +6,12 @@
 set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
-CREDS_FILE="$MIND_PATH/self/credentials/bluesky.json"
+CREDENTIAL="$MIND_PATH/system/bin/credential"
 LOG_FILE="$MIND_PATH/system/logs/bluesky.log"
-CONFIG_FILE="$MIND_PATH/config.json"
+CONFIG_FILE="$MIND_PATH/system/config.json"
 
 # Load config (required)
-source "$MIND_PATH/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
+source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
     echo "Error: config.sh not found" >&2
     exit 1
 }
@@ -28,10 +28,10 @@ log() {
     echo "$1"
 }
 
-# Check credentials exist
-if [ ! -f "$CREDS_FILE" ]; then
-    echo "Error: Credentials not found at $CREDS_FILE"
-    echo "Create a JSON file with: {\"handle\": \"your.handle\", \"app_password\": \"xxxx-xxxx-xxxx-xxxx\"}"
+# Load credentials from Keychain
+BSKY_CREDS_JSON=$("$CREDENTIAL" get bluesky 2>/dev/null || true)
+if [ -z "$BSKY_CREDS_JSON" ]; then
+    echo "Error: Bluesky credentials not found in Keychain"
     exit 1
 fi
 
@@ -69,19 +69,20 @@ if [ -n "$CAPTION" ] && [ ${#CAPTION} -gt 300 ]; then
 fi
 
 # Post using Python atproto SDK (via uvx)
+export BSKY_CREDS_JSON
 uvx --with atproto python << PYEOF
 import json
+import os
 import sys
 from atproto import Client
 
-creds_file = "$CREDS_FILE"
+creds_json = os.environ.get('BSKY_CREDS_JSON', '')
 image_path = "$IMAGE_PATH"
 mime_type = "$MIME_TYPE"
 caption = """$CAPTION"""
 
 try:
-    with open(creds_file) as f:
-        creds = json.load(f)
+    creds = json.loads(creds_json)
 
     client = Client()
     client.login(creds['handle'], creds['app_password'])

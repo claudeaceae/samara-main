@@ -10,8 +10,8 @@ MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 
 # Load config (required)
 # Note: use subshell test to avoid set -e triggering on first source failure
-if [ -f "$MIND_PATH/lib/config.sh" ]; then
-    source "$MIND_PATH/lib/config.sh"
+if [ -f "$MIND_PATH/system/lib/config.sh" ]; then
+    source "$MIND_PATH/system/lib/config.sh"
 elif [ -f "$MIND_PATH/system/lib/config.sh" ]; then
     source "$MIND_PATH/system/lib/config.sh"
 else

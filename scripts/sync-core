@@ -153,7 +153,7 @@ sync_scripts() {
 # ============================================================
 sync_lib() {
     local src="$REPO_DIR/lib"
-    local dst="$MIND_PATH/lib"
+    local dst="$MIND_PATH/system/lib"
 
     log "## Lib"
     mkdir -p "$dst"
@@ -236,7 +236,7 @@ sync_lib() {
 # ============================================================
 sync_instructions() {
     local src="$REPO_DIR/instructions"
-    local dst="$MIND_PATH/instructions"
+    local dst="$MIND_PATH/system/instructions"
 
     log "## Instructions"
     mkdir -p "$dst"

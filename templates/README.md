@@ -22,7 +22,7 @@ Starting points for new Samara organisms. These files are processed by `birth.sh
 | `identity.template.md` | `self/identity.md` | Who the Claude instance is, relationship with collaborator |
 | `goals.template.md` | `self/goals.md` | North stars, active goals, backlog |
 | `ritual.template.md` | `self/ritual.md` | Wake type behaviors (morning, afternoon, evening, dream) |
-| `inventory.template.md` | `self/capabilities/inventory.md` | Available capabilities and tools |
+| `inventory.template.md` | `self/inventory.md` | Available capabilities and tools |
 
 ### Instructions (system/ domain)
 
@@ -88,7 +88,7 @@ templates/                          ~/.claude-mind/
 ├── identity.template.md    →→→     self/identity.md (filled)
 ├── goals.template.md       →→→     self/goals.md (filled)
 ├── ritual.template.md      →→→     self/ritual.md (filled)
-├── inventory.template.md   →→→     self/capabilities/inventory.md (filled)
+├── inventory.template.md   →→→     self/inventory.md (filled)
 ├── instructions/
 │   ├── imessage.md         ~~~     system/instructions/imessage.md (symlink)
 │   └── imessage-group.md   ~~~     system/instructions/imessage-group.md (symlink)

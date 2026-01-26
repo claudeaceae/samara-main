@@ -44,7 +44,7 @@ Accepts webhooks from external services (GitHub, IFTTT, custom).
 
 - Converts webhooks to sense events
 - Supports HMAC-SHA256 signature verification
-- Config: `~/.claude-mind/self/credentials/webhook-secrets.json`
+- Config: macOS Keychain (`credential get webhook-secrets`)
 
 ### mcp-memory-bridge (Port 8765)
 
@@ -77,7 +77,7 @@ cd clients/browser-history-exporter
 
 **Server-side setup (Claude's Mac):**
 ```bash
-# Add to ~/.claude-mind/self/credentials/webhook-secrets.json:
+# Update webhook secrets in Keychain (credential get webhook-secrets | jq):
 {
   "sources": {
     "browser_history": {
@@ -100,7 +100,7 @@ These run every 15 minutes via launchd, check for new activity, and write sense 
 
 | Service | Checks For | Credentials |
 |---------|------------|-------------|
-| `bluesky-watcher` | Notifications, DMs | `~/.claude-mind/self/credentials/bluesky.json` |
+| `bluesky-watcher` | Notifications, DMs | Keychain (`credential get bluesky`) |
 | `github-watcher` | Notifications, mentions | `gh` CLI auth |
 | `x-watcher` | Mentions, replies | `bird` CLI (browser cookies) |
 
