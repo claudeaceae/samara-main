@@ -1020,6 +1020,23 @@ fi
 
 log "=== Voice evolution complete ==="
 
+# === CLAUDE.md Evolution ===
+log "=== CLAUDE.md evolution ==="
+EVOLVE_CMD="$MIND_PATH/system/bin/evolve-claude-docs"
+if [ -x "$EVOLVE_CMD" ]; then
+    python3 "$EVOLVE_CMD" --verbose >> "$LOG_FILE" 2>&1
+    EVOLVE_EXIT=$?
+    if [ $EVOLVE_EXIT -eq 0 ]; then
+        log "CLAUDE.md evolution complete"
+    elif [ $EVOLVE_EXIT -eq 2 ]; then
+        log "CLAUDE.md evolution aborted (safety check)"
+    else
+        log "CLAUDE.md evolution failed (exit $EVOLVE_EXIT)"
+    fi
+else
+    log "evolve-claude-docs not installed, skipping"
+fi
+
 # Sync Chroma semantic index
 log "Syncing Chroma semantic index..."
 if [ -f "$MIND_PATH/system/bin/chroma-rebuild" ]; then

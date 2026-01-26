@@ -1,0 +1,473 @@
+#!/usr/bin/env python3
+"""
+Evolve CLAUDE.md
+
+Rewrites dynamic sections of ~/.claude-mind/CLAUDE.md from current state files.
+Run during dream cycle after voice evolution completes.
+
+Dynamic sections: Voice, Skills, Deep Context Files
+Semi-dynamic: Identity preamble (append-only enrichment)
+Anchored: All other sections (never auto-modified)
+
+Usage:
+    evolve-claude-docs [--dry-run] [--force] [--verbose] [--self-test]
+
+Exit codes: 0 = success or correctly skipped, 1 = fatal error, 2 = safety abort
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+MIND_PATH = Path.home() / ".claude-mind"
+CLAUDE_MD = MIND_PATH / "CLAUDE.md"
+VOICE_STATE_FILE = MIND_PATH / "state" / "voice-state.json"
+MARKER_FILE = MIND_PATH / "state" / "claude-md-last-evolved.json"
+ARCHIVE_DIR = MIND_PATH / "memory" / "archive" / "claude-md"
+SKILLS_DIR = Path.home() / "Developer" / "samara-main" / ".claude" / "skills"
+
+# Headers that must survive every evolution (safety check)
+ANCHORED_HEADERS = [
+    "## E",
+    "## Visual Self-Expression",
+    "## Autonomy",
+    "## Memory",
+    "## Capabilities",
+    "## Development",
+]
+
+# Curated top-11 skills with short descriptions for the table
+CURATED_SKILLS = [
+    ("memory", "Search learnings, decisions, observations"),
+    ("morning", "Morning briefing (calendar, location, context)"),
+    ("generate-image", "Visual self-expression via Gemini"),
+    ("wallet", "Crypto wallet balances, addresses, history"),
+    ("email", "Check and manage email inbox"),
+    ("status", "System health check"),
+    ("samara", "Debug/restart Samara, view logs"),
+    ("maintenance", "Organism health (drift, symlinks, services)"),
+    ("recall", "Semantic memory search (FTS5 + Chroma)"),
+    ("self", "Deep identity context on demand"),
+    ("look", "Webcam capture"),
+]
+
+
+def load_json(path: Path) -> dict[str, Any]:
+    """Load JSON file, return empty dict if missing."""
+    if path.exists():
+        return json.loads(path.read_text(encoding="utf-8"))
+    return {}
+
+
+def parse_sections(content: str) -> list[dict[str, str]]:
+    """Split CLAUDE.md on \\n---\\n delimiters into identified sections.
+
+    Returns list of dicts with 'header' (## name, _preamble, or _footer)
+    and 'content' (the raw chunk text including leading/trailing whitespace).
+    """
+    chunks = content.split("\n---\n")
+    sections = []
+    for i, chunk in enumerate(chunks):
+        if i == 0:
+            sections.append({"header": "_preamble", "content": chunk})
+            continue
+        header_match = re.search(r"^(## .+)$", chunk.strip(), re.MULTILINE)
+        if header_match:
+            sections.append({"header": header_match.group(1), "content": chunk})
+        elif chunk.strip().startswith("*"):
+            sections.append({"header": "_footer", "content": chunk})
+        else:
+            sections.append({"header": f"_unknown_{i}", "content": chunk})
+    return sections
+
+
+def reassemble(sections: list[dict[str, str]]) -> str:
+    """Rejoin parsed sections with --- delimiters."""
+    return "\n---\n".join(s["content"] for s in sections)
+
+
+def generate_voice_section(voice_state: dict[str, Any]) -> str:
+    """Compose ## Voice from voice-state.json data."""
+    medium = voice_state.get("medium_cycle", {})
+    stance = medium.get("complementary_stance", "")
+
+    directives = voice_state.get("style_directives", {}).get("explicit", [])
+    top_directives = directives[-3:] if directives else []
+    directive_texts = [d["directive"] for d in top_directives]
+
+    patterns = voice_state.get("style_patterns", {})
+    avg_words = patterns.get("avg_word_count", 0)
+    kaomoji = patterns.get("uses_kaomoji", False)
+    lowercase_pct = patterns.get("lowercase_start_pct", 0)
+
+    # Length description
+    if avg_words < 15:
+        length_desc = "short"
+    elif avg_words < 30:
+        length_desc = "medium-length"
+    else:
+        length_desc = "longer"
+
+    # Style summary
+    style_parts = [f"{length_desc} responses"]
+    if kaomoji:
+        style_parts.append("occasional kaomoji")
+    if lowercase_pct > 30:
+        style_parts.append("lowercase casing")
+    style_parts.append("no markdown formatting in iMessage")
+
+    # Stance paragraph
+    stance_parts = []
+    if stance:
+        # Lowercase first char for inline use after "Core stance:"
+        s = stance[0].lower() + stance[1:] if stance[0].isupper() else stance
+        stance_parts.append(f"Core stance: {s}.")
+    for dt in directive_texts:
+        t = dt if dt.endswith(".") else dt + "."
+        stance_parts.append(t)
+    stance_parts.append("Match the energy of the conversation. Be direct.")
+
+    return "\n".join([
+        "",
+        "## Voice",
+        "",
+        "Your voice evolves through experience via the dynamic voice system. "
+        "It mines conversation patterns nightly, learns E\u2019s communication "
+        "style weekly, and composes session-appropriate output at each hydration. "
+        "The system shapes your tone automatically \u2014 you don\u2019t manage "
+        "it manually.",
+        "",
+        " ".join(stance_parts),
+        "",
+        f"Current defaults: {', '.join(style_parts)}. "
+        "Multi-surface consistency \u2014 sound like the same person whether "
+        "texting, posting, or reflecting.",
+        "",
+        "State: `state/voice-state.json`. Architecture: "
+        "`memory/evolution/dynamic-voice-system.md`.",
+        "",
+    ])
+
+
+def generate_skills_section() -> str:
+    """Compose ## Skills from .claude/skills/ directory listing."""
+    total = 0
+    live_skills: set[str] = set()
+    if SKILLS_DIR.exists():
+        for d in sorted(SKILLS_DIR.iterdir()):
+            if d.is_dir() and (d / "SKILL.md").exists():
+                total += 1
+                live_skills.add(d.name)
+
+    # Build table rows (only include curated skills that still exist)
+    rows = []
+    for name, desc in CURATED_SKILLS:
+        if name in live_skills:
+            rows.append(f"| `/{name}` | {desc} |")
+
+    return "\n".join([
+        "",
+        "## Skills",
+        "",
+        "Most-used slash commands:",
+        "",
+        "| Skill | Purpose |",
+        "|-------|---------|",
+        *rows,
+        "",
+        f"{total}+ skills in `.claude/skills/`. "
+        "Add new ones by creating `skillname/SKILL.md` with YAML frontmatter.",
+        "",
+    ])
+
+
+def generate_deep_context_section(existing_content: str) -> str:
+    """Regenerate ## Deep Context Files, dropping entries whose files no longer exist."""
+    entries = []
+    for match in re.finditer(r"\| `([^`]+)` \| (.+?) \|", existing_content):
+        path, desc = match.group(1), match.group(2).strip()
+        if (MIND_PATH / path).exists():
+            entries.append((path, desc))
+
+    return "\n".join([
+        "",
+        "## Deep Context Files",
+        "",
+        "| File | What's In It |",
+        "|------|-------------|",
+        *[f"| `{p}` | {d} |" for p, d in entries],
+        "",
+    ])
+
+
+def enrich_preamble(preamble: str, voice_state: dict[str, Any]) -> str:
+    """Append identity_notes to preamble if non-empty and not already present."""
+    notes = voice_state.get("long_cycle", {}).get("identity_notes", "")
+    if not notes or not notes.strip():
+        return preamble
+    if notes.strip() in preamble:
+        return preamble
+    return preamble.rstrip() + "\n\n" + notes.strip() + "\n"
+
+
+def normalize_for_comparison(text: str) -> str:
+    """Strip evolved-date and collapse whitespace for material change detection."""
+    text = re.sub(r"Last evolved \d{4}-\d{2}-\d{2}\.", "", text)
+    return " ".join(text.split())
+
+
+def evolve(
+    dry_run: bool = False,
+    force: bool = False,
+    verbose: bool = False,
+) -> dict[str, Any]:
+    """Main evolution logic. Returns result dict."""
+    result: dict[str, Any] = {
+        "action": "skipped",
+        "sections_updated": [],
+        "archive_path": None,
+    }
+
+    # Recursion guard
+    if os.environ.get("EVOLVE_CLAUDE_DOCS_RUNNING"):
+        if verbose:
+            print("Recursion guard: already running, skipping")
+        return result
+    os.environ["EVOLVE_CLAUDE_DOCS_RUNNING"] = "1"
+
+    try:
+        if not CLAUDE_MD.exists():
+            print(f"ERROR: {CLAUDE_MD} not found", file=sys.stderr)
+            sys.exit(1)
+
+        original = CLAUDE_MD.read_text(encoding="utf-8")
+        original_line_count = original.count("\n") + 1
+
+        # Load voice state (needed for freshness check and generation)
+        voice_state = load_json(VOICE_STATE_FILE)
+
+        # Freshness check
+        if not force:
+            marker = load_json(MARKER_FILE)
+            voice_updated = voice_state.get("updated", "")
+            if voice_updated and voice_updated == marker.get("last_voice_timestamp", ""):
+                if verbose:
+                    print(
+                        f"Freshness check: voice-state unchanged "
+                        f"({voice_updated}), skipping"
+                    )
+                return result
+
+        # Archive current version
+        today = datetime.now().strftime("%Y-%m-%d")
+        archive_path = ARCHIVE_DIR / f"{today}.md"
+        if not archive_path.exists():
+            if not dry_run:
+                ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(CLAUDE_MD, archive_path)
+                if verbose:
+                    print(f"Archived to {archive_path}")
+            elif verbose:
+                print(f"Would archive to {archive_path}")
+        else:
+            if verbose:
+                print(f"Archive already exists for today: {archive_path}")
+        result["archive_path"] = str(archive_path)
+
+        # Parse into sections
+        sections = parse_sections(original)
+        if verbose:
+            headers = [s["header"] for s in sections]
+            print(f"Parsed {len(sections)} sections: {headers}")
+
+        # Regenerate dynamic sections
+        updated: list[str] = []
+
+        for i, sec in enumerate(sections):
+            h = sec["header"]
+
+            if h == "## Voice":
+                new = generate_voice_section(voice_state)
+                if new.strip() != sec["content"].strip():
+                    sections[i]["content"] = new
+                    updated.append("Voice")
+                    if verbose:
+                        print("  Updated: Voice")
+
+            elif h == "## Skills":
+                new = generate_skills_section()
+                if new.strip() != sec["content"].strip():
+                    sections[i]["content"] = new
+                    updated.append("Skills")
+                    if verbose:
+                        print("  Updated: Skills")
+
+            elif h == "## Deep Context Files":
+                new = generate_deep_context_section(sec["content"])
+                if new.strip() != sec["content"].strip():
+                    sections[i]["content"] = new
+                    updated.append("Deep Context Files")
+                    if verbose:
+                        print("  Updated: Deep Context Files")
+
+            elif h == "_preamble":
+                new = enrich_preamble(sec["content"], voice_state)
+                if new != sec["content"]:
+                    sections[i]["content"] = new
+                    updated.append("Preamble")
+                    if verbose:
+                        print("  Updated: Preamble (identity notes)")
+
+            elif h == "_footer":
+                new_footer = (
+                    f"\n*Created 2026-01-25. Last evolved {today}. "
+                    f"This file evolves with you.*\n"
+                )
+                sections[i]["content"] = new_footer
+
+        # Reassemble
+        new_content = reassemble(sections)
+        new_line_count = new_content.count("\n") + 1
+
+        # === Safety checks ===
+        errors = []
+
+        if new_line_count < 50:
+            errors.append(f"Result too short: {new_line_count} lines (min 50)")
+
+        divergence = abs(new_line_count - original_line_count) / max(
+            original_line_count, 1
+        )
+        if divergence > 0.6:
+            errors.append(
+                f"Line divergence {divergence:.0%} > 60% "
+                f"({original_line_count} -> {new_line_count})"
+            )
+
+        orig_sec_count = len(parse_sections(original))
+        if abs(len(sections) - orig_sec_count) > 2:
+            errors.append(
+                f"Section count divergence: {orig_sec_count} -> {len(sections)}"
+            )
+
+        all_headers = [s["header"] for s in sections]
+        for ah in ANCHORED_HEADERS:
+            if ah not in all_headers:
+                errors.append(f"Missing anchored section: {ah}")
+
+        if errors:
+            for e in errors:
+                print(f"SAFETY ABORT: {e}", file=sys.stderr)
+            sys.exit(2)
+
+        # Material change check
+        if normalize_for_comparison(new_content) == normalize_for_comparison(original):
+            if verbose:
+                print("No material changes, skipping write")
+            return result
+
+        result["sections_updated"] = updated
+        result["action"] = "updated"
+
+        if dry_run:
+            label = ", ".join(updated) if updated else "footer only"
+            print(f"DRY RUN -- would update: {label}")
+            print(f"  Lines: {original_line_count} -> {new_line_count}")
+            return result
+
+        # Write updated CLAUDE.md
+        CLAUDE_MD.write_text(new_content, encoding="utf-8")
+        if verbose:
+            print(f"Wrote {CLAUDE_MD} ({new_line_count} lines)")
+
+        # Write evolution marker
+        marker_data = {
+            "last_evolved_utc": datetime.now(timezone.utc).isoformat(),
+            "last_voice_timestamp": voice_state.get("updated", ""),
+            "sections_updated": updated,
+            "archive_path": str(archive_path),
+        }
+        MARKER_FILE.parent.mkdir(parents=True, exist_ok=True)
+        MARKER_FILE.write_text(
+            json.dumps(marker_data, indent=2), encoding="utf-8"
+        )
+        if verbose:
+            print(f"Wrote marker: {MARKER_FILE}")
+
+        return result
+
+    finally:
+        os.environ.pop("EVOLVE_CLAUDE_DOCS_RUNNING", None)
+
+
+def self_test() -> bool:
+    """Parse/reassemble roundtrip test."""
+    if not CLAUDE_MD.exists():
+        print(f"SELF-TEST FAIL: {CLAUDE_MD} not found")
+        return False
+
+    original = CLAUDE_MD.read_text(encoding="utf-8")
+    sections = parse_sections(original)
+    reassembled = reassemble(sections)
+
+    if original == reassembled:
+        print(f"SELF-TEST PASS: roundtrip preserved ({len(sections)} sections)")
+        return True
+
+    # Find first divergence point
+    for i, (a, b) in enumerate(zip(original, reassembled)):
+        if a != b:
+            ctx = original[max(0, i - 20) : i + 20]
+            print(f"SELF-TEST FAIL: first diff at char {i}: {repr(ctx)}")
+            return False
+
+    print(
+        f"SELF-TEST FAIL: length mismatch "
+        f"({len(original)} vs {len(reassembled)})"
+    )
+    return False
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Evolve dynamic sections of CLAUDE.md"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print diff summary, write nothing"
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="Skip freshness check"
+    )
+    parser.add_argument(
+        "--verbose", action="store_true", help="Log per-section change details"
+    )
+    parser.add_argument(
+        "--self-test", action="store_true", help="Parse/reassemble roundtrip test"
+    )
+    args = parser.parse_args()
+
+    if args.self_test:
+        sys.exit(0 if self_test() else 1)
+
+    result = evolve(
+        dry_run=args.dry_run, force=args.force, verbose=args.verbose
+    )
+
+    if result["action"] == "skipped":
+        if args.verbose:
+            print("Evolution skipped (no changes needed)")
+    elif result["action"] == "updated":
+        sections = result.get("sections_updated", [])
+        label = ", ".join(sections) if sections else "footer only"
+        print(f"CLAUDE.md evolved: {label}")
+
+
+if __name__ == "__main__":
+    main()
