@@ -32,7 +32,7 @@ import chromadb
 from chromadb.config import Settings
 
 MIND_PATH = get_mind_path()
-CHROMA_PATH = MIND_PATH / "chroma"
+CHROMA_PATH = MIND_PATH / "memory" / "chroma"
 COLLECTION_NAME = "memories"
 TRANSCRIPT_COLLECTION_NAME = "transcripts"
 
@@ -284,6 +284,128 @@ class MemoryIndex:
             "collection_name": COLLECTION_NAME,
             "chroma_path": str(CHROMA_PATH)
         }
+
+    def search_with_threads(self, query: str, n_results: int = 5) -> dict:
+        """
+        Combined search across memories and knowledge threads.
+
+        Args:
+            query: Search text
+            n_results: Max results per source
+
+        Returns:
+            Dict with 'memories' and 'threads' results
+        """
+        result = {
+            'memories': [],
+            'threads': {
+                'matching_thread': None,
+                'related_items': []
+            }
+        }
+
+        # Search memories
+        result['memories'] = self.search(query, n_results=n_results)
+
+        # Search threads if available
+        try:
+            from thread_manager import ThreadManager
+            tm = ThreadManager()
+
+            # Find matching thread
+            match = tm.find_matching_thread(query)
+            if match:
+                thread_id, score = match
+                manifest = tm.get_thread(thread_id)
+                if manifest:
+                    result['threads']['matching_thread'] = {
+                        'id': thread_id,
+                        'title': manifest.title,
+                        'score': score,
+                        'item_count': manifest.item_count
+                    }
+
+                    # Get recent items from matching thread
+                    items = tm.get_items(thread_id)
+                    for item in items[-3:]:
+                        result['threads']['related_items'].append({
+                            'id': item.id,
+                            'type': item.type,
+                            'content': item.content
+                        })
+        except ImportError:
+            pass
+
+        return result
+
+    def index_thread_item(self, thread_id: str, item_id: str, text: str,
+                          metadata: dict = None) -> bool:
+        """
+        Index a thread item in Chroma for semantic search.
+
+        Args:
+            thread_id: Thread ID
+            item_id: Item ID
+            text: Text content to index
+            metadata: Additional metadata
+
+        Returns:
+            True if indexed successfully
+        """
+        if not text or len(text) < 20:
+            return False
+
+        doc_id = self._make_id(f"thread-{thread_id}-{item_id}-{text[:50]}")
+        doc_metadata = {
+            "source": "thread",
+            "thread_id": thread_id,
+            "item_id": item_id,
+            **(metadata or {})
+        }
+
+        try:
+            self.collection.add(
+                ids=[doc_id],
+                documents=[text[:2000]],
+                metadatas=[doc_metadata]
+            )
+            return True
+        except Exception:
+            return False
+
+    def search_threads_only(self, query: str, n_results: int = 5) -> list:
+        """
+        Search only thread items in the index.
+
+        Args:
+            query: Search text
+            n_results: Max results
+
+        Returns:
+            List of matching thread items
+        """
+        try:
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=n_results,
+                where={"source": "thread"},
+                include=["documents", "metadatas", "distances"]
+            )
+
+            output = []
+            if results["documents"] and results["documents"][0]:
+                for i, doc in enumerate(results["documents"][0]):
+                    metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+                    output.append({
+                        "text": doc,
+                        "thread_id": metadata.get("thread_id"),
+                        "item_id": metadata.get("item_id"),
+                        "distance": results["distances"][0][i] if results["distances"] else None
+                    })
+
+            return output
+        except Exception:
+            return []
 
     def _add_documents(self, docs: list):
         """Add documents to the collection."""
@@ -806,6 +928,7 @@ def main():
         print("  rebuild            - Full rebuild of index")
         print("  sync               - Incremental sync")
         print("  query <text> [n]   - Search for text")
+        print("  query-with-threads - Search memories + threads")
         print("  stats              - Show index stats")
         print("  index-file <path>  - Re-index a single file")
         sys.exit(1)
@@ -834,6 +957,14 @@ def main():
             print(f"\n--- Result {i+1} (distance: {r['distance']:.3f}) ---")
             print(f"Source: {r['metadata'].get('source')} | Date: {r['metadata'].get('date')}")
             print(r['text'][:500] + "..." if len(r['text']) > 500 else r['text'])
+
+    elif command == "query-with-threads":
+        if len(sys.argv) < 3:
+            print("Usage: chroma_helper.py query-with-threads <text>")
+            sys.exit(1)
+        query = sys.argv[2]
+        results = index.search_with_threads(query)
+        print(json.dumps(results, indent=2, default=str))
 
     elif command == "stats":
         stats = index.get_stats()

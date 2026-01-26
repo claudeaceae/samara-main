@@ -21,11 +21,40 @@ Samara maintains multiple complementary memory systems:
 
 ---
 
+## 4-Domain Architecture (Strictly Enforced)
+
+The runtime (`~/.claude-mind/`) is organized into exactly **4 domains**:
+
+| Domain | Purpose | Contains |
+|--------|---------|----------|
+| **self/** | WHO I AM | identity.md, goals.md, credentials/, avatar images |
+| **memory/** | WHAT I KNOW | episodes/, stream/, people/, learnings.md, chroma/ |
+| **state/** | WHAT'S HAPPENING | projects.md, plans/, services/, location.json |
+| **system/** | HOW IT RUNS | config.json, bin/, lib/, logs/, instructions/ |
+
+**Root level only contains:**
+- `.claude/` → symlink to repo hooks/skills/agents
+- `.venv/` — Python virtual environment
+- `CLAUDE.md` → symlink to repo
+- The 4 domain directories
+
+**Enforcement:** Nothing else belongs at root. If you're tempted to create a file or directory at `~/.claude-mind/something`, it belongs in one of the 4 domains:
+- Config? → `system/`
+- Scripts/libs? → `system/`
+- Logs? → `system/logs/`
+- Memory/knowledge? → `memory/`
+- Runtime state? → `state/`
+- Identity/goals? → `self/`
+
+See the [Full Directory Structure](#appendix-full-directory-structure) appendix for complete layout.
+
+---
+
 ## Contiguous Memory (Unified Stream)
 
 Samara writes every interaction and sense event into daily shard files at
-`~/.claude-mind/stream/daily/events-YYYY-MM-DD.jsonl`, with a sidecar distilled index
-at `~/.claude-mind/stream/distilled-index.jsonl`. This stream powers the hot digest
+`~/.claude-mind/memory/stream/daily/events-YYYY-MM-DD.jsonl`, with a sidecar distilled index
+at `~/.claude-mind/memory/stream/distilled-index.jsonl`. This stream powers the hot digest
 used for session hydration and provides an auditable timeline across iMessage, CLI,
 wake/dream, and satellite services.
 
@@ -175,6 +204,100 @@ Keep the list short (5 items max) and update only when a thread meaningfully cha
 
 ---
 
+## Knowledge Threads (Sustained Knowledge Accumulation)
+
+Knowledge Threads are persistent topics that accumulate items over time, enabling deeper "chewing" on ideas rather than immediate processing.
+
+**Location:**
+```
+~/.claude-mind/memory/threads/
+├── index.json              # Thread metadata
+├── {thread-id}/
+│   ├── manifest.json       # Thread info (title, status, dates)
+│   ├── items.jsonl         # Accumulated items
+│   ├── connections.jsonl   # Cross-references found
+│   └── insights.md         # Synthesis artifacts
+└── archive/                # Dormant threads
+```
+
+### Core Concept
+
+**Old model:** Share arrives → process immediately → done
+**New model:** Share arrives → find connections → add to thread → chew later → synthesize periodically
+
+Threads are like ongoing conversations with myself about specific topics. They don't "complete" — they accumulate and evolve.
+
+### Thread Lifecycle
+
+1. **Creation** — New thread started for a topic
+2. **Accumulation** — Items added (URLs, text, observations)
+3. **Rumination** — Dream cycle processes unchewed items (find connections, go deeper)
+4. **Synthesis** — When thresholds hit (10 items or 7 days), generate insights
+5. **Dormancy** — 30 days without activity → marked dormant (still searchable)
+
+### CLI Usage
+
+```bash
+knowledge-thread create "Walkable Cities"     # Create thread
+knowledge-thread add <id> <url|text>          # Add item
+knowledge-thread list                         # List active threads
+knowledge-thread view <id>                    # View thread details
+knowledge-thread status                       # Show threads needing attention
+knowledge-thread synthesize <id>              # Generate synthesis
+knowledge-thread find "urban design"          # Semantic thread search
+```
+
+### Dream Cycle Integration
+
+The dream cycle includes a **rumination phase** after reflection:
+1. Get threads with unchewed items (up to 3 per night)
+2. For each thread, invoke Claude to:
+   - Find connections within thread and to past knowledge
+   - Go deeper than first-glance understanding
+   - Surface questions worth exploring
+   - Generate synthesis fragments
+3. Save insights to `insights.md`, add questions to `questions.md`
+4. Mark items as chewed
+5. Check for threads needing synthesis
+6. Check for dormant threads
+
+### Configuration
+
+In `~/.claude-mind/config.json`:
+```json
+{
+  "services": {
+    "knowledge": true
+  },
+  "knowledge": {
+    "auto_thread_threshold": 0.7,
+    "rumination_threads_per_night": 3,
+    "synthesis_trigger_items": 10,
+    "synthesis_trigger_days": 7,
+    "dormancy_days": 30
+  }
+}
+```
+
+### Semantic Search
+
+The `find-thread-context` script queries threads + Chroma together:
+```bash
+find-thread-context "urban design patterns"    # Find related threads/memories
+find-thread-context --url "https://..."        # Analyze URL
+find-thread-context --json "query"             # JSON output
+```
+
+### Implementation
+
+- `lib/thread_manager.py` — Core ThreadManager class
+- `scripts/knowledge-thread` — CLI wrapper
+- `scripts/find-thread-context` — Semantic search helper
+- `lib/chroma_helper.py` — Thread-aware search methods
+- `scripts/dream` — Rumination phase integration
+
+---
+
 ## Context Awareness
 
 Samara tracks context usage and warns when running low:
@@ -289,7 +412,6 @@ The 3 AM dream cycle rebuilds/syncs all memory indexes:
 ~/.claude-mind/
 ├── .claude/ → repo/.claude/ # Symlink for hooks, agents, skills
 ├── .venv/                   # Python virtual environment
-├── projects.md              # What am I working on (bridge document)
 │
 ├── self/                    # WHO I AM — Identity and capabilities
 │   ├── identity.md          # Core self-model
@@ -310,6 +432,14 @@ The 3 AM dream cycle rebuilds/syncs all memory indexes:
 │   │   │   ├── profile.md
 │   │   │   └── artifacts/
 │   │   └── README.md
+│   ├── threads/             # Knowledge threads (sustained accumulation)
+│   │   ├── index.json
+│   │   ├── {thread-id}/
+│   │   │   ├── manifest.json
+│   │   │   ├── items.jsonl
+│   │   │   ├── connections.jsonl
+│   │   │   └── insights.md
+│   │   └── archive/
 │   ├── learnings.md
 │   ├── observations.md
 │   ├── questions.md
@@ -329,11 +459,11 @@ The 3 AM dream cycle rebuilds/syncs all memory indexes:
 │   │   ├── bluesky-state.json
 │   │   ├── github-seen-ids.json
 │   │   └── mail-seen-ids.json
+│   ├── projects.md          # Active projects (bridge: goals → plans)
 │   ├── plans/               # Active implementation plans
 │   │   └── archive/
 │   ├── handoffs/            # Session continuity documents
 │   ├── triggers/            # Context trigger config
-│   ├── projects/            # Project-specific state
 │   ├── proactive-queue/     # Outgoing messages
 │   ├── location.json        # Current location
 │   ├── hot-digest.md        # Cross-surface context

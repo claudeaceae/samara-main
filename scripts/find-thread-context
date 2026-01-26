@@ -1,0 +1,156 @@
+#!/usr/bin/env python3
+"""
+Find Thread Context - Semantic search across threads and Chroma.
+
+This script queries knowledge threads and the Chroma memory index together
+to find related items and threads for incoming content.
+
+Usage:
+    find-thread-context "search query"
+    find-thread-context --url "https://example.com/article"
+    find-thread-context --json "search query"
+"""
+
+import sys
+import os
+import json
+import argparse
+
+# Add lib path
+LIB_PATH = os.environ.get("LIB_PATH", os.path.expanduser("~/Developer/samara-main/lib"))
+sys.path.insert(0, LIB_PATH)
+
+from thread_manager import ThreadManager
+
+
+def find_context(query: str, n_results: int = 5, as_json: bool = False):
+    """
+    Find related threads and memories for the given query.
+
+    Args:
+        query: Search text
+        n_results: Max results per source
+        as_json: Output as JSON
+
+    Returns:
+        Dict with matching_thread, related_threads, related_memories
+    """
+    tm = ThreadManager()
+
+    result = {
+        'matching_thread': None,
+        'related_threads': [],
+        'related_memories': [],
+        'has_connections': False
+    }
+
+    # Find best matching thread
+    match = tm.find_matching_thread(query)
+    if match:
+        thread_id, score = match
+        manifest = tm.get_thread(thread_id)
+        result['matching_thread'] = {
+            'id': thread_id,
+            'title': manifest.title,
+            'score': score,
+            'item_count': manifest.item_count
+        }
+
+    # Find semantically related content from Chroma
+    related = tm.find_semantic_connections(query, n_results=n_results)
+    result['related_memories'] = [
+        {
+            'text': r['text'][:300],
+            'source': r['metadata'].get('source', 'unknown'),
+            'date': r['metadata'].get('date', ''),
+            'distance': r['distance']
+        }
+        for r in related
+    ]
+
+    # Find related threads (top 3 by recency that aren't the matching one)
+    matching_id = result['matching_thread']['id'] if result['matching_thread'] else None
+    all_threads = tm.list_threads(status='active')
+    for thread in all_threads[:5]:
+        if thread.id != matching_id:
+            items = tm.get_items(thread.id)
+            # Check if any items semantically relate
+            for item in items[-3:]:  # Last 3 items
+                content = item.content.get('title', '') + ' ' + item.content.get('text', '')[:100]
+                if content.strip():
+                    # Simple keyword overlap check (could be enhanced with embeddings)
+                    query_words = set(query.lower().split())
+                    content_words = set(content.lower().split())
+                    overlap = query_words & content_words
+                    if len(overlap) >= 2:
+                        result['related_threads'].append({
+                            'id': thread.id,
+                            'title': thread.title,
+                            'overlap_words': list(overlap)
+                        })
+                        break
+
+    result['has_connections'] = bool(result['matching_thread'] or result['related_memories'])
+
+    if as_json:
+        print(json.dumps(result, indent=2))
+    else:
+        _print_result(result)
+
+    return result
+
+
+def _print_result(result: dict):
+    """Pretty-print the context result."""
+    if result['matching_thread']:
+        t = result['matching_thread']
+        print(f"Best matching thread: [{t['id']}] {t['title']} (score: {t['score']:.2f})")
+        print(f"  Items: {t['item_count']}")
+        print()
+
+    if result['related_memories']:
+        print("Related memories:")
+        for m in result['related_memories'][:3]:
+            preview = m['text'][:100].replace('\n', ' ')
+            print(f"  [{m['source']}] {m['date']}: {preview}...")
+        print()
+
+    if result['related_threads']:
+        print("Related threads:")
+        for t in result['related_threads'][:3]:
+            print(f"  [{t['id']}] {t['title']}")
+        print()
+
+    if not result['has_connections']:
+        print("No existing connections found. This could start a new thread.")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Find related threads and memories for content'
+    )
+    parser.add_argument('query', nargs='*', help='Search query')
+    parser.add_argument('--url', help='URL to analyze (fetches title)')
+    parser.add_argument('--json', action='store_true', help='Output as JSON')
+    parser.add_argument('-n', '--results', type=int, default=5,
+                        help='Max results per source')
+
+    args = parser.parse_args()
+
+    if args.url:
+        # Extract query from URL (could fetch and extract title)
+        # For now, just use the URL path as query
+        from urllib.parse import urlparse
+        parsed = urlparse(args.url)
+        query = parsed.path.replace('/', ' ').replace('-', ' ').replace('_', ' ')
+    elif args.query:
+        query = ' '.join(args.query)
+    else:
+        parser.print_help()
+        sys.exit(1)
+
+    find_context(query, n_results=args.results, as_json=args.json)
+
+
+if __name__ == '__main__':
+    main()

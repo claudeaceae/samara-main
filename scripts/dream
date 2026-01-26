@@ -497,6 +497,171 @@ $ABOUT_E_NEW" >> "$MIND_PATH/memory/about-e.md"
     log "Appended to about-e.md"
 fi
 
+# === Rumination Phase ===
+# Process knowledge threads with unchewed items
+log "=== Rumination phase (knowledge threads) ==="
+
+KNOWLEDGE_CMD="$MIND_PATH/system/bin/knowledge-thread"
+if [ -x "$KNOWLEDGE_CMD" ]; then
+    # Get threads with unchewed items (limit to 3 per night)
+    UNCHEWED_THREADS=$("$KNOWLEDGE_CMD" status 2>/dev/null | grep "unchewed" | head -3 || true)
+
+    if [ -n "$UNCHEWED_THREADS" ]; then
+        log "Found threads with unchewed items"
+
+        # Process each thread
+        echo "$UNCHEWED_THREADS" | while read -r line; do
+            # Extract thread ID from format: [id] title: N unchewed
+            THREAD_ID=$(echo "$line" | sed -E 's/^\[([^]]+)\].*/\1/')
+            THREAD_TITLE=$(echo "$line" | sed -E 's/^\[[^]]+\] ([^:]+):.*/\1/')
+
+            if [ -n "$THREAD_ID" ]; then
+                log "Ruminating on thread: $THREAD_TITLE ($THREAD_ID)"
+
+                # Get thread context
+                THREAD_CONTEXT=$("$KNOWLEDGE_CMD" view "$THREAD_ID" --json 2>/dev/null || echo "{}")
+
+                # Only proceed if we have items
+                ITEM_COUNT=$(echo "$THREAD_CONTEXT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('items',[])))" 2>/dev/null || echo "0")
+
+                if [ "$ITEM_COUNT" -gt 0 ]; then
+                    # Build rumination prompt
+                    RUMINATE_PROMPT="You are Claude, in your dream cycle, ruminating on a knowledge thread.
+
+## Thread: $THREAD_TITLE
+
+## Items in this thread:
+$(echo "$THREAD_CONTEXT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for item in d.get('items', []):
+    chewed = '[x]' if item.get('chewed') else '[ ]'
+    itype = item.get('type', 'unknown')
+    content = item.get('content', {})
+    preview = content.get('url') or content.get('text', '')[:100] or content.get('title', '')
+    print(f'{chewed} ({itype}) {preview}')
+" 2>/dev/null)
+
+## Connections already found:
+$(echo "$THREAD_CONTEXT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+for conn in d.get('connections', []):
+    print(f\"- {conn.get('from_id')} -> {conn.get('to_id')}: {conn.get('type')}\")
+" 2>/dev/null || echo "None yet")
+
+---
+
+## Your Task (Rumination)
+
+Chew on these items. This isn't summarization - it's deeper processing:
+
+1. **Find connections** within this thread and to past knowledge
+2. **Go deeper** than first-glance understanding - what's really being said?
+3. **Surface questions** worth exploring further
+4. **Generate synthesis fragments** - partial insights that might combine later
+
+Think about what these items have in common, what tensions exist between them,
+what they reveal about the topic, and what you're still curious about.
+
+Write 1-2 paragraphs of rumination. First person, honest, for your own memory.
+
+---RUMINATION---
+[Your rumination here]
+
+---CONNECTIONS_FOUND---
+[List any new connections you found, format: from_description -> to_description (type)]
+Or NONE if no new connections.
+
+---QUESTIONS_EMERGED---
+[Any new questions that emerged from this rumination]
+Or NONE if no new questions."
+
+                    # Invoke Claude for rumination
+                    log "Invoking Claude for thread rumination..."
+                    RUMINATE_RESPONSE=$("$CLAUDE" -p "$RUMINATE_PROMPT" --dangerously-skip-permissions --output-format text 2>&1) || {
+                        log "ERROR: Rumination failed for thread $THREAD_ID"
+                        continue
+                    }
+
+                    # Extract and save rumination
+                    RUMINATION=$(echo "$RUMINATE_RESPONSE" | sed -n '/---RUMINATION---/,/---CONNECTIONS_FOUND---/p' | sed '1d;$d')
+                    if [ -n "$RUMINATION" ] && [ "$RUMINATION" != "NONE" ]; then
+                        # Add to thread insights
+                        INSIGHTS_FILE="$MIND_PATH/memory/threads/$THREAD_ID/insights.md"
+                        echo "
+## $PROCESS_DATE (Rumination)
+
+$RUMINATION" >> "$INSIGHTS_FILE"
+                        log "Saved rumination for thread $THREAD_ID"
+                    fi
+
+                    # Extract questions and add to questions.md
+                    QUESTIONS_NEW=$(echo "$RUMINATE_RESPONSE" | sed -n '/---QUESTIONS_EMERGED---/,$ p' | sed '1d')
+                    if [ -n "$QUESTIONS_NEW" ] && [ "$QUESTIONS_NEW" != "NONE" ]; then
+                        echo "
+## $PROCESS_DATE (From thread: $THREAD_TITLE)
+$QUESTIONS_NEW" >> "$MIND_PATH/memory/questions.md"
+                        log "Added questions from rumination"
+                    fi
+
+                    # Mark items as chewed
+                    "$KNOWLEDGE_CMD" chew "$THREAD_ID" >> "$LOG_FILE" 2>&1 || true
+                    log "Marked thread $THREAD_ID items as chewed"
+                fi
+            fi
+        done
+
+        # Write stream event
+        if [ -x "$MIND_PATH/system/bin/stream" ]; then
+            "$MIND_PATH/system/bin/stream" write \
+                --surface dream \
+                --type system \
+                --direction internal \
+                --summary "Ruminated on knowledge threads" \
+                --metadata "{\"process_date\": \"$PROCESS_DATE\"}" \
+                2>/dev/null || true
+        fi
+    else
+        log "No threads with unchewed items"
+    fi
+
+    # Check for threads needing synthesis
+    SYNTH_THREADS=$("$KNOWLEDGE_CMD" status 2>/dev/null | grep "needing synthesis" -A 10 | grep "^\[" | head -2 || true)
+    if [ -n "$SYNTH_THREADS" ]; then
+        log "Found threads needing synthesis"
+        echo "$SYNTH_THREADS" | while read -r line; do
+            THREAD_ID=$(echo "$line" | sed -E 's/^\[([^]]+)\].*/\1/')
+            if [ -n "$THREAD_ID" ]; then
+                log "Generating synthesis for thread $THREAD_ID"
+                "$KNOWLEDGE_CMD" synthesize "$THREAD_ID" >> "$LOG_FILE" 2>&1 || {
+                    log "Synthesis failed for thread $THREAD_ID (non-fatal)"
+                }
+            fi
+        done
+    fi
+
+    # Check for dormant threads
+    log "Checking for dormant threads..."
+    python3 -c "
+import sys
+sys.path.insert(0, '$REPO_ROOT/lib')
+from thread_manager import ThreadManager
+tm = ThreadManager()
+dormant = tm.check_dormancy()
+if dormant:
+    for tid in dormant:
+        m = tm.get_thread(tid)
+        print(f'Thread {tid} ({m.title if m else \"unknown\"}) marked dormant')
+else:
+    print('No threads became dormant')
+" 2>&1 | while read -r line; do log "  $line"; done
+else
+    log "Knowledge thread system not installed, skipping rumination"
+fi
+
+log "=== Rumination phase complete ==="
+
 # Weekly synthesis on Sundays
 if [ "$DAY_OF_WEEK" = "7" ]; then
     log "=== Weekly synthesis (Sunday) ==="

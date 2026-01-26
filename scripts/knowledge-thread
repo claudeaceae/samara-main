@@ -1,0 +1,474 @@
+#!/bin/bash
+# Knowledge Thread - CLI for managing knowledge threads
+# Persistent topics that accumulate items over time for sustained knowledge building.
+#
+# Usage:
+#   knowledge-thread create "Topic Title"
+#   knowledge-thread add <thread-id> <url|text> [--note "..."]
+#   knowledge-thread list [--active|--dormant|--all]
+#   knowledge-thread view <thread-id>
+#   knowledge-thread connect <thread-id> <item1> <item2>
+#   knowledge-thread chew <thread-id>
+#   knowledge-thread synthesize <thread-id>
+#   knowledge-thread find "search query"
+#   knowledge-thread migrate   # Migrate from research-queue
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+THREADS_PATH="$MIND_PATH/memory/threads"
+INDEX_FILE="$THREADS_PATH/index.json"
+LIB_PATH="${LIB_PATH:-$HOME/Developer/samara-main/lib}"
+
+# Ensure PYTHONPATH includes lib
+export PYTHONPATH="${LIB_PATH}:${PYTHONPATH:-}"
+
+usage() {
+    cat <<EOF
+Usage: knowledge-thread <command> [args]
+
+Commands:
+  create "Title"           Create a new thread
+  add <id> <content>       Add item to thread (URL detected automatically)
+  list [--active|--all]    List threads
+  view <id>                View thread details
+  connect <id> <i1> <i2>   Connect two items
+  chew <id>                Mark all items as chewed
+  synthesize <id>          Generate synthesis for thread
+  find "query"             Find threads matching query
+  status                   Show threads needing attention
+  migrate                  Migrate research-queue to threads
+
+Options:
+  --note "text"            Add a note when adding items
+  --json                   Output as JSON
+EOF
+    exit 1
+}
+
+# Helper to run Python with lib path
+run_python() {
+    python3 -c "
+import sys
+sys.path.insert(0, '$LIB_PATH')
+$1
+"
+}
+
+# Create a new thread
+cmd_create() {
+    local title="$*"
+    if [ -z "$title" ]; then
+        echo "Error: Title required"
+        echo "Usage: knowledge-thread create \"Topic Title\""
+        exit 1
+    fi
+
+    run_python "
+from thread_manager import ThreadManager
+tm = ThreadManager()
+thread_id = tm.create_thread('$title')
+print(f'Created thread: {thread_id}')
+print(f'Title: $title')
+print(f'Path: $THREADS_PATH/{thread_id}/')
+"
+}
+
+# Add item to a thread
+cmd_add() {
+    local thread_id="$1"
+    shift
+    local content="$*"
+    local note=""
+
+    # Parse --note flag
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --note)
+                note="$2"
+                shift 2
+                ;;
+            *)
+                if [ -z "$content" ]; then
+                    content="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [ -z "$thread_id" ] || [ -z "$content" ]; then
+        echo "Error: Thread ID and content required"
+        echo "Usage: knowledge-thread add <thread-id> <url|text> [--note \"...\"]"
+        exit 1
+    fi
+
+    # Detect if content is a URL
+    if [[ "$content" =~ ^https?:// ]]; then
+        local item_type="url"
+        local content_json="{\"url\": \"$content\", \"note\": \"$note\"}"
+    else
+        local item_type="text"
+        local content_json="{\"text\": \"$content\", \"note\": \"$note\"}"
+    fi
+
+    run_python "
+import json
+from thread_manager import ThreadManager
+tm = ThreadManager()
+content = json.loads('$content_json')
+item_id = tm.add_item('$thread_id', 'cli', '$item_type', content)
+print(f'Added item: {item_id}')
+"
+}
+
+# List threads
+cmd_list() {
+    local status_filter=""
+    local include_archived="False"
+    local json_output="False"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --active)
+                status_filter="active"
+                shift
+                ;;
+            --dormant)
+                status_filter="dormant"
+                shift
+                ;;
+            --all)
+                include_archived="True"
+                shift
+                ;;
+            --json)
+                json_output="True"
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    run_python "
+import json
+from thread_manager import ThreadManager
+tm = ThreadManager()
+status = '$status_filter' if '$status_filter' else None
+threads = tm.list_threads(status=status, include_archived=$include_archived)
+
+if $json_output:
+    print(json.dumps([t.to_dict() for t in threads], indent=2))
+else:
+    if not threads:
+        print('No threads found.')
+    else:
+        for t in threads:
+            status_badge = f'[{t.status}]' if t.status != 'active' else ''
+            print(f'[{t.id}] {t.title} ({t.item_count} items) {status_badge}')
+"
+}
+
+# View thread details
+cmd_view() {
+    local thread_id="$1"
+    local json_output="False"
+
+    if [ "$2" = "--json" ]; then
+        json_output="True"
+    fi
+
+    if [ -z "$thread_id" ]; then
+        echo "Error: Thread ID required"
+        echo "Usage: knowledge-thread view <thread-id>"
+        exit 1
+    fi
+
+    run_python "
+import json
+from thread_manager import ThreadManager
+tm = ThreadManager()
+manifest = tm.get_thread('$thread_id')
+if not manifest:
+    print(f'Thread not found: $thread_id')
+    exit(1)
+
+items = tm.get_items('$thread_id')
+connections = tm.get_connections('$thread_id')
+
+if $json_output:
+    output = manifest.to_dict()
+    output['items'] = [i.to_dict() for i in items]
+    output['connections'] = connections
+    print(json.dumps(output, indent=2))
+else:
+    print(f'Thread: {manifest.title}')
+    print(f'ID: {manifest.id}')
+    print(f'Status: {manifest.status}')
+    print(f'Created: {manifest.created}')
+    print(f'Updated: {manifest.updated}')
+    print(f'Items: {manifest.item_count}')
+    print(f'Tags: {\", \".join(manifest.tags) if manifest.tags else \"none\"}')
+    print(f'Last synthesis: {manifest.last_synthesis or \"never\"}')
+
+    if items:
+        print()
+        print('Items:')
+        for item in items:
+            chewed = '[x]' if item.chewed else '[ ]'
+            content_preview = str(item.content.get('url') or item.content.get('text', ''))[:50]
+            print(f'  {chewed} [{item.id}] ({item.type}) {content_preview}')
+
+    if connections:
+        print()
+        print('Connections:')
+        for conn in connections:
+            print(f'  {conn[\"from_id\"]} -> {conn[\"to_id\"]} ({conn[\"type\"]})')
+"
+}
+
+# Connect two items
+cmd_connect() {
+    local thread_id="$1"
+    local item1="$2"
+    local item2="$3"
+    local conn_type="${4:-semantic}"
+
+    if [ -z "$thread_id" ] || [ -z "$item1" ] || [ -z "$item2" ]; then
+        echo "Error: Thread ID and two item IDs required"
+        echo "Usage: knowledge-thread connect <thread-id> <item1> <item2> [type]"
+        exit 1
+    fi
+
+    run_python "
+from thread_manager import ThreadManager
+tm = ThreadManager()
+tm.add_connection('$thread_id', '$item1', '$item2', '$conn_type')
+print(f'Connected {\"$item1\"} -> {\"$item2\"} ({\"$conn_type\"})')
+"
+}
+
+# Mark items as chewed
+cmd_chew() {
+    local thread_id="$1"
+
+    if [ -z "$thread_id" ]; then
+        echo "Error: Thread ID required"
+        echo "Usage: knowledge-thread chew <thread-id>"
+        exit 1
+    fi
+
+    run_python "
+from thread_manager import ThreadManager
+tm = ThreadManager()
+items = tm.get_items('$thread_id', unchewed_only=True)
+count = len(items)
+if count == 0:
+    print('No unchewed items.')
+else:
+    tm.mark_chewed('$thread_id')
+    print(f'Marked {count} items as chewed.')
+"
+}
+
+# Generate synthesis
+cmd_synthesize() {
+    local thread_id="$1"
+
+    if [ -z "$thread_id" ]; then
+        echo "Error: Thread ID required"
+        echo "Usage: knowledge-thread synthesize <thread-id>"
+        exit 1
+    fi
+
+    # Get synthesis context
+    local context
+    context=$(run_python "
+import json
+from thread_manager import ThreadManager
+tm = ThreadManager()
+ctx = tm.get_synthesis_context('$thread_id')
+output = {
+    'title': ctx['thread'].title,
+    'items': [{'type': i.type, 'content': i.content} for i in ctx['items']],
+    'connections': ctx['connections'],
+    'related': ctx['related_memories'][:3] if ctx['related_memories'] else []
+}
+print(json.dumps(output))
+")
+
+    # Build prompt for Claude
+    local prompt="You are synthesizing a knowledge thread.
+
+## Thread: $(echo "$context" | jq -r '.title')
+
+## Items:
+$(echo "$context" | jq -r '.items[] | "- [\(.type)] \(.content | tostring)"')
+
+## Connections:
+$(echo "$context" | jq -r '.connections[] | "- \(.from_id) -> \(.to_id): \(.type)"')
+
+## Related Memories:
+$(echo "$context" | jq -r '.related[] | "- \(.text[:200] // \"\")"')
+
+---
+
+Write a synthesis (2-3 paragraphs) that:
+1. Identifies the core theme or question this thread is exploring
+2. Notes connections between items and to past knowledge
+3. Surfaces questions worth exploring further
+4. Highlights any insights that emerged from the accumulation
+
+Write in first person. This is for my own memory."
+
+    # Invoke Claude
+    local claude="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
+    local synthesis
+    synthesis=$("$claude" -p "$prompt" --output-format text 2>&1) || {
+        echo "Error: Claude invocation failed"
+        exit 1
+    }
+
+    # Save synthesis
+    run_python "
+from thread_manager import ThreadManager
+tm = ThreadManager()
+synthesis = '''$synthesis'''
+tm.save_synthesis('$thread_id', synthesis)
+print('Synthesis saved.')
+"
+
+    echo "---"
+    echo "$synthesis"
+}
+
+# Find threads matching query
+cmd_find() {
+    local query="$*"
+
+    if [ -z "$query" ]; then
+        echo "Error: Search query required"
+        echo "Usage: knowledge-thread find \"search query\""
+        exit 1
+    fi
+
+    run_python "
+from thread_manager import ThreadManager
+tm = ThreadManager()
+match = tm.find_matching_thread('$query')
+if match:
+    thread_id, score = match
+    manifest = tm.get_thread(thread_id)
+    print(f'Best match: [{thread_id}] {manifest.title} (score: {score:.2f})')
+else:
+    print('No matching threads found.')
+
+# Also show related memories
+related = tm.find_semantic_connections('$query', n_results=3)
+if related:
+    print()
+    print('Related memories:')
+    for r in related:
+        source = r['metadata'].get('source', 'unknown')
+        date = r['metadata'].get('date', '')
+        preview = r['text'][:100]
+        print(f'  [{source}] {date}: {preview}...')
+"
+}
+
+# Show threads needing attention
+cmd_status() {
+    run_python "
+from thread_manager import ThreadManager
+tm = ThreadManager()
+
+print('=== Threads with unchewed items ===')
+unchewed = tm.get_threads_with_unchewed(limit=5)
+if unchewed:
+    for manifest, count in unchewed:
+        print(f'  [{manifest.id}] {manifest.title}: {count} unchewed')
+else:
+    print('  None')
+
+print()
+print('=== Threads needing synthesis ===')
+synth = tm.get_threads_needing_synthesis()
+if synth:
+    for t in synth:
+        reason = f'{t.item_count} items' if t.item_count >= 10 else 'time'
+        print(f'  [{t.id}] {t.title} (reason: {reason})')
+else:
+    print('  None')
+
+print()
+print('=== Checking for dormant threads ===')
+dormant = tm.check_dormancy()
+if dormant:
+    for tid in dormant:
+        manifest = tm.get_thread(tid)
+        print(f'  [{tid}] {manifest.title} -> marked dormant')
+else:
+    print('  No threads became dormant')
+"
+}
+
+# Migrate from research-queue
+cmd_migrate() {
+    run_python "
+from thread_manager import migrate_research_queue
+result = migrate_research_queue()
+print(f'Migrated {result[\"migrated\"]} items to {result[\"threads_created\"]} threads')
+"
+}
+
+# Main dispatch
+case "${1:-}" in
+    create)
+        shift
+        cmd_create "$@"
+        ;;
+    add)
+        shift
+        cmd_add "$@"
+        ;;
+    list)
+        shift
+        cmd_list "$@"
+        ;;
+    view)
+        shift
+        cmd_view "$@"
+        ;;
+    connect)
+        shift
+        cmd_connect "$@"
+        ;;
+    chew)
+        shift
+        cmd_chew "$@"
+        ;;
+    synthesize)
+        shift
+        cmd_synthesize "$@"
+        ;;
+    find)
+        shift
+        cmd_find "$@"
+        ;;
+    status)
+        shift
+        cmd_status "$@"
+        ;;
+    migrate)
+        shift
+        cmd_migrate "$@"
+        ;;
+    -h|--help|help)
+        usage
+        ;;
+    *)
+        usage
+        ;;
+esac

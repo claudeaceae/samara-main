@@ -216,6 +216,26 @@ Nightly memory consolidation and reflection.
 | `find-related-context` | Cross-temporal context lookup |
 | `archive-index` | Transcript archive (rebuild, sync-recent, search) |
 | `expression-tracker` | Creative expression state tracking |
+| `knowledge-thread` | Knowledge thread management |
+| `find-thread-context` | Semantic search across threads + Chroma |
+
+### Knowledge Threads
+
+Persistent topics that accumulate items over time for sustained knowledge building.
+
+```bash
+knowledge-thread create "Topic Title"     # Create new thread
+knowledge-thread add <id> <url|text>      # Add item to thread
+knowledge-thread list                     # List active threads
+knowledge-thread view <id>                # View thread details
+knowledge-thread status                   # Show threads needing attention
+knowledge-thread synthesize <id>          # Generate synthesis
+knowledge-thread find "query"             # Semantic thread search
+knowledge-thread chew <id>                # Mark items as processed
+knowledge-thread migrate                  # Migrate from research-queue
+```
+
+**Integration:** Dream cycle includes rumination phase (processes up to 3 threads/night).
 
 ---
 
@@ -391,7 +411,7 @@ Rebuild and deploy Samara.app using proper Xcode workflow.
 | `log-session` | Log session summaries to episode |
 | `export-messages` | Export iMessage history |
 | `project` | Project context helper |
-| `research-queue` | Manage research queue |
+| `research-queue` | Manage research queue (deprecated: use `knowledge-thread`) |
 | `creative-prompt` | Generate creative prompts |
 | `generate-skills-manifest` | Rebuild skills manifest |
 | `message-watchdog` | Monitor message delivery |
