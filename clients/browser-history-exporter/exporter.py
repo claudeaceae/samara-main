@@ -31,7 +31,8 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-import requests
+import urllib.request
+import urllib.error
 
 # Configuration
 CONFIG_PATH = Path.home() / ".claude-client" / "config.json"
@@ -311,19 +312,25 @@ def send_to_webhook(config: dict, visits: list[dict], domains: dict[str, int]) -
     payload_json = json.dumps(payload)
     headers = {
         "Content-Type": "application/json",
+        "User-Agent": "claude-browser-history-exporter/1.0",
         "X-Hub-Signature-256": sign_payload(payload_json, secret),
     }
 
     try:
-        resp = requests.post(url, data=payload_json, headers=headers, timeout=30)
-        if resp.status_code == 200:
-            result = resp.json()
+        req = urllib.request.Request(
+            url,
+            data=payload_json.encode(),
+            headers=headers,
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode())
             print(f"Sent {len(visits)} visits. Response: {result.get('status', 'ok')}")
             return True
-        else:
-            print(f"Webhook returned {resp.status_code}: {resp.text}")
-            return False
-    except requests.RequestException as e:
+    except urllib.error.HTTPError as e:
+        print(f"Webhook returned {e.code}: {e.read().decode()}")
+        return False
+    except (urllib.error.URLError, OSError) as e:
         print(f"Failed to send to webhook: {e}")
         return False
 
