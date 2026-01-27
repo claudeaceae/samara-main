@@ -3,22 +3,19 @@
 # Browser History Exporter - Installer
 #
 # Installs the browser history exporter on the client machine (your Mac).
-# This script copies the exporter to a shared location, creates a Python
-# virtual environment with dependencies, and sets up a launchd agent to
-# run it every 15 minutes.
+# Uses only Python stdlib (no pip, no venv needed).
 #
 # Usage:
 #   ./install.sh [--secret <webhook_secret>]
 #
 # After installation:
-#   1. Run a manual test: $INSTALL_DIR/venv/bin/python3 $INSTALL_DIR/exporter.py
+#   1. Run a manual test: python3 $INSTALL_DIR/exporter.py
 #   2. The launchd agent will start automatically every 15 minutes
 
 set -eo pipefail
 
 # Paths
 INSTALL_DIR="/Users/Shared/.claude-client/browser-history-exporter"
-VENV_DIR="$INSTALL_DIR/venv"
 CONFIG_DIR="$HOME/.claude-client"
 LOG_DIR="/Users/Shared/.claude-client/logs"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
@@ -55,12 +52,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cp "$SCRIPT_DIR/exporter.py" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/exporter.py"
 
-# Create virtual environment and install dependencies
-echo "Setting up Python virtual environment..."
-python3 -m venv "$VENV_DIR"
-"$VENV_DIR/bin/pip" install --upgrade pip -q
-"$VENV_DIR/bin/pip" install requests -q
-echo "  Installed: $("$VENV_DIR/bin/python3" -c 'import requests; print(f"requests {requests.__version__}")')"
+# Verify python3 is available
+echo "Checking Python..."
+python3 --version || { echo "ERROR: python3 not found"; exit 1; }
 
 # Create default config if it doesn't exist
 if [[ ! -f "$CONFIG_DIR/config.json" ]]; then
@@ -96,7 +90,7 @@ cat > "$LAUNCH_AGENTS_DIR/$PLIST_NAME" << EOF
 
     <key>ProgramArguments</key>
     <array>
-        <string>$VENV_DIR/bin/python3</string>
+        <string>/usr/bin/python3</string>
         <string>$INSTALL_DIR/exporter.py</string>
     </array>
 
@@ -126,10 +120,9 @@ echo -e "${GREEN}Installation complete!${NC}"
 echo ""
 echo "  Config:  $CONFIG_DIR/config.json"
 echo "  Logs:    $LOG_DIR/browser-history-exporter.{log,err}"
-echo "  Venv:    $VENV_DIR/"
 echo ""
 echo "Test manually:"
-echo "  $VENV_DIR/bin/python3 $INSTALL_DIR/exporter.py"
+echo "  python3 $INSTALL_DIR/exporter.py"
 echo ""
 echo "To uninstall:"
 echo "  launchctl unload $LAUNCH_AGENTS_DIR/$PLIST_NAME"

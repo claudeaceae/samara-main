@@ -8,7 +8,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/Shared/.claude-client/browser-history-exporter/venv/bin/python3</string>
+        <string>/usr/bin/python3</string>
         <string>/Users/Shared/.claude-client/browser-history-exporter/exporter.py</string>
     </array>
 

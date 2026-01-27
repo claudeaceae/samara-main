@@ -19,8 +19,9 @@ cd /path/to/samara-main/clients/browser-history-exporter
 ./install.sh --secret <webhook_secret>
 ```
 
-The installer creates a Python venv with dependencies, writes the config, and
-registers a launchd agent. The config lives at `~/.claude-client/config.json`:
+The installer copies the exporter, writes the config, and registers a launchd
+agent. No external dependencies — uses only Python stdlib. The config lives at
+`~/.claude-client/config.json`:
 
 ```json
 {
@@ -64,8 +65,7 @@ Enable the service in config:
 Run the exporter manually to verify it works:
 
 ```bash
-/Users/Shared/.claude-client/browser-history-exporter/venv/bin/python3 \
-  /Users/Shared/.claude-client/browser-history-exporter/exporter.py
+python3 /Users/Shared/.claude-client/browser-history-exporter/exporter.py
 ```
 
 You should see output like:
@@ -94,7 +94,7 @@ Edit `browsers` in config.json to choose which browsers to track.
 
 | Location | Purpose |
 |----------|---------|
-| `/Users/Shared/.claude-client/browser-history-exporter/` | Exporter script + venv |
+| `/Users/Shared/.claude-client/browser-history-exporter/` | Exporter script |
 | `~/.claude-client/config.json` | Your configuration |
 | `~/.claude-client/browser-history-state.json` | Last-seen timestamps (auto-managed) |
 | `/Users/Shared/.claude-client/logs/` | Log files |
