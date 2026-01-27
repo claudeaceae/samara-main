@@ -1,18 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
+<!-- Reference template. The installer generates the actual plist with correct paths. -->
 <dict>
     <key>Label</key>
     <string>com.claude.browser-history-exporter</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
+        <string>/Users/Shared/.claude-client/browser-history-exporter/venv/bin/python3</string>
         <string>/Users/Shared/.claude-client/browser-history-exporter/exporter.py</string>
     </array>
 
     <key>StartInterval</key>
-    <integer>900</integer><!-- 15 minutes -->
+    <integer>900</integer>
 
     <key>RunAtLoad</key>
     <true/>
@@ -22,11 +23,5 @@
 
     <key>StandardErrorPath</key>
     <string>/Users/Shared/.claude-client/logs/browser-history-exporter.err</string>
-
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin</string>
-    </dict>
 </dict>
 </plist>

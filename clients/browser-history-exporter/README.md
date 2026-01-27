@@ -16,15 +16,16 @@ On your Mac (the one you browse from):
 
 ```bash
 cd /path/to/samara-main/clients/browser-history-exporter
-./install.sh
+./install.sh --secret <webhook_secret>
 ```
 
-Then edit `~/.claude-client/config.json`:
+The installer creates a Python venv with dependencies, writes the config, and
+registers a launchd agent. The config lives at `~/.claude-client/config.json`:
 
 ```json
 {
-  "webhook_url": "https://your-cloudflare-tunnel-url/webhook/browser_history",
-  "webhook_secret": "your-shared-secret-here",
+  "webhook_url": "https://webhooks.organelle.co/webhook/browser_history",
+  "webhook_secret": "<from Claude's keychain>",
   "browsers": ["dia", "safari"],
   "poll_interval_min": 15,
   "device_name": "eriks-macbook"
@@ -63,7 +64,8 @@ Enable the service in config:
 Run the exporter manually to verify it works:
 
 ```bash
-python3 ~/.claude-client/browser-history-exporter/exporter.py
+/Users/Shared/.claude-client/browser-history-exporter/venv/bin/python3 \
+  /Users/Shared/.claude-client/browser-history-exporter/exporter.py
 ```
 
 You should see output like:
@@ -81,7 +83,7 @@ Sent 55 visits. Response: accepted
 
 | Browser | Status | DB Location |
 |---------|--------|-------------|
-| Dia     | Supported | `~/Library/Application Support/Dia/Default/History` |
+| Dia     | Supported | `~/Library/Application Support/Dia/User Data/Default/History` |
 | Chrome  | Supported | `~/Library/Application Support/Google/Chrome/Default/History` |
 | Safari  | Supported | `~/Library/Safari/History.db` |
 | Arc     | Supported | `~/Library/Application Support/Arc/User Data/Default/History` |
@@ -92,7 +94,7 @@ Edit `browsers` in config.json to choose which browsers to track.
 
 | Location | Purpose |
 |----------|---------|
-| `/Users/Shared/.claude-client/browser-history-exporter/` | Exporter script |
+| `/Users/Shared/.claude-client/browser-history-exporter/` | Exporter script + venv |
 | `~/.claude-client/config.json` | Your configuration |
 | `~/.claude-client/browser-history-state.json` | Last-seen timestamps (auto-managed) |
 | `/Users/Shared/.claude-client/logs/` | Log files |
