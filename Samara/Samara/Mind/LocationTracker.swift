@@ -191,8 +191,9 @@ final class LocationTracker {
     /// Time threshold for lingering at unknown location (5 minutes)
     private let lingeringThreshold: TimeInterval = 5 * 60
 
-    /// Minimum time between proactive messages (1 hour)
-    private let messageCooldown: TimeInterval = 60 * 60
+    /// Minimum time between proactive messages (15 minutes)
+    /// Each trigger has its own anti-spam logic, so this is just a safety net.
+    private let messageCooldown: TimeInterval = 15 * 60
 
     /// Data age threshold for adding staleness qualifier to messages (2 minutes)
     private let stalenessQualifierThreshold: TimeInterval = 2 * 60
@@ -218,6 +219,7 @@ final class LocationTracker {
     private var wasAtHome: Bool = false  // for detecting departure from home
     private var wasAtWork: Bool = false  // for detecting departure from work
     private var didLoadTrackerState: Bool = false
+    private var lastTriggerType: TriggerType?  // for journey pair cooldown bypass
     private var lastTransitAlert: String?  // prevent re-alerting same station
     private var lastPatternDeviationAlert: Date?  // prevent repeated deviation alerts
     private var consecutiveAwayReadings: Int = 0  // hysteresis counter for departure detection
@@ -477,9 +479,19 @@ final class LocationTracker {
         )
     }
 
+    /// Whether a trigger type is a departure (part of a journey pair)
+    private func isDepartureTrigger(_ type: TriggerType) -> Bool {
+        return type == .leavingHome || type == .leavingWork
+    }
+
     private func analyzeLocation(_ location: LocationEntry) -> LocationAnalysis {
         // Check cooldown
         if let lastMsg = lastMessageTime, Date().timeIntervalSince(lastMsg) < messageCooldown {
+            // After a departure, let arrival checks bypass cooldown (journey pairs)
+            if let lastType = lastTriggerType, isDepartureTrigger(lastType) {
+                if let result = checkArrivingHome(location) { return result }
+                if let result = checkArrivingWork(location) { return result }
+            }
             return LocationAnalysis(shouldMessage: false, reason: "Cooldown active", currentLocation: location, triggerType: nil, triggerContext: nil)
         }
 
@@ -659,6 +671,7 @@ final class LocationTracker {
                 // Actually leaving
                 consecutiveAwayReadings = 0
                 wasAtHome = false
+                lastTriggerType = .leavingHome
                 saveTrackerState()
                 lastMessageTime = Date()
                 log("Leaving home confirmed after \(requiredAwayReadings) readings",
@@ -710,6 +723,7 @@ final class LocationTracker {
         // Trigger: was away, now home
         if !wasAtHome && isNowHome {
             wasAtHome = true
+            lastTriggerType = .arrivingHome
             saveTrackerState()
             lastMessageTime = Date()
             log("Arriving home detected - wasAtHome=\(wasAtHome)", level: .info, component: "LocationTracker")
@@ -759,6 +773,7 @@ final class LocationTracker {
         // Trigger: was at work, now away
         if wasAtWork && isNowAway {
             wasAtWork = false
+            lastTriggerType = .leavingWork
             saveTrackerState()
             lastMessageTime = Date()
             log("Leaving work detected - wasAtWork=\(wasAtWork)", level: .info, component: "LocationTracker")
@@ -800,6 +815,7 @@ final class LocationTracker {
         // Trigger: was away, now at work
         if !wasAtWork && isNowAtWork {
             wasAtWork = true
+            lastTriggerType = .arrivingWork
             saveTrackerState()
             lastMessageTime = Date()
             log("Arriving at work detected - wasAtWork=\(wasAtWork)", level: .info, component: "LocationTracker")
@@ -1278,6 +1294,7 @@ final class LocationTracker {
         var wasAtHome: Bool
         var wasAtWork: Bool?  // Optional for backwards compatibility
         var lastMessageTime: Date?
+        var lastTriggerType: String?  // Raw value of TriggerType for journey pair bypass
         var lastTransitAlert: String?
         var consecutiveAwayReadings: Int?  // Hysteresis counter for departure detection
     }
@@ -1296,6 +1313,7 @@ final class LocationTracker {
             wasAtHome = state.wasAtHome
             wasAtWork = state.wasAtWork ?? false
             lastMessageTime = state.lastMessageTime
+            lastTriggerType = state.lastTriggerType.flatMap { TriggerType(rawValue: $0) }
             lastTransitAlert = state.lastTransitAlert
             consecutiveAwayReadings = state.consecutiveAwayReadings ?? 0
             didLoadTrackerState = true
@@ -1310,6 +1328,7 @@ final class LocationTracker {
             wasAtHome: wasAtHome,
             wasAtWork: wasAtWork,
             lastMessageTime: lastMessageTime,
+            lastTriggerType: lastTriggerType?.rawValue,
             lastTransitAlert: lastTransitAlert,
             consecutiveAwayReadings: consecutiveAwayReadings
         )
