@@ -232,7 +232,7 @@ final class LocationTracker {
 
         // Initialize home state from last known location if not loaded from state
         if let home = findPlace(named: "home"), let last = locationHistory.last {
-            let isCurrentlyHome = last.distance(toLat: home.lat, lon: home.lon) < home.radius
+            let isCurrentlyHome = isLocationAtPlace(last, home)
             // Only override if state wasn't loaded (wasAtHome defaults to false)
             if !wasAtHome && isCurrentlyHome {
                 wasAtHome = isCurrentlyHome
@@ -242,7 +242,7 @@ final class LocationTracker {
 
         // Initialize work state from last known location if not loaded from state
         if let work = findPlace(named: "work"), let last = locationHistory.last {
-            let isCurrentlyAtWork = last.distance(toLat: work.lat, lon: work.lon) < work.radius
+            let isCurrentlyAtWork = isLocationAtPlace(last, work)
             // Only override if state wasn't loaded (wasAtWork defaults to false)
             if !wasAtWork && isCurrentlyAtWork {
                 wasAtWork = isCurrentlyAtWork
@@ -287,8 +287,12 @@ final class LocationTracker {
 
     /// Get a human-readable address for coordinates
     private func getAddressForLocation(lat: Double, lon: Double, wifi: String?) -> String {
-        // First check if we're at a known place
+        // First check if we're at a known place (WiFi match takes priority)
         for place in places {
+            if let placeWifi = place.wifiHints, !placeWifi.isEmpty,
+               let currentWifi = wifi, placeWifi.contains(currentWifi) {
+                return place.label ?? place.name
+            }
             let distance = LocationTracker.haversineDistance(lat1: lat, lon1: lon, lat2: place.lat, lon2: place.lon)
             if distance < place.radius {
                 return place.label ?? place.name
@@ -574,10 +578,8 @@ final class LocationTracker {
                 consecutiveAwayReadings = 0
                 saveTrackerState()
             }
-            if !wasAtHome {
-                wasAtHome = true
-                saveTrackerState()
-            }
+            // Don't set wasAtHome here — let checkArrivingHome handle the
+            // transition so it can fire the arrival notification
             return nil
         }
 
@@ -635,8 +637,7 @@ final class LocationTracker {
     private func checkArrivingHome(_ location: LocationEntry) -> LocationAnalysis? {
         guard let home = findPlace(named: "home") else { return nil }
 
-        let distanceFromHome = location.distance(toLat: home.lat, lon: home.lon)
-        let isNowHome = distanceFromHome < home.radius
+        let isNowHome = isLocationAtPlace(location, home)
 
         // Trigger: was away, now home
         if !wasAtHome && isNowHome {
@@ -700,8 +701,7 @@ final class LocationTracker {
     private func checkArrivingWork(_ location: LocationEntry) -> LocationAnalysis? {
         guard let work = findPlace(named: "work") else { return nil }
 
-        let distanceFromWork = location.distance(toLat: work.lat, lon: work.lon)
-        let isNowAtWork = distanceFromWork < work.radius
+        let isNowAtWork = isLocationAtPlace(location, work)
 
         // Trigger: was away, now at work
         if !wasAtWork && isNowAtWork {
@@ -797,6 +797,15 @@ final class LocationTracker {
         return nil
     }
 
+    /// Check if a location is at a given place (WiFi match takes priority over GPS)
+    private func isLocationAtPlace(_ location: LocationEntry, _ place: Place) -> Bool {
+        if let placeWifi = place.wifiHints, !placeWifi.isEmpty,
+           let currentWifi = location.wifi, placeWifi.contains(currentWifi) {
+            return true
+        }
+        return location.distance(toLat: place.lat, lon: place.lon) < place.radius
+    }
+
     /// Find a named place
     private func findPlace(named name: String) -> Place? {
         return places.first { $0.name == name }
@@ -810,9 +819,10 @@ final class LocationTracker {
         }
 
         for place in places {
-            let distance = location.distance(toLat: place.lat, lon: place.lon)
-            if distance < place.radius {
-                log("isAtKnownPlace: At \(place.name) (distance: \(Int(distance))m, radius: \(Int(place.radius))m)", level: .debug, component: "LocationTracker")
+            if isLocationAtPlace(location, place) {
+                let method = (place.wifiHints?.isEmpty == false && location.wifi.flatMap({ place.wifiHints?.contains($0) }) == true) ? "wifi" : "gps"
+                let distance = Int(location.distance(toLat: place.lat, lon: place.lon))
+                log("isAtKnownPlace: At \(place.name) (distance: \(distance)m, radius: \(Int(place.radius))m, method: \(method))", level: .debug, component: "LocationTracker")
                 return true
             }
         }
@@ -826,7 +836,7 @@ final class LocationTracker {
     /// Get name of current place, if at one
     func currentPlaceName(for location: LocationEntry) -> String? {
         for place in places {
-            if location.distance(toLat: place.lat, lon: place.lon) < place.radius {
+            if isLocationAtPlace(location, place) {
                 return place.label ?? place.name
             }
         }
@@ -852,7 +862,7 @@ final class LocationTracker {
         let isWeekday = calendar.component(.weekday, from: now) >= 2 &&
                         calendar.component(.weekday, from: now) <= 6
 
-        let atHome = location.distance(toLat: home.lat, lon: home.lon) < home.radius
+        let atHome = isLocationAtPlace(location, home)
 
         // Check: Still at home past typical departure time?
         if atHome {

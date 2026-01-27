@@ -60,6 +60,17 @@ final class LocationTrackerTests: SamaraTestCase {
         try data.write(to: url)
     }
 
+    private func writeHistory(_ entries: [LocationTracker.LocationEntry], to url: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var lines: [String] = []
+        for entry in entries {
+            let data = try encoder.encode(entry)
+            lines.append(String(data: data, encoding: .utf8)!)
+        }
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
     private func makeUpdate(lat: Double, lon: Double, timestamp: Date = Date(), speed: Double? = nil, wifi: String? = nil, motion: [String] = []) -> LocationUpdate {
         LocationUpdate(
             timestamp: timestamp,
@@ -190,5 +201,118 @@ final class LocationTrackerTests: SamaraTestCase {
         )
 
         XCTAssertEqual(tracker.currentPlaceName(for: entry), "HQ")
+    }
+
+    // MARK: - WiFi-First Place Matching Tests
+
+    func testIsAtKnownPlaceUsesWiFiMatch() throws {
+        let paths = try makePaths()
+        // Home with 100m GPS radius and WiFi hint
+        let home = LocationTracker.Place(name: "home", label: "É's apartment", lat: 40.67217, lon: -73.95, radiusM: 100, type: nil, wifiHints: ["cute aggression"])
+        try writePlaces([home], to: paths.placesPath)
+        try writeTrackerState(wasAtHome: true, wasAtWork: false, to: paths.statePath)
+
+        // Seed history at home so isNewLocation doesn't fire
+        let historyEntry = LocationTracker.LocationEntry(
+            timestamp: Date(timeIntervalSinceNow: -300),
+            latitude: 40.67217, longitude: -73.95,
+            address: "É's apartment", altitude: nil, speed: nil, motion: [], wifi: "cute aggression"
+        )
+        try writeHistory([historyEntry], to: paths.historyPath)
+
+        let tracker = LocationTracker(
+            historyPath: paths.historyPath.path,
+            knownPlacesPath: paths.knownPlacesPath.path,
+            placesPath: paths.placesPath.path,
+            subwayPath: paths.subwayPath.path,
+            patternsPath: paths.patternsPath.path,
+            statePath: paths.statePath.path
+        )
+
+        // GPS drifts ~148m from home center (outside 100m radius), but WiFi matches
+        let update = makeUpdate(lat: 40.6735, lon: -73.95, wifi: "cute aggression")
+        let analysis = tracker.processLocation(update)
+
+        // WiFi match proves we're home — no lingering/new-spot alerts
+        XCTAssertFalse(analysis.shouldMessage, "WiFi match should suppress false alerts when GPS drifts at home")
+    }
+
+    func testAddressResolvesToPlaceLabelWithWiFi() throws {
+        let paths = try makePaths()
+        let home = LocationTracker.Place(name: "home", label: "É's apartment", lat: 40.67217, lon: -73.95, radiusM: 100, type: nil, wifiHints: ["cute aggression"])
+        try writePlaces([home], to: paths.placesPath)
+
+        let tracker = LocationTracker(
+            historyPath: paths.historyPath.path,
+            knownPlacesPath: paths.knownPlacesPath.path,
+            placesPath: paths.placesPath.path,
+            subwayPath: paths.subwayPath.path,
+            patternsPath: paths.patternsPath.path,
+            statePath: paths.statePath.path
+        )
+
+        // GPS outside 100m radius but WiFi matches home
+        let update = makeUpdate(lat: 40.6735, lon: -73.95, wifi: "cute aggression")
+        let analysis = tracker.processLocation(update)
+
+        // Address should be place label, not "near cute aggression"
+        XCTAssertEqual(analysis.currentLocation?.address, "É's apartment")
+    }
+
+    func testCurrentPlaceNameUsesWiFi() throws {
+        let paths = try makePaths()
+        let home = LocationTracker.Place(name: "home", label: "É's apartment", lat: 40.67217, lon: -73.95, radiusM: 100, type: nil, wifiHints: ["cute aggression"])
+        try writePlaces([home], to: paths.placesPath)
+
+        let tracker = LocationTracker(
+            historyPath: paths.historyPath.path,
+            knownPlacesPath: paths.knownPlacesPath.path,
+            placesPath: paths.placesPath.path,
+            subwayPath: paths.subwayPath.path,
+            patternsPath: paths.patternsPath.path,
+            statePath: paths.statePath.path
+        )
+
+        // GPS outside radius but WiFi matches
+        let entry = LocationTracker.LocationEntry(
+            timestamp: Date(),
+            latitude: 40.6735, longitude: -73.95,
+            address: "near cute aggression", altitude: nil, speed: nil, motion: [],
+            wifi: "cute aggression"
+        )
+
+        XCTAssertEqual(tracker.currentPlaceName(for: entry), "É's apartment")
+    }
+
+    func testArrivingHomeDetectedByWiFi() throws {
+        let paths = try makePaths()
+        let home = LocationTracker.Place(name: "home", label: "É's apartment", lat: 40.67217, lon: -73.95, radiusM: 100, type: nil, wifiHints: ["cute aggression"])
+        try writePlaces([home], to: paths.placesPath)
+        // Start as away from home
+        try writeTrackerState(wasAtHome: false, wasAtWork: false, to: paths.statePath)
+
+        // Seed history so isNewLocation doesn't fire
+        let historyEntry = LocationTracker.LocationEntry(
+            timestamp: Date(timeIntervalSinceNow: -300),
+            latitude: 40.67217, longitude: -73.95,
+            address: "É's apartment", altitude: nil, speed: nil, motion: [], wifi: "cute aggression"
+        )
+        try writeHistory([historyEntry], to: paths.historyPath)
+
+        let tracker = LocationTracker(
+            historyPath: paths.historyPath.path,
+            knownPlacesPath: paths.knownPlacesPath.path,
+            placesPath: paths.placesPath.path,
+            subwayPath: paths.subwayPath.path,
+            patternsPath: paths.patternsPath.path,
+            statePath: paths.statePath.path
+        )
+
+        // GPS outside radius but WiFi matches home — should detect arrival
+        let update = makeUpdate(lat: 40.6735, lon: -73.95, wifi: "cute aggression")
+        let analysis = tracker.processLocation(update)
+
+        XCTAssertTrue(analysis.shouldMessage, "WiFi match should trigger arriving home even with GPS outside radius")
+        XCTAssertEqual(analysis.triggerType, .arrivingHome)
     }
 }
