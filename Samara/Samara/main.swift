@@ -108,16 +108,32 @@ let locationFileWatcher = LocationFileWatcher(
             episodeLogger.logSenseEvent(sense: "location", data: details.joined(separator: "\n"))
         }
 
-        if analysis.shouldMessage, let reason = analysis.reason {
-            log("[Main] Location trigger: \(reason)")
+        if analysis.shouldMessage, let triggerCtx = analysis.triggerContext {
+            let fallback = analysis.reason ?? "Location update"
+            log("[Main] Location trigger: \(fallback)")
 
-            // Send proactive message to collaborator via MessageBus (ensures logging)
+            // Invoke Claude to compose a contextual message, with canned string as fallback
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
-                    try messageBus.send(reason, type: .locationTrigger)
-                    log("[Main] Sent proactive location message")
+                    var needs = ContextRouter.ContextNeeds()
+                    needs.needsLocationContext = true
+                    needs.needsTodayEpisode = true
+                    let context = memoryContext.buildSmartContext(needs: needs)
+
+                    let prompt = buildLocationPrompt(triggerContext: triggerCtx)
+                    let result = try invoker.invoke(prompt: prompt, context: context, attachmentPaths: [])
+
+                    try messageBus.send(result, type: .locationTrigger)
+                    episodeLogger.logExchange(
+                        from: "Location:\(triggerCtx.triggerType.rawValue)",
+                        message: formatTriggerForLogging(triggerCtx),
+                        response: result,
+                        source: "Location"
+                    )
+                    log("[Main] Sent contextual location message")
                 } catch {
-                    log("[Main] Failed to send location message: \(error)")
+                    log("[Main] Claude failed for location, using fallback: \(error)")
+                    try? messageBus.send(fallback, type: .locationTrigger)
                 }
             }
         } else {
@@ -156,6 +172,71 @@ let permissionMonitor = PermissionDialogMonitor { message in
     } catch {
         log("[Main] Failed to send permission dialog alert: \(error)")
     }
+}
+
+/// Build a prompt for Claude to compose a contextual location message
+func buildLocationPrompt(triggerContext: LocationTracker.TriggerContext) -> String {
+    var prompt = """
+        You are Claude, running as Samara. You noticed a location change for \(collaboratorName).
+        Send a brief, natural message acknowledging what happened.
+
+        ## Location Trigger
+        - Type: \(triggerContext.triggerType.rawValue)
+        - Time of day: \(triggerContext.timeOfDay)
+        """
+
+    if let place = triggerContext.placeName {
+        prompt += "\n- Place: \(place)"
+    }
+    if let address = triggerContext.address {
+        prompt += "\n- Address: \(address)"
+    }
+    if let mins = triggerContext.durationMinutes {
+        prompt += "\n- Duration: \(mins) minutes"
+    }
+    if let hours = triggerContext.durationHours {
+        prompt += "\n- Duration: \(hours)+ hours"
+    }
+    if let km = triggerContext.distanceKm {
+        prompt += String(format: "\n- Distance moved: ~%.1f km", km)
+    }
+    if let typical = triggerContext.typicalTime {
+        prompt += "\n- Typical time: \(typical)"
+    }
+    if let stale = triggerContext.stalenessQualifier {
+        prompt += "\n- Data freshness: \(stale)"
+    }
+    if !triggerContext.motionStates.isEmpty {
+        prompt += "\n- Motion: \(triggerContext.motionStates.joined(separator: ", "))"
+    }
+    if let speed = triggerContext.speed {
+        prompt += String(format: "\n- Speed: %.1f m/s", speed)
+    }
+
+    prompt += """
+
+        \n
+        ## Guidelines
+        - One sentence, max two. Casual and warm.
+        - Vary your phrasing — don't repeat the same words each time.
+        - Reflect the time of day naturally.
+        - If data is stale, note uncertainty.
+        - Don't over-question. A simple acknowledgment is often enough.
+        - Output ONLY the message text, nothing else.
+        """
+    return prompt
+}
+
+/// Format trigger context for episode logging
+func formatTriggerForLogging(_ ctx: LocationTracker.TriggerContext) -> String {
+    var parts = ["trigger: \(ctx.triggerType.rawValue)", "time: \(ctx.timeOfDay)"]
+    if let place = ctx.placeName { parts.append("place: \(place)") }
+    if let address = ctx.address { parts.append("address: \(address)") }
+    if let mins = ctx.durationMinutes { parts.append("duration: \(mins)m") }
+    if let hours = ctx.durationHours { parts.append("duration: \(hours)h+") }
+    if let km = ctx.distanceKm { parts.append(String(format: "distance: %.1fkm", km)) }
+    if let typical = ctx.typicalTime { parts.append("typical: \(typical)") }
+    return parts.joined(separator: ", ")
 }
 
 /// Build an acknowledgment message based on the current task

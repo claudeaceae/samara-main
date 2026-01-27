@@ -115,6 +115,12 @@ final class LocationTrackerTests: SamaraTestCase {
         let analysis3 = tracker.processLocation(awayUpdate)
         XCTAssertTrue(analysis3.shouldMessage, "Third away reading should trigger")
         XCTAssertEqual(analysis3.triggerType, .leavingHome)
+
+        // Verify triggerContext is populated alongside reason
+        XCTAssertNotNil(analysis3.triggerContext)
+        XCTAssertEqual(analysis3.triggerContext?.triggerType, .leavingHome)
+        XCTAssertEqual(analysis3.triggerContext?.placeName, "home")
+        XCTAssertNotNil(analysis3.reason, "Fallback reason should still be present")
     }
 
     func testProcessLocationTriggersNearTransit() throws {
@@ -140,6 +146,12 @@ final class LocationTrackerTests: SamaraTestCase {
         XCTAssertTrue(analysis.shouldMessage)
         XCTAssertEqual(analysis.triggerType, .nearTransit)
         XCTAssertTrue(analysis.reason?.contains("Near Test Station") == true)
+
+        // Verify triggerContext is populated with station name
+        XCTAssertNotNil(analysis.triggerContext)
+        XCTAssertEqual(analysis.triggerContext?.triggerType, .nearTransit)
+        XCTAssertEqual(analysis.triggerContext?.placeName, "Test Station")
+        XCTAssertNotNil(analysis.reason, "Fallback reason should still be present")
     }
 
     func testGetPatternSummaryIncludesKnownPlaces() throws {
@@ -314,5 +326,78 @@ final class LocationTrackerTests: SamaraTestCase {
 
         XCTAssertTrue(analysis.shouldMessage, "WiFi match should trigger arriving home even with GPS outside radius")
         XCTAssertEqual(analysis.triggerType, .arrivingHome)
+
+        // Verify triggerContext is populated for arrival
+        XCTAssertNotNil(analysis.triggerContext)
+        XCTAssertEqual(analysis.triggerContext?.triggerType, .arrivingHome)
+        XCTAssertEqual(analysis.triggerContext?.placeName, "home")
+        XCTAssertNotNil(analysis.reason, "Fallback reason should still be present")
+    }
+
+    // MARK: - TriggerContext Tests
+
+    func testTriggerContextIncludesTimeOfDay() throws {
+        let paths = try makePaths()
+        let home = LocationTracker.Place(name: "home", label: "Home", lat: 40.0, lon: -73.0, radiusM: 100, type: nil, wifiHints: nil)
+        try writePlaces([home], to: paths.placesPath)
+        try writeTrackerState(wasAtHome: false, wasAtWork: false, to: paths.statePath)
+
+        // Seed history so isNewLocation doesn't fire
+        let historyEntry = LocationTracker.LocationEntry(
+            timestamp: Date(timeIntervalSinceNow: -300),
+            latitude: 40.0, longitude: -73.0,
+            address: "Home", altitude: nil, speed: nil, motion: [], wifi: nil
+        )
+        try writeHistory([historyEntry], to: paths.historyPath)
+
+        let tracker = LocationTracker(
+            historyPath: paths.historyPath.path,
+            knownPlacesPath: paths.knownPlacesPath.path,
+            placesPath: paths.placesPath.path,
+            subwayPath: paths.subwayPath.path,
+            patternsPath: paths.patternsPath.path,
+            statePath: paths.statePath.path
+        )
+
+        // Arriving home triggers a message with context
+        let update = makeUpdate(lat: 40.0, lon: -73.0)
+        let analysis = tracker.processLocation(update)
+
+        XCTAssertTrue(analysis.shouldMessage)
+        XCTAssertNotNil(analysis.triggerContext)
+        let timeOfDay = analysis.triggerContext!.timeOfDay
+        XCTAssertTrue(["morning", "afternoon", "evening", "night"].contains(timeOfDay),
+                       "timeOfDay should be one of the expected values, got: \(timeOfDay)")
+    }
+
+    func testNonTriggeringAnalysisHasNilContext() throws {
+        let paths = try makePaths()
+        let home = LocationTracker.Place(name: "home", label: "Home", lat: 40.0, lon: -73.0, radiusM: 5000, type: nil, wifiHints: nil)
+        try writePlaces([home], to: paths.placesPath)
+        try writeTrackerState(wasAtHome: true, wasAtWork: false, to: paths.statePath)
+
+        // Seed history so isNewLocation doesn't fire
+        let historyEntry = LocationTracker.LocationEntry(
+            timestamp: Date(timeIntervalSinceNow: -300),
+            latitude: 40.0, longitude: -73.0,
+            address: "Home", altitude: nil, speed: nil, motion: [], wifi: nil
+        )
+        try writeHistory([historyEntry], to: paths.historyPath)
+
+        let tracker = LocationTracker(
+            historyPath: paths.historyPath.path,
+            knownPlacesPath: paths.knownPlacesPath.path,
+            placesPath: paths.placesPath.path,
+            subwayPath: paths.subwayPath.path,
+            patternsPath: paths.patternsPath.path,
+            statePath: paths.statePath.path
+        )
+
+        // At home, already wasAtHome — no trigger
+        let update = makeUpdate(lat: 40.0, lon: -73.0)
+        let analysis = tracker.processLocation(update)
+
+        XCTAssertFalse(analysis.shouldMessage)
+        XCTAssertNil(analysis.triggerContext, "Non-triggering analysis should have nil triggerContext")
     }
 }

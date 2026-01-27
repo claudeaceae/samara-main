@@ -46,11 +46,26 @@ final class LocationTracker {
         }
     }
 
+    struct TriggerContext {
+        let triggerType: TriggerType
+        let placeName: String?
+        let address: String?
+        let durationMinutes: Int?
+        let durationHours: Int?
+        let distanceKm: Double?
+        let typicalTime: String?
+        let stalenessQualifier: String?
+        let timeOfDay: String
+        let motionStates: [String]
+        let speed: Double?
+    }
+
     struct LocationAnalysis {
         let shouldMessage: Bool
         let reason: String?
         let currentLocation: LocationEntry?
         let triggerType: TriggerType?
+        let triggerContext: TriggerContext?
     }
 
     /// Place definition from places.json
@@ -336,7 +351,7 @@ final class LocationTracker {
     func processLocationUpdate(noteContent: String) -> LocationAnalysis {
         guard let location = parseLocation(from: noteContent) else {
             log("Could not parse location from note", level: .debug, component: "LocationTracker")
-            return LocationAnalysis(shouldMessage: false, reason: nil, currentLocation: nil, triggerType: nil)
+            return LocationAnalysis(shouldMessage: false, reason: nil, currentLocation: nil, triggerType: nil, triggerContext: nil)
         }
 
         // Store in history
@@ -465,7 +480,7 @@ final class LocationTracker {
     private func analyzeLocation(_ location: LocationEntry) -> LocationAnalysis {
         // Check cooldown
         if let lastMsg = lastMessageTime, Date().timeIntervalSince(lastMsg) < messageCooldown {
-            return LocationAnalysis(shouldMessage: false, reason: "Cooldown active", currentLocation: location, triggerType: nil)
+            return LocationAnalysis(shouldMessage: false, reason: "Cooldown active", currentLocation: location, triggerType: nil, triggerContext: nil)
         }
 
         // Check 1: Leaving home
@@ -510,7 +525,20 @@ final class LocationTracker {
                 shouldMessage: true,
                 reason: "You're somewhere new! \(location.address). Exploring?",
                 currentLocation: location,
-                triggerType: .newLocation
+                triggerType: .newLocation,
+                triggerContext: TriggerContext(
+                    triggerType: .newLocation,
+                    placeName: nil,
+                    address: simplifyAddress(location.address),
+                    durationMinutes: nil,
+                    durationHours: nil,
+                    distanceKm: nil,
+                    typicalTime: nil,
+                    stalenessQualifier: stalenessQualifier(for: location),
+                    timeOfDay: timeOfDayString(),
+                    motionStates: location.motion,
+                    speed: location.speed
+                )
             )
         }
 
@@ -524,7 +552,20 @@ final class LocationTracker {
                     shouldMessage: true,
                     reason: String(format: "Noticed you moved ~%.1f km. On the go?", km),
                     currentLocation: location,
-                    triggerType: .significantMovement
+                    triggerType: .significantMovement,
+                    triggerContext: TriggerContext(
+                        triggerType: .significantMovement,
+                        placeName: nil,
+                        address: simplifyAddress(location.address),
+                        durationMinutes: nil,
+                        durationHours: nil,
+                        distanceKm: km,
+                        typicalTime: nil,
+                        stalenessQualifier: stalenessQualifier(for: location),
+                        timeOfDay: timeOfDayString(),
+                        motionStates: location.motion,
+                        speed: location.speed
+                    )
                 )
             }
         }
@@ -555,14 +596,27 @@ final class LocationTracker {
                             shouldMessage: true,
                             reason: message,
                             currentLocation: location,
-                            triggerType: .stationary
+                            triggerType: .stationary,
+                            triggerContext: TriggerContext(
+                                triggerType: .stationary,
+                                placeName: nil,
+                                address: simplifyAddress(location.address),
+                                durationMinutes: nil,
+                                durationHours: hours,
+                                distanceKm: nil,
+                                typicalTime: nil,
+                                stalenessQualifier: stalenessQualifier(for: location),
+                                timeOfDay: timeOfDayString(),
+                                motionStates: location.motion,
+                                speed: location.speed
+                            )
                         )
                     }
                 }
             }
         }
 
-        return LocationAnalysis(shouldMessage: false, reason: nil, currentLocation: location, triggerType: nil)
+        return LocationAnalysis(shouldMessage: false, reason: nil, currentLocation: location, triggerType: nil, triggerContext: nil)
     }
 
     // MARK: - New Trigger Detection
@@ -613,7 +667,20 @@ final class LocationTracker {
                     shouldMessage: true,
                     reason: "Heading out?",
                     currentLocation: location,
-                    triggerType: .leavingHome
+                    triggerType: .leavingHome,
+                    triggerContext: TriggerContext(
+                        triggerType: .leavingHome,
+                        placeName: "home",
+                        address: nil,
+                        durationMinutes: nil,
+                        durationHours: nil,
+                        distanceKm: nil,
+                        typicalTime: nil,
+                        stalenessQualifier: nil,
+                        timeOfDay: timeOfDayString(),
+                        motionStates: location.motion,
+                        speed: location.speed
+                    )
                 )
             }
             saveTrackerState()  // Persist counter
@@ -650,7 +717,20 @@ final class LocationTracker {
                 shouldMessage: true,
                 reason: "Welcome back!",
                 currentLocation: location,
-                triggerType: .arrivingHome
+                triggerType: .arrivingHome,
+                triggerContext: TriggerContext(
+                    triggerType: .arrivingHome,
+                    placeName: "home",
+                    address: nil,
+                    durationMinutes: nil,
+                    durationHours: nil,
+                    distanceKm: nil,
+                    typicalTime: nil,
+                    stalenessQualifier: nil,
+                    timeOfDay: timeOfDayString(),
+                    motionStates: location.motion,
+                    speed: location.speed
+                )
             )
         }
 
@@ -686,7 +766,20 @@ final class LocationTracker {
                 shouldMessage: true,
                 reason: "Heading home?",
                 currentLocation: location,
-                triggerType: .leavingWork
+                triggerType: .leavingWork,
+                triggerContext: TriggerContext(
+                    triggerType: .leavingWork,
+                    placeName: "work",
+                    address: nil,
+                    durationMinutes: nil,
+                    durationHours: nil,
+                    distanceKm: nil,
+                    typicalTime: nil,
+                    stalenessQualifier: nil,
+                    timeOfDay: timeOfDayString(),
+                    motionStates: location.motion,
+                    speed: location.speed
+                )
             )
         }
 
@@ -714,7 +807,20 @@ final class LocationTracker {
                 shouldMessage: true,
                 reason: "Made it to work!",
                 currentLocation: location,
-                triggerType: .arrivingWork
+                triggerType: .arrivingWork,
+                triggerContext: TriggerContext(
+                    triggerType: .arrivingWork,
+                    placeName: "work",
+                    address: nil,
+                    durationMinutes: nil,
+                    durationHours: nil,
+                    distanceKm: nil,
+                    typicalTime: nil,
+                    stalenessQualifier: nil,
+                    timeOfDay: timeOfDayString(),
+                    motionStates: location.motion,
+                    speed: location.speed
+                )
             )
         }
 
@@ -745,7 +851,20 @@ final class LocationTracker {
                     shouldMessage: true,
                     reason: message,
                     currentLocation: location,
-                    triggerType: .nearTransit
+                    triggerType: .nearTransit,
+                    triggerContext: TriggerContext(
+                        triggerType: .nearTransit,
+                        placeName: station.name,
+                        address: nil,
+                        durationMinutes: nil,
+                        durationHours: nil,
+                        distanceKm: nil,
+                        typicalTime: nil,
+                        stalenessQualifier: stalenessQualifier(for: location),
+                        timeOfDay: timeOfDayString(),
+                        motionStates: location.motion,
+                        speed: location.speed
+                    )
                 )
             }
         }
@@ -791,7 +910,20 @@ final class LocationTracker {
                     shouldMessage: true,
                     reason: message,
                     currentLocation: location,
-                    triggerType: .lingering
+                    triggerType: .lingering,
+                    triggerContext: TriggerContext(
+                        triggerType: .lingering,
+                        placeName: nil,
+                        address: simplifyAddress(location.address),
+                        durationMinutes: minutes,
+                        durationHours: nil,
+                        distanceKm: nil,
+                        typicalTime: nil,
+                        stalenessQualifier: stalenessQualifier(for: location),
+                        timeOfDay: timeOfDayString(),
+                        motionStates: location.motion,
+                        speed: location.speed
+                    )
                 )
             }
         }
@@ -884,7 +1016,20 @@ final class LocationTracker {
                         shouldMessage: true,
                         reason: "Still home? You usually head out around \(typicalTime).",
                         currentLocation: location,
-                        triggerType: .patternDeviation
+                        triggerType: .patternDeviation,
+                        triggerContext: TriggerContext(
+                            triggerType: .patternDeviation,
+                            placeName: "home",
+                            address: nil,
+                            durationMinutes: nil,
+                            durationHours: nil,
+                            distanceKm: nil,
+                            typicalTime: typicalTime,
+                            stalenessQualifier: nil,
+                            timeOfDay: timeOfDayString(),
+                            motionStates: location.motion,
+                            speed: location.speed
+                        )
                     )
                 }
             }
@@ -956,6 +1101,17 @@ final class LocationTracker {
     }
 
     // MARK: - Temporal Accuracy Helpers
+
+    /// Current time of day as a string
+    private func timeOfDayString() -> String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        switch hour {
+        case 5..<12: return "morning"
+        case 12..<17: return "afternoon"
+        case 17..<22: return "evening"
+        default: return "night"
+        }
+    }
 
     /// Calculate how stale the location data is
     private func dataAge(for location: LocationEntry) -> TimeInterval {
