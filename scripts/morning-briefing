@@ -13,7 +13,9 @@ DAY_OF_WEEK=$(date +%A)  # Full day name (e.g., "Monday")
 YESTERDAY=$(date -v-1d +%Y-%m-%d)
 TIME=$(date +%H:%M)
 LOG_FILE="$MIND_PATH/system/logs/morning-briefing.log"
-LOCK_FILE="$MIND_PATH/claude.lock"
+LOCK_SCOPE_NAME="cli"
+LOCK_DIR="$MIND_PATH/state/locks"
+LOCK_FILE="$LOCK_DIR/system-${LOCK_SCOPE_NAME}.lock"
 
 # Load config (required)
 source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
@@ -33,6 +35,7 @@ log() {
 
 # Lock management - coordinate with wake cycles and Samara
 acquire_lock() {
+    mkdir -p "$LOCK_DIR"
     if [ -f "$LOCK_FILE" ]; then
         local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
         if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
@@ -44,7 +47,7 @@ acquire_lock() {
         fi
     fi
 
-    echo "{\"task\":\"morning-briefing\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    echo "{\"task\":\"morning-briefing\",\"scope\":{\"systemTask\":{\"name\":\"$LOCK_SCOPE_NAME\"}},\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
     log "Acquired lock for morning briefing"
 }
 

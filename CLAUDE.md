@@ -186,7 +186,7 @@ When busy (wake/dream cycle), incoming messages are:
 2. Queued
 3. Processed when current task completes
 
-Lock file: `~/.claude-mind/claude.lock`
+Lock file: `~/.claude-mind/state/locks/system-cli.lock`
 
 ---
 

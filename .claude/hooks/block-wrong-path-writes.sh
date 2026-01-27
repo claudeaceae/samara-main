@@ -20,6 +20,14 @@ fi
 
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""' 2>/dev/null)
 
+# Block writes to runtime root sessions/ (session state lives in memory/sessions)
+if [[ "$FILE_PATH" == "sessions/"* || "$FILE_PATH" == "./sessions/"* ]] || \
+   [[ "$FILE_PATH" == "$HOME/.claude-mind/sessions"* ]] || \
+   [[ "$FILE_PATH" == "/Users/"*"/.claude-mind/sessions"* ]]; then
+    echo "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"deny\", \"permissionDecisionReason\": \"BLOCKED: Session state does not live in ~/.claude-mind/sessions.\\nUse ~/.claude-mind/memory/sessions for session JSON, or ~/.claude-mind/state/handoffs for handoff docs.\\nPath: $FILE_PATH\"}}"
+    exit 0
+fi
+
 # Check if path contains .claude-mind but is NOT under $HOME/.claude-mind
 if echo "$FILE_PATH" | grep -q "\.claude-mind"; then
     # Normalize home directory (handle both ~ and /Users/claude)

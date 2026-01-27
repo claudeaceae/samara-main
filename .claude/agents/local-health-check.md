@@ -46,7 +46,7 @@ df -h ~ | tail -1 | awk '{print $5}' | tr -d '%'
 
 ### 5. Stale Lock Check
 ```bash
-if [ -f ~/.claude-mind/claude.lock ]; then echo "exists"; else echo "none"; fi
+if [ -f ~/.claude-mind/state/locks/system-cli.lock ]; then echo "exists"; else echo "none"; fi
 ```
 
 ## Classification Rules

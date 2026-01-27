@@ -77,7 +77,7 @@ if [[ "$TASK" == "health-check" ]]; then
     FDA_ERRORS=$(tail -50 ~/.claude-mind/system/logs/samara.log 2>/dev/null | grep -c "authorization denied\|Operation not permitted" || echo "0")
     LAUNCHD_JOBS=$(launchctl list 2>/dev/null | grep -c "com.claude" || echo "0")
     DISK_USAGE=$(df -h ~ | tail -1 | awk '{print $5}' | tr -d '%')
-    LOCK_STATUS=$([ -f ~/.claude-mind/claude.lock ] && echo "exists" || echo "none")
+    LOCK_STATUS=$([ -f "$MIND_PATH/state/locks/system-cli.lock" ] && echo "exists" || echo "none")
     TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
     # Build the analysis prompt

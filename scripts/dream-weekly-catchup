@@ -16,6 +16,9 @@ set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 CLAUDE="${CLAUDE_PATH:-${CLAUDE:-$HOME/.local/bin/claude}}"
 LOG_FILE="$MIND_PATH/system/logs/dream.log"
+LOCK_SCOPE_NAME="cli"
+LOCK_DIR="$MIND_PATH/state/locks"
+LOCK_FILE="$LOCK_DIR/system-${LOCK_SCOPE_NAME}.lock"
 
 # Calculate most recent Sunday if no date provided
 if [ -n "$1" ]; then
@@ -37,7 +40,7 @@ log() {
 log "=== Weekly catch-up starting for $PROCESS_DATE ==="
 
 # Acquire lock
-LOCK_FILE="$MIND_PATH/claude.lock"
+mkdir -p "$LOCK_DIR"
 if [ -f "$LOCK_FILE" ]; then
     PID=$(jq -r '.pid // empty' "$LOCK_FILE" 2>/dev/null)
     if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
@@ -48,7 +51,7 @@ if [ -f "$LOCK_FILE" ]; then
     rm -f "$LOCK_FILE"
 fi
 
-echo "{\"task\":\"weekly-catchup\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"pid\":$$,\"date\":\"$PROCESS_DATE\"}" > "$LOCK_FILE"
+echo "{\"task\":\"weekly-catchup\",\"scope\":{\"systemTask\":{\"name\":\"$LOCK_SCOPE_NAME\"}},\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$,\"date\":\"$PROCESS_DATE\"}" > "$LOCK_FILE"
 trap "rm -f $LOCK_FILE; log 'Released lock'" EXIT
 
 # Collect recent reflections (7 days from PROCESS_DATE)

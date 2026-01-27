@@ -26,7 +26,7 @@ def resolve_mind_dir() -> str:
 
 MIND_DIR = resolve_mind_dir()
 CREDENTIAL_BIN = os.path.join(MIND_DIR, 'system', 'bin', 'credential')
-STATE_FILE = os.path.join(MIND_DIR, 'state', 'wallet-state.json')
+STATE_FILE = os.path.join(MIND_DIR, 'state', 'services', 'wallet-state.json')
 SENSES_DIR = os.path.join(MIND_DIR, 'system', 'senses')
 LOG_FILE = os.path.join(MIND_DIR, 'system', 'logs', 'wallet-watcher.log')
 

@@ -61,8 +61,8 @@ Complex group chats can cause internal content to leak. Three layers prevent thi
 ## Key Files to Check
 
 - Logs: `~/.claude-mind/system/logs/samara.log`
-- Sessions: `~/.claude-mind/state/sessions.json`
-- Lock: `~/.claude-mind/claude.lock`
+- Sessions: `~/.claude-mind/memory/sessions/`
+- Lock: `~/.claude-mind/state/locks/system-cli.lock`
 - Episodes: `~/.claude-mind/memory/episodes/$(date +%Y-%m-%d).md`
 
 ## Leak Diagnosis Commands

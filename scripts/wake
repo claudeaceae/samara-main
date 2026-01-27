@@ -12,7 +12,9 @@ DATE=$(date +%Y-%m-%d)
 TIME=$(date +%H:%M)
 HOUR=$(date +%H)
 LOG_FILE="$MIND_PATH/system/logs/wake.log"
-LOCK_FILE="$MIND_PATH/claude.lock"
+LOCK_SCOPE_NAME="cli"
+LOCK_DIR="$MIND_PATH/state/locks"
+LOCK_FILE="$LOCK_DIR/system-${LOCK_SCOPE_NAME}.lock"
 
 # Load config (required - no fallbacks to prevent sending to wrong person)
 source "$MIND_PATH/system/lib/config.sh" || {
@@ -27,6 +29,7 @@ log() {
 
 # Lock management - coordinate with Samara and other scripts
 acquire_lock() {
+    mkdir -p "$LOCK_DIR"
     if [ -f "$LOCK_FILE" ]; then
         # Check if the lock is stale (process not running)
         local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
@@ -40,7 +43,7 @@ acquire_lock() {
     fi
 
     # Create lock file
-    echo "{\"task\":\"wake\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    echo "{\"task\":\"wake\",\"scope\":{\"systemTask\":{\"name\":\"$LOCK_SCOPE_NAME\"}},\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
     log "Acquired lock for wake cycle"
 
     # Record wake with scheduler to prevent duplicate wakes from wake-adaptive
@@ -217,19 +220,26 @@ fi
 # MCP servers are now configured globally in ~/.claude.json
 # No need for --mcp-config flag
 
-# Fetch shared workspaces (Notes and Reminders)
-log "Fetching shared workspaces..."
-SHARED_NOTES=$("$CLAUDE" -p "Use the apple MCP tools to list notes. Return just the title and first 100 chars of each note, max 10 notes. Format as a simple list." \
-    --dangerously-skip-permissions \
-    --max-turns 3 \
-    --output-format text 2>/dev/null || echo "Could not fetch notes")
+# Fetch shared workspaces (Notes and Reminders) only when explicitly requested
+FETCH_SHARED_WORKSPACES="${WAKE_SHARED_WORKSPACES:-false}"
+if [ "$FETCH_SHARED_WORKSPACES" = "1" ] || [ "$FETCH_SHARED_WORKSPACES" = "true" ]; then
+    log "Fetching shared workspaces..."
+    SHARED_NOTES=$("$CLAUDE" -p "Use the apple MCP tools to list notes. Return just the title and first 100 chars of each note, max 10 notes. Format as a simple list." \
+        --dangerously-skip-permissions \
+        --max-turns 3 \
+        --output-format text 2>/dev/null || echo "Could not fetch notes")
 
-ACTIVE_REMINDERS=$("$CLAUDE" -p "Use the apple MCP tools to list incomplete reminders. Return name, due date (if any), and list name. Format as a simple list, max 15 items." \
-    --dangerously-skip-permissions \
-    --max-turns 3 \
-    --output-format text 2>/dev/null || echo "Could not fetch reminders")
+    ACTIVE_REMINDERS=$("$CLAUDE" -p "Use the apple MCP tools to list incomplete reminders. Return name, due date (if any), and list name. Format as a simple list, max 15 items." \
+        --dangerously-skip-permissions \
+        --max-turns 3 \
+        --output-format text 2>/dev/null || echo "Could not fetch reminders")
 
-log "Workspaces fetched"
+    log "Workspaces fetched"
+else
+    log "Skipping shared workspaces (no explicit request)"
+    SHARED_NOTES="Skipped (no explicit request)"
+    ACTIVE_REMINDERS="Skipped (no explicit request)"
+fi
 
 # Get recent episode content (last 100 lines of today)
 RECENT_EPISODE=$(tail -100 "$EPISODE_FILE" 2>/dev/null || echo "No activity today yet.")

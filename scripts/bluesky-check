@@ -14,7 +14,9 @@ source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || {
 LOG_FILE="$MIND_PATH/system/logs/bluesky.log"
 STATE_FILE="$MIND_PATH/state/services/bluesky-state.json"
 CREDENTIAL="$MIND_PATH/system/bin/credential"
-LOCK_FILE="$MIND_PATH/claude.lock"
+LOCK_SCOPE_NAME="cli"
+LOCK_DIR="$MIND_PATH/state/locks"
+LOCK_FILE="$LOCK_DIR/system-${LOCK_SCOPE_NAME}.lock"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
@@ -25,6 +27,7 @@ log() {
 LOCK_ACQUIRED=false
 
 acquire_lock() {
+    mkdir -p "$LOCK_DIR"
     if [ -f "$LOCK_FILE" ]; then
         # Check if the lock is stale (process not running)
         local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
@@ -38,7 +41,7 @@ acquire_lock() {
     fi
 
     # Create lock file
-    echo "{\"task\":\"bluesky\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    echo "{\"task\":\"bluesky\",\"scope\":{\"systemTask\":{\"name\":\"$LOCK_SCOPE_NAME\"}},\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
     LOCK_ACQUIRED=true
     log "Acquired lock for Bluesky check"
 }

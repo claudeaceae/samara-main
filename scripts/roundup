@@ -15,7 +15,9 @@ set -e
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 VENV_PATH="$MIND_PATH/.venv"
 LOG_FILE="$MIND_PATH/system/logs/roundup.log"
-LOCK_FILE="$MIND_PATH/claude.lock"
+LOCK_SCOPE_NAME="cli"
+LOCK_DIR="$MIND_PATH/state/locks"
+LOCK_FILE="$LOCK_DIR/system-${LOCK_SCOPE_NAME}.lock"
 
 log() {
     mkdir -p "$(dirname "$LOG_FILE")"
@@ -25,6 +27,7 @@ log() {
 
 # Lock management - coordinate with Samara and other scripts
 acquire_lock() {
+    mkdir -p "$LOCK_DIR"
     if [ -f "$LOCK_FILE" ]; then
         local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
         if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
@@ -41,7 +44,7 @@ acquire_lock() {
         fi
     fi
 
-    echo "{\"task\":\"roundup\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    echo "{\"task\":\"roundup\",\"scope\":{\"systemTask\":{\"name\":\"$LOCK_SCOPE_NAME\"}},\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
     log "Acquired lock for roundup"
 }
 

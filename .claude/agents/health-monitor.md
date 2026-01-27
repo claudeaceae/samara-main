@@ -68,8 +68,8 @@ fi
 
 ### 6. Stale Lock File
 ```bash
-if [ -f ~/.claude-mind/claude.lock ]; then
-    LOCK_PID=$(cat ~/.claude-mind/claude.lock 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
+if [ -f ~/.claude-mind/state/locks/system-cli.lock ]; then
+    LOCK_PID=$(cat ~/.claude-mind/state/locks/system-cli.lock 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
     if [ -n "$LOCK_PID" ] && ! kill -0 "$LOCK_PID" 2>/dev/null; then
         echo "WARN: Stale lock file from dead process $LOCK_PID"
     else

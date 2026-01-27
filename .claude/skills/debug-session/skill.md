@@ -36,12 +36,12 @@ MessageBus sends response (with source tag)
 
 ### 1. Check Active Sessions
 ```bash
-# View session state
-cat ~/.claude-mind/state/sessions.json 2>/dev/null | head -30
+# View session state files
+ls ~/.claude-mind/memory/sessions 2>/dev/null | head -30
 
 # Check for stale locks
-cat ~/.claude-mind/claude.lock 2>/dev/null
-ls -la ~/.claude-mind/claude.lock
+cat ~/.claude-mind/state/locks/system-cli.lock 2>/dev/null
+ls -la ~/.claude-mind/state/locks/system-cli.lock
 ```
 
 ### 2. Check Message Batching
@@ -107,13 +107,13 @@ grep "Routing decision" ~/.claude-mind/system/logs/samara.log | tail -10
 **Check:**
 ```bash
 # Check lock status
-cat ~/.claude-mind/claude.lock
+cat ~/.claude-mind/state/locks/system-cli.lock
 
 # Check queue processor
 grep "QueueProcessor" ~/.claude-mind/system/logs/samara.log | tail -10
 
 # Force release stale lock if needed
-# rm ~/.claude-mind/claude.lock
+# rm ~/.claude-mind/state/locks/system-cli.lock
 ```
 
 ## Task Routing Reference
@@ -129,8 +129,8 @@ grep "QueueProcessor" ~/.claude-mind/system/logs/samara.log | tail -10
 
 | File | Purpose |
 |------|---------|
-| `~/.claude-mind/state/sessions.json` | Per-chat session IDs |
-| `~/.claude-mind/claude.lock` | Current task lock |
+| `~/.claude-mind/memory/sessions/*.json` | Per-chat session state |
+| `~/.claude-mind/state/locks/system-cli.lock` | Current task lock |
 | `~/.claude-mind/state/message-queue.json` | Pending messages |
 
 ## Diagnostic Report

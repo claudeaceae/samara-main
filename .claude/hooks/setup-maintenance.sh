@@ -51,8 +51,8 @@ run_checks() {
     fi
 
     # 5. Check stale lock file
-    if [ -f "$MIND_PATH/claude.lock" ]; then
-        local lock_pid=$(cat "$MIND_PATH/claude.lock" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
+    if [ -f "$MIND_PATH/state/locks/system-cli.lock" ]; then
+        local lock_pid=$(cat "$MIND_PATH/state/locks/system-cli.lock" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
         if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
             issues="$issues\n- Stale lock file from dead process $lock_pid"
         fi

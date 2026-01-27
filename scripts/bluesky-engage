@@ -27,7 +27,9 @@ ENTITY_BLUESKY_HANDLE="$ENTITY_BLUESKY"
 
 LOG_FILE="$MIND_PATH/system/logs/bluesky-engage.log"
 STATE_FILE="$MIND_PATH/state/services/bluesky-engage-state.json"
-LOCK_FILE="$MIND_PATH/claude.lock"
+LOCK_SCOPE_NAME="cli"
+LOCK_DIR="$MIND_PATH/state/locks"
+LOCK_FILE="$LOCK_DIR/system-${LOCK_SCOPE_NAME}.lock"
 IDENTITY_FILE="$MIND_PATH/self/identity.md"
 
 # Minimum hours between proactive posts (avoid spam)
@@ -48,6 +50,7 @@ log() {
 LOCK_ACQUIRED=false
 
 acquire_lock() {
+    mkdir -p "$LOCK_DIR"
     if [ -f "$LOCK_FILE" ]; then
         local lock_pid
         lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
@@ -59,7 +62,7 @@ acquire_lock() {
             exit 0
         fi
     fi
-    echo "{\"task\":\"bluesky-engage\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    echo "{\"task\":\"bluesky-engage\",\"scope\":{\"systemTask\":{\"name\":\"$LOCK_SCOPE_NAME\"}},\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
     LOCK_ACQUIRED=true
     log "Acquired lock for Bluesky engagement"
 }

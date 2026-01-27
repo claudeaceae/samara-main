@@ -50,7 +50,7 @@ cat ~/.claude-mind/state/scheduler-state.json 2>/dev/null || echo "No scheduler 
 
 ### 5. Lock File Status
 ```bash
-ls -la ~/.claude-mind/claude.lock 2>/dev/null || echo "No lock file (good)"
+ls -la ~/.claude-mind/state/locks/system-cli.lock 2>/dev/null || echo "No lock file (good)"
 ```
 A stale lock file can block operations.
 

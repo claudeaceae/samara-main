@@ -49,8 +49,6 @@ final class TaskLock {
     /// Base directory for all lock files
     static let locksDir = MindPaths.statePath("locks")
 
-    /// Legacy single lock path for backward compatibility
-    static let legacyLockPath = MindPaths.statePath("claude.lock")
 
     /// Configurable threshold for considering a task stuck (default: 2 hours)
     /// This is used by detectAndClearStuck() for long-running task recovery
@@ -72,11 +70,6 @@ final class TaskLock {
             }
         }
 
-        // Clean up legacy single lock if it exists
-        if fm.fileExists(atPath: legacyLockPath) {
-            try? fm.removeItem(atPath: legacyLockPath)
-            log("Removed legacy single lock file", level: .info, component: "TaskLock")
-        }
     }
 
     /// Get path for a specific scope's lock file

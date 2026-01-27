@@ -12,7 +12,7 @@ REPO_DIR="$HOME/Developer/samara-main"
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 RUNTIME_DIR="$MIND_PATH"
 REPO_SCRIPTS="$REPO_DIR/scripts"
-RUNTIME_SCRIPTS="$RUNTIME_DIR/bin"
+RUNTIME_SCRIPTS="$RUNTIME_DIR/system/bin"
 
 # Colors
 RED='\033[0;31m'

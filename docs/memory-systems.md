@@ -165,7 +165,7 @@ chroma-rebuild        # Full rebuild of Chroma index
 Infrastructure for structured session handoffs exists in `LedgerManager.swift`:
 - Tracks active goals, decisions made, files modified
 - Creates handoff documents when context runs high
-- Would write to `~/.claude-mind/state/ledgers/`
+- Currently unused; no runtime ledger directory is created
 
 This system is fully implemented and tested but not yet wired into the message flow.
 The wrapper methods in `ClaudeInvoker` (`recordGoal()`, `recordDecision()`, `createHandoff()`)
@@ -460,7 +460,7 @@ The 3 AM dream cycle rebuilds/syncs all memory indexes:
 │   ├── services/            # Service state tracking
 │   │   ├── bluesky-state.json
 │   │   ├── github-seen-ids.json
-│   │   └── mail-seen-ids.json
+│   │   └── email-seen-ids.json
 │   ├── projects.md          # Active projects (bridge: goals → plans)
 │   ├── plans/               # Active implementation plans
 │   │   └── archive/

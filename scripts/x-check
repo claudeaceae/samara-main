@@ -23,7 +23,9 @@ export ENTITY_X_HANDLE
 LOG_FILE="$MIND_PATH/system/logs/x.log"
 STATE_FILE="$MIND_PATH/state/services/x-seen-ids.json"
 CREDENTIAL="$MIND_PATH/system/bin/credential"
-LOCK_FILE="$MIND_PATH/claude.lock"
+LOCK_SCOPE_NAME="cli"
+LOCK_DIR="$MIND_PATH/state/locks"
+LOCK_FILE="$LOCK_DIR/system-${LOCK_SCOPE_NAME}.lock"
 
 # Ensure log directory exists
 mkdir -p "$(dirname "$LOG_FILE")"
@@ -38,6 +40,7 @@ log() {
 LOCK_ACQUIRED=false
 
 acquire_lock() {
+    mkdir -p "$LOCK_DIR"
     if [ -f "$LOCK_FILE" ]; then
         # Check if the lock is stale (process not running)
         local lock_pid=$(cat "$LOCK_FILE" 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('pid',''))" 2>/dev/null || echo "")
@@ -51,7 +54,7 @@ acquire_lock() {
     fi
 
     # Create lock file
-    echo "{\"task\":\"x-check\",\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
+    echo "{\"task\":\"x-check\",\"scope\":{\"systemTask\":{\"name\":\"$LOCK_SCOPE_NAME\"}},\"started\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"chat\":null,\"pid\":$$}" > "$LOCK_FILE"
     LOCK_ACQUIRED=true
     log "Acquired lock for X check"
 }

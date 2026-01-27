@@ -146,7 +146,7 @@ check "Messages DB exists" "test -f ~/Library/Messages/chat.db"
 # Check FDA by looking at Samara logs for database access
 # This catches when Samara is running but can't read Messages
 critical_check "Samara has FDA (Messages DB access)" "! tail -20 $MIND_PATH/system/logs/samara.log 2>/dev/null | grep -q 'FATAL.*authorization denied'"
-check "Samara lock file healthy" "test -f $MIND_PATH/samara.lock && lsof $MIND_PATH/samara.lock > /dev/null 2>&1"
+check "Samara lock file healthy" "test -f $MIND_PATH/state/samara.lock && lsof $MIND_PATH/state/samara.lock > /dev/null 2>&1"
 
 # === SAMARA UNIT TESTS ===
 log "--- Samara Unit Tests ---"

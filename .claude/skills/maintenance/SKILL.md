@@ -60,8 +60,8 @@ tail -20 ~/.claude-mind/system/logs/samara.log | grep -i "denied\|permission"
 ### 5. Lock File
 ```bash
 # Check for stale locks
-if [ -f ~/.claude-mind/claude.lock ]; then
-    cat ~/.claude-mind/claude.lock | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"Lock held by: {d.get('task')} (PID: {d.get('pid')})\")"
+if [ -f ~/.claude-mind/state/locks/system-cli.lock ]; then
+    cat ~/.claude-mind/state/locks/system-cli.lock | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"Lock held by: {d.get('task')} (PID: {d.get('pid')})\")"
 fi
 ```
 
@@ -93,7 +93,7 @@ done
 
 ### Clear stale lock
 ```bash
-rm -f ~/.claude-mind/claude.lock
+rm -f ~/.claude-mind/state/locks/system-cli.lock
 ```
 
 ### Reload all launchd services

@@ -445,13 +445,14 @@ $MAIL_ACCOUNT         # Mail account name
 
 ## Lock Coordination
 
-Scripts that invoke Claude Code use a lock file to prevent concurrent execution:
+Scripts that invoke Claude Code use a shared TaskLock file to prevent concurrent execution:
 
-**Lock file:** `~/.claude-mind/claude.lock`
+**Lock file:** `~/.claude-mind/state/locks/system-cli.lock`
 
 ```json
 {
   "task": "wake",
+  "scope": { "systemTask": { "name": "cli" } },
   "started": "2025-12-31T09:00:00Z",
   "chat": null,
   "pid": 12345
