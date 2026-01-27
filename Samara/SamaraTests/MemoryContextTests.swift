@@ -22,7 +22,7 @@ final class MemoryContextTests: SamaraTestCase {
     }
 
     func testReadInstructionFileAppliesSubstitutions() throws {
-        let instructionsDir = TestEnvironment.mindPath.appendingPathComponent("instructions")
+        let instructionsDir = TestEnvironment.mindPath.appendingPathComponent("system/instructions")
         try FileManager.default.createDirectory(at: instructionsDir, withIntermediateDirectories: true)
 
         let fileURL = instructionsDir.appendingPathComponent("test.md")

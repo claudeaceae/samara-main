@@ -194,6 +194,8 @@ final class MessageQueue {
 
     private static func saveQueue(_ queue: [QueuedMessage]) {
         do {
+            let dir = (queuePath as NSString).deletingLastPathComponent
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
             let encoder = JSONEncoder()
             encoder.dateEncodingStrategy = .iso8601
             encoder.outputFormatting = .prettyPrinted

@@ -52,12 +52,17 @@ enum TestEnvironment {
     }
 
     private static func ensureConfigIfNeeded() {
-        let configURL = mindPath.appendingPathComponent("config.json")
+        let configURL = mindPath.appendingPathComponent("system/config.json")
         let fm = FileManager.default
 
         guard !fm.fileExists(atPath: configURL.path) else { return }
 
-        if let fixtureConfig = fixtureURL()?.appendingPathComponent("config.json"),
+        let configDir = configURL.deletingLastPathComponent()
+        if !fm.fileExists(atPath: configDir.path) {
+            try? fm.createDirectory(at: configDir, withIntermediateDirectories: true)
+        }
+
+        if let fixtureConfig = fixtureURL()?.appendingPathComponent("system/config.json"),
            fm.fileExists(atPath: fixtureConfig.path) {
             do {
                 try fm.copyItem(at: fixtureConfig, to: configURL)

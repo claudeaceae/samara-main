@@ -202,6 +202,7 @@ final class LocationTracker {
     private var patterns: LocationPatterns?  // learned patterns
     private var wasAtHome: Bool = false  // for detecting departure from home
     private var wasAtWork: Bool = false  // for detecting departure from work
+    private var didLoadTrackerState: Bool = false
     private var lastTransitAlert: String?  // prevent re-alerting same station
     private var lastPatternDeviationAlert: Date?  // prevent repeated deviation alerts
     private var consecutiveAwayReadings: Int = 0  // hysteresis counter for departure detection
@@ -231,7 +232,7 @@ final class LocationTracker {
         loadTrackerState()
 
         // Initialize home state from last known location if not loaded from state
-        if let home = findPlace(named: "home"), let last = locationHistory.last {
+        if !didLoadTrackerState, let home = findPlace(named: "home"), let last = locationHistory.last {
             let isCurrentlyHome = isLocationAtPlace(last, home)
             // Only override if state wasn't loaded (wasAtHome defaults to false)
             if !wasAtHome && isCurrentlyHome {
@@ -241,7 +242,7 @@ final class LocationTracker {
         }
 
         // Initialize work state from last known location if not loaded from state
-        if let work = findPlace(named: "work"), let last = locationHistory.last {
+        if !didLoadTrackerState, let work = findPlace(named: "work"), let last = locationHistory.last {
             let isCurrentlyAtWork = isLocationAtPlace(last, work)
             // Only override if state wasn't loaded (wasAtWork defaults to false)
             if !wasAtWork && isCurrentlyAtWork {
@@ -1141,6 +1142,7 @@ final class LocationTracker {
             lastMessageTime = state.lastMessageTime
             lastTransitAlert = state.lastTransitAlert
             consecutiveAwayReadings = state.consecutiveAwayReadings ?? 0
+            didLoadTrackerState = true
             log("Loaded tracker state: wasAtHome=\(wasAtHome), wasAtWork=\(wasAtWork), awayReadings=\(consecutiveAwayReadings)", level: .debug, component: "LocationTracker")
         } catch {
             log("Error loading tracker state: \(error)", level: .warn, component: "LocationTracker")

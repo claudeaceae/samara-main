@@ -28,7 +28,24 @@ final class SanitizationTests: SamaraTestCase {
             // "Just sent a message..."
             #"^Just sent (?:a |the )?(?:message|response|reply)"#,
             // "Acknowledged the message about..."
-            #"^Acknowledged (?:the |their |É's )?(?:message|request|question)"#
+            #"^Acknowledged (?:the |their |É's )?(?:message|request|question)"#,
+
+            // THINKING TRACE NARRATION PATTERNS (added 2026-01-23)
+            // These catch internal reasoning that describes what someone is doing/about to do
+            // rather than being an actual message to send
+
+            // "[Name] is about to..." - narrating what someone will do
+            #"^[A-ZÉ][a-zé]* is (?:about to|going to|trying to) "#,
+            // "[Name] reacted with [emoji] to..." - analyzing a reaction
+            #"^[A-ZÉ][a-zé]* reacted with "#,
+            // "[Name]'s [reaction/message/question] - [analysis]" - metacognitive observation
+            #"^[A-ZÉ][a-zé]*'s (?:reaction|message|question|response) (?:shows|indicates|suggests|is) "#,
+            // "This is [analysis] - I'll/I should..." - internal deliberation
+            #"^This is (?:a moment|an opportunity|not|just) [^.]*- (?:I'll|I should|no response)"#,
+            // "No response needed from me" - explicit internal note
+            #"(?:No response needed|I'll stay quiet|I'll let them|stepping back)"#,
+            // "[Name] is telling [other person]..." - narrating third-party actions
+            #"^[A-ZÉ][a-zé]* is (?:telling|asking|showing|explaining) "#
         ]
         for pattern in pureMetaCommentaryPatterns {
             if let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {

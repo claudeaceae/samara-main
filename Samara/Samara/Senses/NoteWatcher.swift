@@ -211,6 +211,9 @@ final class NoteWatcher {
 
     /// Trigger iCloud sync by briefly activating Notes.app in background
     private func triggerNotesSync() {
+        if ProcessInfo.processInfo.environment["SAMARA_TEST_MODE"] == "1" {
+            return
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         process.arguments = ["-g", "-a", "Notes"]  // -g = background, don't bring to front

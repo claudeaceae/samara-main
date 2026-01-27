@@ -23,6 +23,16 @@ final class MailWatcher {
     /// Path to persist seen email IDs
     private let seenIdsPath: String
 
+    private struct SeenIdsState: Codable {
+        var seenIds: [String]
+        var lastTriage: String?
+
+        enum CodingKeys: String, CodingKey {
+            case seenIds = "seen_ids"
+            case lastTriage = "last_triage"
+        }
+    }
+
     init(
         store: MailStore,
         pollInterval: TimeInterval = 30,
@@ -32,7 +42,7 @@ final class MailWatcher {
         self.pollInterval = pollInterval
         self.onNewEmail = onNewEmail
 
-        self.seenIdsPath = MindPaths.mindPath("state/services/mail-seen-ids.json")
+        self.seenIdsPath = MindPaths.mindPath("state/services/email-seen-ids.json")
 
         // Load previously seen IDs
         loadSeenIds()
@@ -49,15 +59,13 @@ final class MailWatcher {
         checkForNewEmails()
 
         // Start polling thread
-        let watcher = self
-        let interval = pollInterval
         let thread = Thread { [weak self] in
             log("[MailWatcher] Poll thread running")
             while let self = self, !self.shouldStop {
-                Thread.sleep(forTimeInterval: interval)
+                self.sleepWithStop(self.pollInterval)
                 if self.shouldStop { break }
                 autoreleasepool {
-                    watcher.checkForNewEmails()
+                    self.checkForNewEmails()
                 }
             }
         }
@@ -142,9 +150,14 @@ final class MailWatcher {
 
         do {
             let data = try Data(contentsOf: URL(fileURLWithPath: seenIdsPath))
+            if let state = try? JSONDecoder().decode(SeenIdsState.self, from: data) {
+                seenEmailIds = Set(state.seenIds)
+                log("[MailWatcher] Loaded \(state.seenIds.count) seen email IDs")
+                return
+            }
             let ids = try JSONDecoder().decode([String].self, from: data)
             seenEmailIds = Set(ids)
-            log("[MailWatcher] Loaded \(ids.count) seen email IDs")
+            log("[MailWatcher] Loaded \(ids.count) seen email IDs (legacy format)")
         } catch {
             log("[MailWatcher] Failed to load seen IDs: \(error)")
         }
@@ -155,11 +168,35 @@ final class MailWatcher {
         let ids = Array(seenEmailIds)
         lock.unlock()
 
+        let state = SeenIdsState(seenIds: ids, lastTriage: loadLastTriage())
+
         do {
-            let data = try JSONEncoder().encode(ids)
+            let dir = (seenIdsPath as NSString).deletingLastPathComponent
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            let data = try JSONEncoder().encode(state)
             try data.write(to: URL(fileURLWithPath: seenIdsPath))
         } catch {
             log("[MailWatcher] Failed to save seen IDs: \(error)")
+        }
+    }
+
+    private func sleepWithStop(_ interval: TimeInterval) {
+        let step = min(0.25, interval)
+        var remaining = interval
+        while remaining > 0 && !shouldStop {
+            Thread.sleep(forTimeInterval: min(step, remaining))
+            remaining -= step
+        }
+    }
+
+    private func loadLastTriage() -> String? {
+        guard FileManager.default.fileExists(atPath: seenIdsPath) else { return nil }
+        do {
+            let data = try Data(contentsOf: URL(fileURLWithPath: seenIdsPath))
+            let state = try JSONDecoder().decode(SeenIdsState.self, from: data)
+            return state.lastTriage
+        } catch {
+            return nil
         }
     }
 

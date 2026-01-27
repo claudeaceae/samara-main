@@ -57,6 +57,7 @@ final class MessageWatcherTests: SamaraTestCase {
         )
 
         let group = DispatchGroup()
+        let completion = expectation(description: "concurrent checks")
         for _ in 0..<10 {
             group.enter()
             DispatchQueue.global().async {
@@ -69,7 +70,11 @@ final class MessageWatcherTests: SamaraTestCase {
                 group.leave()
             }
         }
-        group.wait()
+        DispatchQueue.global().async {
+            group.wait()
+            completion.fulfill()
+        }
+        wait(for: [completion], timeout: 2.0)
 
         let uniqueRowIds = Set(receivedRowIds)
         XCTAssertEqual(uniqueRowIds.count, receivedRowIds.count, "No duplicates should be present")

@@ -16,7 +16,7 @@ final class StreamIntegrationTests: SamaraTestCase {
 
     private func makeStreamRecorder() throws -> URL {
         let mindPath = TestEnvironment.mindPath
-        let binPath = mindPath.appendingPathComponent("bin")
+        let binPath = mindPath.appendingPathComponent("system/bin")
         let statePath = mindPath.appendingPathComponent("state")
 
         try FileManager.default.createDirectory(at: binPath, withIntermediateDirectories: true)

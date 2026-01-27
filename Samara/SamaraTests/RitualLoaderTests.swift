@@ -24,7 +24,8 @@ final class RitualLoaderTests: SamaraTestCase {
 
     func testRitualParsingAndPrompt() {
         let mindPath = makeMindPath()
-        let ritualPath = URL(fileURLWithPath: mindPath).appendingPathComponent("ritual.md")
+        let ritualPath = URL(fileURLWithPath: mindPath).appendingPathComponent("self/ritual.md")
+        try? FileManager.default.createDirectory(at: ritualPath.deletingLastPathComponent(), withIntermediateDirectories: true)
 
         let contents = """
         # Rituals
