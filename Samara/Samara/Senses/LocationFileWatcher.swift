@@ -189,6 +189,10 @@ final class LocationFileWatcher {
 
         do {
             let data = try Data(contentsOf: URL(fileURLWithPath: locationFilePath))
+            guard !data.isEmpty else {
+                // File is momentarily empty during write — skip silently
+                return nil
+            }
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
 
             guard let json = json,
