@@ -376,10 +376,13 @@ Rebuild and deploy Samara.app using proper Xcode workflow.
 
 | Script | Purpose |
 |--------|---------|
-| `check-scratchpad` | Read current scratchpad contents |
-| `check-scratchpad-changed` | Check if scratchpad was modified |
-| `update-scratchpad` | Update scratchpad note |
-| `check-notes-sync` | Debug Notes.app sync issues |
+| `check-scratchpad` | Read current scratchpad file contents |
+| `check-scratchpad-changed` | Check if scratchpad file was modified |
+| `update-scratchpad` | Update scratchpad file |
+| `check-notes-sync` | Debug Notes.app sync issues (legacy) |
+
+Scratchpad lives in the shared workspace (file-based, no Notes UI).
+Default: `~/.claude-mind/shared/scratchpad.md` (override via `sharedWorkspace.path` in `~/.claude-mind/config.json`).
 
 ---
 

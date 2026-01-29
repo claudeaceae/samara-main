@@ -1,14 +1,18 @@
 #!/bin/bash
-# Check Claude Scratchpad note for content
+# Check shared scratchpad file for content
 
-osascript -e '
-tell application "Notes"
-    try
-        set targetNote to first note whose name is "Claude Scratchpad"
-        set noteBody to body of targetNote
-        return noteBody
-    on error
-        return "Error: Could not find Claude Scratchpad note"
-    end try
-end tell
-' | sed 's/<[^>]*>//g' | grep -v "^$"
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || source "$MIND_PATH/lib/config.sh" 2>/dev/null || true
+
+SCRATCHPAD_PATH="${SCRATCHPAD_FILE:-$MIND_PATH/shared/scratchpad.md}"
+
+if [ "$SHARED_WORKSPACE_SYNC" = "true" ] && [ -d "$SHARED_WORKSPACE_DIR/.git" ]; then
+    timeout 10 git -C "$SHARED_WORKSPACE_DIR" pull --ff-only >/dev/null 2>&1 || true
+fi
+
+if [ ! -f "$SCRATCHPAD_PATH" ]; then
+    echo "Error: Scratchpad file not found at $SCRATCHPAD_PATH"
+    exit 2
+fi
+
+cat "$SCRATCHPAD_PATH"

@@ -8,6 +8,9 @@
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 STATE_DIR="$MIND_PATH/state"
 HASH_FILE="$STATE_DIR/scratchpad-hash.txt"
+source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || source "$MIND_PATH/lib/config.sh" 2>/dev/null || true
+
+SCRATCHPAD_PATH="${SCRATCHPAD_FILE:-$MIND_PATH/shared/scratchpad.md}"
 
 # Get content to write
 if [[ "$1" == "--stdin" ]]; then
@@ -19,37 +22,11 @@ else
     exit 1
 fi
 
-# Escape for AppleScript
-ESCAPED_CONTENT=$(echo "$NEW_CONTENT" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | tr '\n' '\r')
-
-# Update the note
-RESULT=$(osascript -e "
-tell application \"Notes\"
-    try
-        set targetNote to first note whose name is \"Claude Scratchpad\"
-        set body of targetNote to \"$ESCAPED_CONTENT\"
-        return \"OK\"
-    on error errMsg
-        return \"ERROR: \" & errMsg
-    end try
-end tell
-")
-
-if [[ "$RESULT" != "OK" ]]; then
-    echo "$RESULT"
-    exit 1
-fi
-
-# Now get the actual content back and hash it
-# (Notes might modify formatting slightly)
-ACTUAL_CONTENT=$(osascript -e '
-tell application "Notes"
-    set targetNote to first note whose name is "Claude Scratchpad"
-    return body of targetNote
-end tell
-' | sed 's/<[^>]*>//g' | grep -v "^$")
+mkdir -p "$(dirname "$SCRATCHPAD_PATH")"
+echo "$NEW_CONTENT" > "$SCRATCHPAD_PATH"
+ACTUAL_CONTENT=$(cat "$SCRATCHPAD_PATH")
 
 # Store the hash
 echo "$ACTUAL_CONTENT" | shasum -a 256 | cut -d' ' -f1 > "$HASH_FILE"
 
-echo "Scratchpad updated and hash recorded"
+echo "Scratchpad updated at $SCRATCHPAD_PATH and hash recorded"

@@ -39,7 +39,8 @@ grep "^## " ~/.claude-mind/self/inventory.md
 | Read calendar | AppleScript | Calendar permission |
 | Write calendar | AppleScript | Calendar permission |
 | Read contacts | AppleScript | Contacts permission |
-| Read/write notes | AppleScript | Notes permission |
+| Read/write notes | AppleScript | Notes permission (legacy) |
+| Shared workspace notes | Filesystem | `~/.claude-mind/shared/` (preferred) |
 | Send email | AppleScript | Mail permission |
 | Post to Bluesky | `bluesky-post` script | Credentials in config |
 | Browse web | Playwright MCP | MCP server running |
@@ -66,7 +67,12 @@ osascript -e 'tell application "Calendar" to get name of calendars' 2>&1
 osascript -e 'tell application "Contacts" to get name of first person' 2>&1
 ```
 
-### Notes
+### Shared Workspace (Preferred)
+```bash
+ls ~/.claude-mind/shared 2>/dev/null
+```
+
+### Notes (Legacy)
 ```bash
 osascript -e 'tell application "Notes" to get name of first note' 2>&1
 ```

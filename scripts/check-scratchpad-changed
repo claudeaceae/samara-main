@@ -11,24 +11,21 @@ MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 STATE_DIR="$MIND_PATH/state"
 HASH_FILE="$STATE_DIR/scratchpad-hash.txt"
 CONTENT_FILE="$STATE_DIR/scratchpad-content.txt"
+source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || source "$MIND_PATH/lib/config.sh" 2>/dev/null || true
 
-# Get current scratchpad content
-CURRENT_CONTENT=$(osascript -e '
-tell application "Notes"
-    try
-        set targetNote to first note whose name is "Claude Scratchpad"
-        set noteBody to body of targetNote
-        return noteBody
-    on error
-        return "ERROR: Could not find Claude Scratchpad note"
-    end try
-end tell
-' | sed 's/<[^>]*>//g' | grep -v "^$")
+SCRATCHPAD_PATH="${SCRATCHPAD_FILE:-$MIND_PATH/shared/scratchpad.md}"
 
-if [[ "$CURRENT_CONTENT" == ERROR:* ]]; then
-    echo "$CURRENT_CONTENT"
+if [ "$SHARED_WORKSPACE_SYNC" = "true" ] && [ -d "$SHARED_WORKSPACE_DIR/.git" ]; then
+    timeout 10 git -C "$SHARED_WORKSPACE_DIR" pull --ff-only >/dev/null 2>&1 || true
+fi
+
+if [ ! -f "$SCRATCHPAD_PATH" ]; then
+    echo "ERROR: Scratchpad file not found at $SCRATCHPAD_PATH"
     exit 2
 fi
+
+# Get current scratchpad content
+CURRENT_CONTENT=$(cat "$SCRATCHPAD_PATH")
 
 # Calculate hash of current content
 CURRENT_HASH=$(echo "$CURRENT_CONTENT" | shasum -a 256 | cut -d' ' -f1)
