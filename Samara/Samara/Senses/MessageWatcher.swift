@@ -33,6 +33,12 @@ final class MessageWatcher {
     private var watchThread: Thread?
     private var shouldStop = false
 
+    /// Watchdog timer to detect thread death
+    private var watchdogTimer: DispatchSourceTimer?
+    private var lastPollTime: Date = Date()
+    private let watchdogInterval: TimeInterval = 30.0
+    private let pollTimeout: TimeInterval = 15.0
+
     /// State persistence for ROWID recovery across restarts
     private let stateFilePath = MindPaths.mindPath("state/message-watcher-state.json")
 
@@ -173,15 +179,27 @@ final class MessageWatcher {
             let heartbeatInterval = 60  // Log heartbeat every 60 polls (5 min at 5s interval)
 
             let thread = Thread { [weak self] in
+                // Guarantee logging on ANY exit - catch silent deaths
+                defer {
+                    log("Poll thread exiting", level: .warn, component: "MessageWatcher")
+                }
+
+                guard let self = self else {
+                    log("Poll thread: MessageWatcher deallocated before start", level: .error, component: "MessageWatcher")
+                    return
+                }
+
                 log("Poll thread running", level: .info, component: "MessageWatcher")
-                while let self = self, !self.shouldStop {
-                    Thread.sleep(forTimeInterval: interval)
+
+                // Use strong self inside loop - thread lifetime tied to watcher
+                while !self.shouldStop {
+                    self.sleepWithStop(interval)
                     if self.shouldStop { break }
 
-                    // Periodic heartbeat to confirm thread is alive
+                    // Periodic heartbeat to confirm thread is alive (visible in production logs)
                     heartbeatCounter += 1
                     if heartbeatCounter >= heartbeatInterval {
-                        log("Poll thread heartbeat: still running", level: .debug, component: "MessageWatcher")
+                        log("Poll thread heartbeat: still running", level: .info, component: "MessageWatcher")
                         heartbeatCounter = 0
                     }
 
@@ -189,13 +207,19 @@ final class MessageWatcher {
                     autoreleasepool {
                         self.checkForNewMessages()
                     }
+
+                    // Update watchdog timestamp after successful poll
+                    self.lastPollTime = Date()
                 }
-                log("Poll thread stopped", level: .info, component: "MessageWatcher")
+                log("Poll thread stopped normally", level: .info, component: "MessageWatcher")
             }
             thread.qualityOfService = .userInitiated
             thread.start()
             watchThread = thread
             log("Poll thread started", level: .info, component: "MessageWatcher")
+
+            // Start watchdog timer to detect thread death
+            startWatchdog()
         } else {
             log("Polling disabled", level: .debug, component: "MessageWatcher")
         }
@@ -205,6 +229,10 @@ final class MessageWatcher {
     func stop() {
         // Signal poll thread to stop
         shouldStop = true
+
+        // Cancel watchdog timer
+        watchdogTimer?.cancel()
+        watchdogTimer = nil
 
         // Cancel file system watcher
         source?.cancel()
@@ -219,6 +247,94 @@ final class MessageWatcher {
             close(fileDescriptor)
             fileDescriptor = -1
         }
+    }
+
+    // MARK: - Thread Health
+
+    /// Sleep in small increments to respond quickly to stop signal (matches MailWatcher)
+    private func sleepWithStop(_ interval: TimeInterval) {
+        let step = min(0.25, interval)
+        var remaining = interval
+        while remaining > 0 && !shouldStop {
+            Thread.sleep(forTimeInterval: min(step, remaining))
+            remaining -= step
+        }
+    }
+
+    /// Start watchdog timer to detect poll thread death
+    private func startWatchdog() {
+        let timer = DispatchSource.makeTimerSource(queue: pollQueue)
+        timer.schedule(deadline: .now() + watchdogInterval, repeating: watchdogInterval)
+        timer.setEventHandler { [weak self] in
+            self?.checkThreadHealth()
+        }
+        timer.resume()
+        watchdogTimer = timer
+        log("Watchdog timer started (interval: \(Int(watchdogInterval))s)", level: .info, component: "MessageWatcher")
+    }
+
+    /// Check if poll thread is still healthy, restart if dead
+    private func checkThreadHealth() {
+        guard enablePolling, !shouldStop else { return }
+
+        let timeSinceLastPoll = Date().timeIntervalSince(lastPollTime)
+
+        if timeSinceLastPoll > pollTimeout {
+            log("Poll thread appears dead (last poll \(Int(timeSinceLastPoll))s ago), attempting restart", level: .error, component: "MessageWatcher")
+            alertCriticalFailure("MessageWatcher poll thread died silently, restarting", component: "MessageWatcher")
+
+            // Restart the poll thread
+            restartPollThread()
+        }
+    }
+
+    /// Restart the poll thread after detected death
+    private func restartPollThread() {
+        // Cancel old thread if any
+        watchThread?.cancel()
+        watchThread = nil
+
+        // Reset poll timestamp
+        lastPollTime = Date()
+
+        let interval = self.pollInterval
+        var heartbeatCounter = 0
+        let heartbeatInterval = 60
+
+        let thread = Thread { [weak self] in
+            defer {
+                log("Poll thread exiting (restarted instance)", level: .warn, component: "MessageWatcher")
+            }
+
+            guard let self = self else {
+                log("Poll thread: MessageWatcher deallocated before restart", level: .error, component: "MessageWatcher")
+                return
+            }
+
+            log("Poll thread restarted and running", level: .info, component: "MessageWatcher")
+
+            while !self.shouldStop {
+                self.sleepWithStop(interval)
+                if self.shouldStop { break }
+
+                heartbeatCounter += 1
+                if heartbeatCounter >= heartbeatInterval {
+                    log("Poll thread heartbeat: still running (restarted)", level: .info, component: "MessageWatcher")
+                    heartbeatCounter = 0
+                }
+
+                autoreleasepool {
+                    self.checkForNewMessages()
+                }
+
+                self.lastPollTime = Date()
+            }
+            log("Poll thread stopped normally (restarted instance)", level: .info, component: "MessageWatcher")
+        }
+        thread.qualityOfService = .userInitiated
+        thread.start()
+        watchThread = thread
+        log("Poll thread restarted successfully", level: .info, component: "MessageWatcher")
     }
 
     /// Manual trigger for message checks (used in tests)
@@ -283,6 +399,7 @@ final class MessageWatcher {
         // Dispatch callbacks OUTSIDE lock to avoid deadlocks
         for message in messagesToDispatch {
             saveState()
+            log("Dispatching message ROWID \(message.rowId)", level: .debug, component: "MessageWatcher")
             onNewMessage(message)
         }
     }

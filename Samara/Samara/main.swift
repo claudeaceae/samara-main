@@ -212,6 +212,15 @@ func buildLocationPrompt(triggerContext: LocationTracker.TriggerContext) -> Stri
     if let speed = triggerContext.speed {
         prompt += String(format: "\n- Speed: %.1f m/s", speed)
     }
+    if let distM = triggerContext.distanceFromPlaceM {
+        prompt += String(format: "\n- Distance from place: %.0f meters", distM)
+    }
+    if let lat = triggerContext.latitude, let lon = triggerContext.longitude {
+        prompt += String(format: "\n- Coordinates: %.5f, %.5f", lat, lon)
+    }
+    if let confidence = triggerContext.arrivalConfidence {
+        prompt += "\n- Arrival confidence: \(confidence)"
+    }
 
     prompt += """
 
@@ -222,6 +231,9 @@ func buildLocationPrompt(triggerContext: LocationTracker.TriggerContext) -> Stri
         - Reflect the time of day naturally.
         - If data is stale, note uncertainty.
         - Don't over-question. A simple acknowledgment is often enough.
+        - Only reference a specific place if the trigger type explicitly says arrival/departure.
+        - For lingering/new_location/significant_movement triggers, do NOT compose "welcome home" or "made it to work" messages.
+        - Trust the trigger type, not the address — the address may match a known place while the user is still en route.
         - Output ONLY the message text, nothing else.
         """
     return prompt
