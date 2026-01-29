@@ -58,6 +58,10 @@ final class LocationTracker {
         let timeOfDay: String
         let motionStates: [String]
         let speed: Double?
+        let distanceFromPlaceM: Double?   // actual distance from named place
+        let latitude: Double?             // coordinates of the reading
+        let longitude: Double?
+        let arrivalConfidence: String?    // "wifi_confirmed" or "gps_hysteresis"
     }
 
     struct LocationAnalysis {
@@ -224,6 +228,11 @@ final class LocationTracker {
     private var lastPatternDeviationAlert: Date?  // prevent repeated deviation alerts
     private var consecutiveAwayReadings: Int = 0  // hysteresis counter for departure detection
     private let requiredAwayReadings: Int = 3  // require N consecutive away readings before triggering
+    private var consecutiveHomeReadings: Int = 0  // hysteresis counter for home arrival
+    private var consecutiveWorkReadings: Int = 0  // hysteresis counter for work arrival
+    private let requiredArrivalReadings: Int = 2  // require N consecutive readings in radius
+    private var consecutiveWorkAwayReadings: Int = 0  // hysteresis counter for work departure
+    private let requiredWorkAwayReadings: Int = 3  // require N consecutive away readings for work departure
 
     // MARK: - Initialization
 
@@ -549,7 +558,11 @@ final class LocationTracker {
                     stalenessQualifier: stalenessQualifier(for: location),
                     timeOfDay: timeOfDayString(),
                     motionStates: location.motion,
-                    speed: location.speed
+                    speed: location.speed,
+                    distanceFromPlaceM: nil,
+                    latitude: nil,
+                    longitude: nil,
+                    arrivalConfidence: nil
                 )
             )
         }
@@ -576,7 +589,11 @@ final class LocationTracker {
                         stalenessQualifier: stalenessQualifier(for: location),
                         timeOfDay: timeOfDayString(),
                         motionStates: location.motion,
-                        speed: location.speed
+                        speed: location.speed,
+                        distanceFromPlaceM: nil,
+                        latitude: nil,
+                        longitude: nil,
+                        arrivalConfidence: nil
                     )
                 )
             }
@@ -620,7 +637,11 @@ final class LocationTracker {
                                 stalenessQualifier: stalenessQualifier(for: location),
                                 timeOfDay: timeOfDayString(),
                                 motionStates: location.motion,
-                                speed: location.speed
+                                speed: location.speed,
+                                distanceFromPlaceM: nil,
+                                latitude: nil,
+                                longitude: nil,
+                                arrivalConfidence: nil
                             )
                         )
                     }
@@ -692,7 +713,11 @@ final class LocationTracker {
                         stalenessQualifier: nil,
                         timeOfDay: timeOfDayString(),
                         motionStates: location.motion,
-                        speed: location.speed
+                        speed: location.speed,
+                        distanceFromPlaceM: nil,
+                        latitude: nil,
+                        longitude: nil,
+                        arrivalConfidence: nil
                     )
                 )
             }
@@ -715,43 +740,111 @@ final class LocationTracker {
     }
 
     /// Check if arriving home
+    /// Uses WiFi-first confirmation, movement suppression, and GPS hysteresis
     private func checkArrivingHome(_ location: LocationEntry) -> LocationAnalysis? {
         guard let home = findPlace(named: "home") else { return nil }
 
-        let isNowHome = isLocationAtPlace(location, home)
+        let distanceFromHome = location.distance(toLat: home.lat, lon: home.lon)
+        let isWithinRadius = distanceFromHome < home.radius
 
-        // Trigger: was away, now home
-        if !wasAtHome && isNowHome {
-            wasAtHome = true
-            lastTriggerType = .arrivingHome
-            saveTrackerState()
-            lastMessageTime = Date()
-            log("Arriving home detected - wasAtHome=\(wasAtHome)", level: .info, component: "LocationTracker")
-            return LocationAnalysis(
-                shouldMessage: true,
-                reason: "Welcome back!",
-                currentLocation: location,
-                triggerType: .arrivingHome,
-                triggerContext: TriggerContext(
+        // WiFi match → immediate confirmed arrival (strongest signal, no hysteresis needed)
+        if let homeWifi = home.wifiHints, !homeWifi.isEmpty,
+           let currentWifi = location.wifi, homeWifi.contains(currentWifi) {
+            if !wasAtHome {
+                consecutiveHomeReadings = 0
+                wasAtHome = true
+                lastTriggerType = .arrivingHome
+                saveTrackerState()
+                lastMessageTime = Date()
+                log("Arriving home confirmed via WiFi", level: .info, component: "LocationTracker")
+                return LocationAnalysis(
+                    shouldMessage: true,
+                    reason: "Welcome back!",
+                    currentLocation: location,
                     triggerType: .arrivingHome,
-                    placeName: "home",
-                    address: nil,
-                    durationMinutes: nil,
-                    durationHours: nil,
-                    distanceKm: nil,
-                    typicalTime: nil,
-                    stalenessQualifier: nil,
-                    timeOfDay: timeOfDayString(),
-                    motionStates: location.motion,
-                    speed: location.speed
+                    triggerContext: TriggerContext(
+                        triggerType: .arrivingHome,
+                        placeName: "home",
+                        address: nil,
+                        durationMinutes: nil,
+                        durationHours: nil,
+                        distanceKm: nil,
+                        typicalTime: nil,
+                        stalenessQualifier: nil,
+                        timeOfDay: timeOfDayString(),
+                        motionStates: location.motion,
+                        speed: location.speed,
+                        distanceFromPlaceM: distanceFromHome,
+                        latitude: location.latitude,
+                        longitude: location.longitude,
+                        arrivalConfidence: "wifi_confirmed"
+                    )
                 )
-            )
+            }
+            return nil
+        }
+
+        // GPS within radius checks
+        if !wasAtHome && isWithinRadius {
+            // Moving through radius → suppress (catches drive-by scenarios)
+            if isMoving(location) {
+                log("Suppressing home arrival - user is moving (distance: \(Int(distanceFromHome))m, speed: \(location.speed ?? 0))",
+                    level: .debug, component: "LocationTracker")
+                return nil
+            }
+
+            // Stationary within radius → increment hysteresis counter
+            consecutiveHomeReadings += 1
+            log("Home arrival reading \(consecutiveHomeReadings)/\(requiredArrivalReadings) - distance: \(Int(distanceFromHome))m",
+                level: .debug, component: "LocationTracker")
+
+            if consecutiveHomeReadings >= requiredArrivalReadings {
+                consecutiveHomeReadings = 0
+                wasAtHome = true
+                lastTriggerType = .arrivingHome
+                saveTrackerState()
+                lastMessageTime = Date()
+                log("Arriving home confirmed via GPS hysteresis (\(requiredArrivalReadings) readings)",
+                    level: .info, component: "LocationTracker")
+                return LocationAnalysis(
+                    shouldMessage: true,
+                    reason: "Welcome back!",
+                    currentLocation: location,
+                    triggerType: .arrivingHome,
+                    triggerContext: TriggerContext(
+                        triggerType: .arrivingHome,
+                        placeName: "home",
+                        address: nil,
+                        durationMinutes: nil,
+                        durationHours: nil,
+                        distanceKm: nil,
+                        typicalTime: nil,
+                        stalenessQualifier: nil,
+                        timeOfDay: timeOfDayString(),
+                        motionStates: location.motion,
+                        speed: location.speed,
+                        distanceFromPlaceM: distanceFromHome,
+                        latitude: location.latitude,
+                        longitude: location.longitude,
+                        arrivalConfidence: "gps_hysteresis"
+                    )
+                )
+            }
+            saveTrackerState()
+            return nil
+        }
+
+        // Outside radius → reset home arrival counter
+        if !isWithinRadius && consecutiveHomeReadings > 0 {
+            consecutiveHomeReadings = 0
+            saveTrackerState()
         }
 
         return nil
     }
 
     /// Check if leaving work
+    /// Mirrors checkLeavingHome: WiFi lock, movement check, hysteresis
     private func checkLeavingWork(_ location: LocationEntry) -> LocationAnalysis? {
         guard let work = findPlace(named: "work") else { return nil }
 
@@ -762,6 +855,11 @@ final class LocationTracker {
                 wasAtWork = true
                 saveTrackerState()
             }
+            // Reset away counter since we're definitely at work
+            if consecutiveWorkAwayReadings > 0 {
+                consecutiveWorkAwayReadings = 0
+                saveTrackerState()
+            }
             return nil
         }
 
@@ -770,35 +868,62 @@ final class LocationTracker {
         let distanceFromWork = location.distance(toLat: work.lat, lon: work.lon)
         let isNowAway = distanceFromWork > departureThreshold
 
-        // Trigger: was at work, now away
-        if wasAtWork && isNowAway {
-            wasAtWork = false
-            lastTriggerType = .leavingWork
-            saveTrackerState()
-            lastMessageTime = Date()
-            log("Leaving work detected - wasAtWork=\(wasAtWork)", level: .info, component: "LocationTracker")
-            return LocationAnalysis(
-                shouldMessage: true,
-                reason: "Heading home?",
-                currentLocation: location,
-                triggerType: .leavingWork,
-                triggerContext: TriggerContext(
-                    triggerType: .leavingWork,
-                    placeName: "work",
-                    address: nil,
-                    durationMinutes: nil,
-                    durationHours: nil,
-                    distanceKm: nil,
-                    typicalTime: nil,
-                    stalenessQualifier: nil,
-                    timeOfDay: timeOfDayString(),
-                    motionStates: location.motion,
-                    speed: location.speed
-                )
-            )
+        // Require movement to trigger departure
+        if isNowAway && !isMoving(location) {
+            // Distance says away but not moving - likely GPS jitter
+            return nil
         }
 
-        // Update work state when leaving
+        // Hysteresis - require consecutive away readings
+        if wasAtWork && isNowAway {
+            consecutiveWorkAwayReadings += 1
+            log("Work away reading \(consecutiveWorkAwayReadings)/\(requiredWorkAwayReadings) - distance: \(Int(distanceFromWork))m",
+                level: .debug, component: "LocationTracker")
+
+            if consecutiveWorkAwayReadings >= requiredWorkAwayReadings {
+                // Actually leaving
+                consecutiveWorkAwayReadings = 0
+                wasAtWork = false
+                lastTriggerType = .leavingWork
+                saveTrackerState()
+                lastMessageTime = Date()
+                log("Leaving work confirmed after \(requiredWorkAwayReadings) readings",
+                    level: .info, component: "LocationTracker")
+                return LocationAnalysis(
+                    shouldMessage: true,
+                    reason: "Heading home?",
+                    currentLocation: location,
+                    triggerType: .leavingWork,
+                    triggerContext: TriggerContext(
+                        triggerType: .leavingWork,
+                        placeName: "work",
+                        address: nil,
+                        durationMinutes: nil,
+                        durationHours: nil,
+                        distanceKm: nil,
+                        typicalTime: nil,
+                        stalenessQualifier: nil,
+                        timeOfDay: timeOfDayString(),
+                        motionStates: location.motion,
+                        speed: location.speed,
+                        distanceFromPlaceM: nil,
+                        latitude: nil,
+                        longitude: nil,
+                        arrivalConfidence: nil
+                    )
+                )
+            }
+            saveTrackerState()  // Persist counter
+            return nil  // Not enough consecutive readings yet
+        }
+
+        // Reset counter if back within threshold
+        if !isNowAway && consecutiveWorkAwayReadings > 0 {
+            consecutiveWorkAwayReadings = 0
+            saveTrackerState()
+        }
+
+        // Update work state for other checks
         if isNowAway {
             wasAtWork = false
         }
@@ -807,37 +932,104 @@ final class LocationTracker {
     }
 
     /// Check if arriving at work
+    /// Uses WiFi-first confirmation, movement suppression, and GPS hysteresis
     private func checkArrivingWork(_ location: LocationEntry) -> LocationAnalysis? {
         guard let work = findPlace(named: "work") else { return nil }
 
-        let isNowAtWork = isLocationAtPlace(location, work)
+        let distanceFromWork = location.distance(toLat: work.lat, lon: work.lon)
+        let isWithinRadius = distanceFromWork < work.radius
 
-        // Trigger: was away, now at work
-        if !wasAtWork && isNowAtWork {
-            wasAtWork = true
-            lastTriggerType = .arrivingWork
-            saveTrackerState()
-            lastMessageTime = Date()
-            log("Arriving at work detected - wasAtWork=\(wasAtWork)", level: .info, component: "LocationTracker")
-            return LocationAnalysis(
-                shouldMessage: true,
-                reason: "Made it to work!",
-                currentLocation: location,
-                triggerType: .arrivingWork,
-                triggerContext: TriggerContext(
+        // WiFi match → immediate confirmed arrival
+        if let workWifi = work.wifiHints, !workWifi.isEmpty,
+           let currentWifi = location.wifi, workWifi.contains(currentWifi) {
+            if !wasAtWork {
+                consecutiveWorkReadings = 0
+                wasAtWork = true
+                lastTriggerType = .arrivingWork
+                saveTrackerState()
+                lastMessageTime = Date()
+                log("Arriving at work confirmed via WiFi", level: .info, component: "LocationTracker")
+                return LocationAnalysis(
+                    shouldMessage: true,
+                    reason: "Made it to work!",
+                    currentLocation: location,
                     triggerType: .arrivingWork,
-                    placeName: "work",
-                    address: nil,
-                    durationMinutes: nil,
-                    durationHours: nil,
-                    distanceKm: nil,
-                    typicalTime: nil,
-                    stalenessQualifier: nil,
-                    timeOfDay: timeOfDayString(),
-                    motionStates: location.motion,
-                    speed: location.speed
+                    triggerContext: TriggerContext(
+                        triggerType: .arrivingWork,
+                        placeName: "work",
+                        address: nil,
+                        durationMinutes: nil,
+                        durationHours: nil,
+                        distanceKm: nil,
+                        typicalTime: nil,
+                        stalenessQualifier: nil,
+                        timeOfDay: timeOfDayString(),
+                        motionStates: location.motion,
+                        speed: location.speed,
+                        distanceFromPlaceM: distanceFromWork,
+                        latitude: location.latitude,
+                        longitude: location.longitude,
+                        arrivalConfidence: "wifi_confirmed"
+                    )
                 )
-            )
+            }
+            return nil
+        }
+
+        // GPS within radius checks
+        if !wasAtWork && isWithinRadius {
+            // Moving through radius → suppress
+            if isMoving(location) {
+                log("Suppressing work arrival - user is moving (distance: \(Int(distanceFromWork))m)",
+                    level: .debug, component: "LocationTracker")
+                return nil
+            }
+
+            // Stationary within radius → increment hysteresis counter
+            consecutiveWorkReadings += 1
+            log("Work arrival reading \(consecutiveWorkReadings)/\(requiredArrivalReadings) - distance: \(Int(distanceFromWork))m",
+                level: .debug, component: "LocationTracker")
+
+            if consecutiveWorkReadings >= requiredArrivalReadings {
+                consecutiveWorkReadings = 0
+                wasAtWork = true
+                lastTriggerType = .arrivingWork
+                saveTrackerState()
+                lastMessageTime = Date()
+                log("Arriving at work confirmed via GPS hysteresis (\(requiredArrivalReadings) readings)",
+                    level: .info, component: "LocationTracker")
+                return LocationAnalysis(
+                    shouldMessage: true,
+                    reason: "Made it to work!",
+                    currentLocation: location,
+                    triggerType: .arrivingWork,
+                    triggerContext: TriggerContext(
+                        triggerType: .arrivingWork,
+                        placeName: "work",
+                        address: nil,
+                        durationMinutes: nil,
+                        durationHours: nil,
+                        distanceKm: nil,
+                        typicalTime: nil,
+                        stalenessQualifier: nil,
+                        timeOfDay: timeOfDayString(),
+                        motionStates: location.motion,
+                        speed: location.speed,
+                        distanceFromPlaceM: distanceFromWork,
+                        latitude: location.latitude,
+                        longitude: location.longitude,
+                        arrivalConfidence: "gps_hysteresis"
+                    )
+                )
+            }
+            saveTrackerState()
+            return nil
+        }
+
+        // Outside radius → reset work arrival counter
+        if !isWithinRadius && consecutiveWorkReadings > 0 {
+            consecutiveWorkReadings = 0
+            saveTrackerState()
         }
 
         return nil
@@ -879,7 +1071,11 @@ final class LocationTracker {
                         stalenessQualifier: stalenessQualifier(for: location),
                         timeOfDay: timeOfDayString(),
                         motionStates: location.motion,
-                        speed: location.speed
+                        speed: location.speed,
+                        distanceFromPlaceM: nil,
+                        latitude: nil,
+                        longitude: nil,
+                        arrivalConfidence: nil
                     )
                 )
             }
@@ -938,7 +1134,11 @@ final class LocationTracker {
                         stalenessQualifier: stalenessQualifier(for: location),
                         timeOfDay: timeOfDayString(),
                         motionStates: location.motion,
-                        speed: location.speed
+                        speed: location.speed,
+                        distanceFromPlaceM: nil,
+                        latitude: nil,
+                        longitude: nil,
+                        arrivalConfidence: nil
                     )
                 )
             }
@@ -1044,7 +1244,11 @@ final class LocationTracker {
                             stalenessQualifier: nil,
                             timeOfDay: timeOfDayString(),
                             motionStates: location.motion,
-                            speed: location.speed
+                            speed: location.speed,
+                            distanceFromPlaceM: nil,
+                            latitude: nil,
+                            longitude: nil,
+                            arrivalConfidence: nil
                         )
                     )
                 }
@@ -1296,7 +1500,10 @@ final class LocationTracker {
         var lastMessageTime: Date?
         var lastTriggerType: String?  // Raw value of TriggerType for journey pair bypass
         var lastTransitAlert: String?
-        var consecutiveAwayReadings: Int?  // Hysteresis counter for departure detection
+        var consecutiveAwayReadings: Int?  // Hysteresis counter for home departure detection
+        var consecutiveHomeReadings: Int?  // Hysteresis counter for home arrival detection
+        var consecutiveWorkReadings: Int?  // Hysteresis counter for work arrival detection
+        var consecutiveWorkAwayReadings: Int?  // Hysteresis counter for work departure detection
     }
 
     private func loadTrackerState() {
@@ -1316,8 +1523,11 @@ final class LocationTracker {
             lastTriggerType = state.lastTriggerType.flatMap { TriggerType(rawValue: $0) }
             lastTransitAlert = state.lastTransitAlert
             consecutiveAwayReadings = state.consecutiveAwayReadings ?? 0
+            consecutiveHomeReadings = state.consecutiveHomeReadings ?? 0
+            consecutiveWorkReadings = state.consecutiveWorkReadings ?? 0
+            consecutiveWorkAwayReadings = state.consecutiveWorkAwayReadings ?? 0
             didLoadTrackerState = true
-            log("Loaded tracker state: wasAtHome=\(wasAtHome), wasAtWork=\(wasAtWork), awayReadings=\(consecutiveAwayReadings)", level: .debug, component: "LocationTracker")
+            log("Loaded tracker state: wasAtHome=\(wasAtHome), wasAtWork=\(wasAtWork), awayReadings=\(consecutiveAwayReadings), homeReadings=\(consecutiveHomeReadings)", level: .debug, component: "LocationTracker")
         } catch {
             log("Error loading tracker state: \(error)", level: .warn, component: "LocationTracker")
         }
@@ -1330,7 +1540,10 @@ final class LocationTracker {
             lastMessageTime: lastMessageTime,
             lastTriggerType: lastTriggerType?.rawValue,
             lastTransitAlert: lastTransitAlert,
-            consecutiveAwayReadings: consecutiveAwayReadings
+            consecutiveAwayReadings: consecutiveAwayReadings,
+            consecutiveHomeReadings: consecutiveHomeReadings,
+            consecutiveWorkReadings: consecutiveWorkReadings,
+            consecutiveWorkAwayReadings: consecutiveWorkAwayReadings
         )
 
         let encoder = JSONEncoder()
