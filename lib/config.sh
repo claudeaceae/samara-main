@@ -56,9 +56,19 @@ COLLABORATOR_X=$(config_get '.collaborator.x' '')
 # Derived values for convenience
 COLLABORATOR_NAME_LOWER=$(echo "$COLLABORATOR_NAME" | tr '[:upper:]' '[:lower:]')
 
-# Notes configuration
+# Notes configuration (legacy)
 NOTE_LOCATION=$(config_get '.notes.location' 'Claude Location Log')
 NOTE_SCRATCHPAD=$(config_get '.notes.scratchpad' 'Claude Scratchpad')
+
+# Shared workspace configuration (file-based notes)
+SHARED_WORKSPACE_DIR=$(config_get '.sharedWorkspace.path' "$MIND_PATH/shared")
+SHARED_WORKSPACE_SYNC=$(config_get '.sharedWorkspace.sync' 'false')
+SHARED_SCRATCHPAD=$(config_get '.sharedWorkspace.scratchpad' 'scratchpad.md')
+if [[ "$SHARED_SCRATCHPAD" = /* ]]; then
+    SCRATCHPAD_FILE="$SHARED_SCRATCHPAD"
+else
+    SCRATCHPAD_FILE="$SHARED_WORKSPACE_DIR/$SHARED_SCRATCHPAD"
+fi
 
 # Mail configuration
 MAIL_ACCOUNT=$(config_get '.mail.account' 'iCloud')
@@ -67,5 +77,6 @@ MAIL_ACCOUNT=$(config_get '.mail.account' 'iCloud')
 export ENTITY_NAME ENTITY_ICLOUD ENTITY_BLUESKY ENTITY_X ENTITY_GITHUB
 export COLLABORATOR_NAME COLLABORATOR_PHONE COLLABORATOR_EMAIL COLLABORATOR_BLUESKY COLLABORATOR_X COLLABORATOR_NAME_LOWER
 export NOTE_LOCATION NOTE_SCRATCHPAD
+export SHARED_WORKSPACE_DIR SHARED_WORKSPACE_SYNC SCRATCHPAD_FILE
 export MAIL_ACCOUNT
 export MIND_PATH CONFIG_FILE CONFIG_AVAILABLE

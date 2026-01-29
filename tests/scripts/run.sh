@@ -89,20 +89,13 @@ run_send_image_test() {
 }
 
 run_scratchpad_first_run_test() {
-  local temp_bin="$SAMARA_TEST_ROOT/osascript-bin"
-  mkdir -p "$temp_bin"
-  cat > "$temp_bin/osascript" <<'EOF'
-#!/bin/bash
-printf '%s' '<p>Scratchpad content</p>'
-EOF
-  chmod +x "$temp_bin/osascript"
-  local original_path="$PATH"
-  PATH="$temp_bin:$PATH"
+  local scratchpad_dir="$SAMARA_MIND_PATH/shared"
+  local scratchpad_file="$scratchpad_dir/scratchpad.md"
+  mkdir -p "$scratchpad_dir"
+  printf '%s' 'Scratchpad content' > "$scratchpad_file"
   rm -f "$SAMARA_MIND_PATH/state/scratchpad-hash.txt"
 
   run_command_capture "$REPO_ROOT/scripts/check-scratchpad-changed"
-
-  PATH="$original_path"
 
   if [[ "$RUN_STATUS" -ne 0 ]]; then
     echo "Expected exit 0, got $RUN_STATUS" >&2
@@ -114,23 +107,16 @@ EOF
 }
 
 run_scratchpad_no_change_test() {
-  local temp_bin="$SAMARA_TEST_ROOT/osascript-bin"
-  mkdir -p "$temp_bin"
-  cat > "$temp_bin/osascript" <<'EOF'
-#!/bin/bash
-printf '%s' '<p>Scratchpad content</p>'
-EOF
-  chmod +x "$temp_bin/osascript"
-  local original_path="$PATH"
-  PATH="$temp_bin:$PATH"
+  local scratchpad_dir="$SAMARA_MIND_PATH/shared"
+  local scratchpad_file="$scratchpad_dir/scratchpad.md"
+  mkdir -p "$scratchpad_dir"
+  printf '%s' 'Scratchpad content' > "$scratchpad_file"
   local content="Scratchpad content"
   local hash
   hash=$(echo "$content" | shasum -a 256 | cut -d' ' -f1)
   echo "$hash" > "$SAMARA_MIND_PATH/state/scratchpad-hash.txt"
 
   run_command_capture "$REPO_ROOT/scripts/check-scratchpad-changed"
-
-  PATH="$original_path"
 
   if [[ "$RUN_STATUS" -ne 1 ]]; then
     echo "Expected exit 1, got $RUN_STATUS" >&2

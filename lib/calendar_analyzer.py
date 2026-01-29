@@ -54,7 +54,7 @@ class CalendarAnalyzer:
             "Scheduled Reminders"
         }
 
-    def get_upcoming_events(self, hours: int = 2) -> list:
+    def get_upcoming_events(self, hours: int = 2, include_attendees: bool = False) -> list:
         """
         Get events starting in the next N hours.
 
@@ -66,10 +66,12 @@ class CalendarAnalyzer:
             - calendar: Which calendar
             - minutes_until: Minutes until start
             - relevance_context: Related past conversations (if Chroma available)
+            - attendees: List of attendees (only if include_attendees=True)
         """
         events = self._fetch_events_in_range(
             start_offset_hours=0,
-            end_offset_hours=hours
+            end_offset_hours=hours,
+            include_attendees=include_attendees
         )
 
         # Add minutes_until and relevance context
@@ -85,7 +87,7 @@ class CalendarAnalyzer:
 
         return events
 
-    def get_recently_ended(self, hours: int = 1) -> list:
+    def get_recently_ended(self, hours: int = 1, include_attendees: bool = False) -> list:
         """
         Get events that ended in the last N hours.
 
@@ -94,7 +96,8 @@ class CalendarAnalyzer:
         events = self._fetch_events_in_range(
             start_offset_hours=-hours * 2,  # Look back further for long events
             end_offset_hours=0,
-            ended_only=True
+            ended_only=True,
+            include_attendees=include_attendees
         )
 
         now = datetime.now()
@@ -237,13 +240,45 @@ class CalendarAnalyzer:
         return triggers
 
     def _fetch_events_in_range(self, start_offset_hours: int, end_offset_hours: int,
-                                ended_only: bool = False) -> list:
+                                ended_only: bool = False,
+                                include_attendees: bool = False) -> list:
         """
         Fetch calendar events in a time range via AppleScript.
+
+        Args:
+            start_offset_hours: Hours from now for range start (negative = past)
+            end_offset_hours: Hours from now for range end
+            ended_only: Only return events that have already ended
+            include_attendees: Fetch attendee data (slower, requires 30s timeout)
         """
         now = datetime.now()
         start_time = now + timedelta(hours=start_offset_hours)
         end_time = now + timedelta(hours=end_offset_hours)
+
+        # Build excluded calendars as AppleScript set
+        excluded_list = ", ".join(f'"{cal}"' for cal in self.excluded_calendars)
+
+        # Conditionally include attendee block
+        if include_attendees:
+            attendee_block = '''
+                        -- Build attendee list (email:name;email:name;...)
+                        set attendeeList to ""
+                        try
+                            set evtAttendees to attendees of evt
+                            repeat with att in evtAttendees
+                                try
+                                    set attEmail to email of att
+                                    set attName to ""
+                                    try
+                                        set attName to display name of att
+                                    end try
+                                    set attendeeList to attendeeList & attEmail & ":" & attName & ";"
+                                end try
+                            end repeat
+                        end try'''
+        else:
+            attendee_block = '''
+                        set attendeeList to ""'''
 
         # AppleScript to get events
         script = f'''
@@ -262,43 +297,41 @@ class CalendarAnalyzer:
             set startDate to startDate + ({start_offset_hours * 3600})
             set endDate to endDate + ({end_offset_hours * 3600})
 
+            -- Excluded calendars (filtered in AppleScript for performance)
+            set excludedCals to {{{excluded_list}}}
+
             set eventList to {{}}
             repeat with cal in calendars
                 try
                     set calName to name of cal
-                    set calEvents to (every event of cal whose start date >= startDate and start date < endDate)
-                    repeat with evt in calEvents
-                        -- Build attendee list (email:name;email:name;...)
-                        set attendeeList to ""
-                        try
-                            set evtAttendees to attendees of evt
-                            repeat with att in evtAttendees
-                                try
-                                    set attEmail to email of att
-                                    set attName to ""
-                                    try
-                                        set attName to display name of att
-                                    end try
-                                    set attendeeList to attendeeList & attEmail & ":" & attName & ";"
-                                end try
-                            end repeat
-                        end try
 
-                        set evtInfo to summary of evt & "|||" & (start date of evt as string) & "|||" & (end date of evt as string) & "|||" & (location of evt as string) & "|||" & calName & "|||" & attendeeList
-                        set end of eventList to evtInfo
-                    end repeat
+                    -- Skip excluded calendars
+                    if excludedCals contains calName then
+                        -- skip this calendar
+                    else
+                        set calEvents to (every event of cal whose start date >= startDate and start date < endDate)
+                        repeat with evt in calEvents
+{attendee_block}
+
+                            set evtInfo to summary of evt & "|||" & (start date of evt as string) & "|||" & (end date of evt as string) & "|||" & (location of evt as string) & "|||" & calName & "|||" & attendeeList
+                            set end of eventList to evtInfo
+                        end repeat
+                    end if
                 end try
             end repeat
             return eventList
         end tell
         '''
 
+        # Longer timeout when fetching attendees (30s vs 10s)
+        timeout_seconds = 30 if include_attendees else 10
+
         try:
             result = subprocess.run(
                 ["osascript", "-e", script],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=timeout_seconds
             )
 
             if result.returncode != 0:
@@ -518,8 +551,8 @@ class CalendarAnalyzer:
 
         Returns events with enriched attendee data for meeting prep sense events.
         """
-        # Get events starting soon
-        upcoming = self.get_upcoming_events(hours=1)
+        # Get events starting soon (with attendees for meeting prep)
+        upcoming = self.get_upcoming_events(hours=1, include_attendees=True)
 
         meetings = []
         for event in upcoming:
@@ -549,7 +582,8 @@ class CalendarAnalyzer:
 
         Returns events with attendee data for debrief sense events.
         """
-        recent = self.get_recently_ended(hours=1)
+        # Get recently ended events (with attendees for meeting debrief)
+        recent = self.get_recently_ended(hours=1, include_attendees=True)
 
         meetings = []
         for event in recent:
