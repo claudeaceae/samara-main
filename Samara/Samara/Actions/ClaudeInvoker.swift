@@ -562,7 +562,8 @@ final class ClaudeInvoker {
                 }
 
                 // Check for error_during_execution subtype
-                // This happens when Claude Code encounters errors but is_error may still be false
+                // This happens when Claude Code encounters non-fatal errors (e.g. plugin failures)
+                // but may still have produced a valid response via structured_output or result
                 if let subtype = json["subtype"] as? String, subtype == "error_during_execution" {
                     // Log the errors for debugging
                     if let errors = json["errors"] as? [String] {
@@ -570,7 +571,19 @@ final class ClaudeInvoker {
                         log("error_during_execution with \(errors.count) errors: \(errorSummary)", level: .warn, component: "ClaudeInvoker")
                     }
 
-                    // Check if there's a result field despite the error
+                    // FIRST: Check structured_output (preferred path when using --json-schema)
+                    // Plugin errors cause error_during_execution even when the model responded correctly
+                    if useStructuredOutput,
+                       let structuredOutput = json["structured_output"] as? [String: Any],
+                       let message = structuredOutput["message"] as? String {
+                        log("Recovered message from structured_output despite error_during_execution", level: .info, component: "ClaudeInvoker")
+                        return ClaudeInvocationResult(
+                            response: message.trimmingCharacters(in: .whitespacesAndNewlines),
+                            sessionId: sessionId
+                        )
+                    }
+
+                    // SECOND: Check result field (legacy text path)
                     if let result = json["result"] as? String, !result.isEmpty {
                         let (sanitized, filtered) = sanitizeResponse(result)
                         if let filteredContent = filtered {
@@ -579,9 +592,28 @@ final class ClaudeInvoker {
                         return ClaudeInvocationResult(response: sanitized, sessionId: sessionId)
                     }
 
-                    // No result - the session failed to produce output
-                    // This often happens due to tool execution failures or permission issues
-                    log("error_during_execution with no result - session produced no output", level: .error, component: "ClaudeInvoker")
+                    // THIRD: Recover from session JSONL (last resort)
+                    // The CLI may set error_during_execution but still have valid session data
+                    // Read the session transcript to find the StructuredOutput tool call
+                    if let sid = sessionId,
+                       let recovered = recoverFromSessionJSONL(sessionId: sid) {
+                        log("Recovered message from session JSONL despite error_during_execution", level: .info, component: "ClaudeInvoker")
+                        return ClaudeInvocationResult(
+                            response: recovered.trimmingCharacters(in: .whitespacesAndNewlines),
+                            sessionId: sessionId
+                        )
+                    }
+
+                    // No result - log the raw JSON keys for diagnosis
+                    let jsonKeys = json.keys.sorted().joined(separator: ", ")
+                    let resultType = json["result"].map { "\(type(of: $0))" } ?? "nil"
+                    let structuredType = json["structured_output"].map { "\(type(of: $0))" } ?? "nil"
+                    log("error_during_execution with no usable result. JSON keys: [\(jsonKeys)], result type: \(resultType), structured_output type: \(structuredType)", level: .error, component: "ClaudeInvoker")
+
+                    // Log truncated raw output for post-mortem analysis
+                    let rawTruncated = String(output.prefix(2000))
+                    log("Raw error output: \(rawTruncated)", level: .warn, component: "ClaudeInvoker")
+
                     return ClaudeInvocationResult(
                         response: "[Session error - no response generated. Try again or start a new conversation.]",
                         sessionId: nil  // Don't preserve bad session
@@ -1028,6 +1060,81 @@ final class ClaudeInvoker {
 
         try? FileManager.default.removeItem(at: stateFile)
         log("Cleared pending debrief", level: .debug, component: "ClaudeInvoker")
+    }
+
+    // MARK: - Session Recovery
+
+    /// Attempts to recover a response from the session JSONL when CLI output lacks result/structured_output.
+    /// This happens when error_during_execution is set (e.g. from plugin errors) but the model
+    /// actually produced a valid StructuredOutput response that the CLI didn't include in its output.
+    private func recoverFromSessionJSONL(sessionId: String) -> String? {
+        // Session files are stored under ~/.claude/projects/{hash}/<sessionId>.jsonl
+        // The project hash is derived from the working directory (~/.claude-mind)
+        let claudeDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/projects")
+
+        // Find the project directory by looking for one that contains our session file
+        guard let projectDirs = try? FileManager.default.contentsOfDirectory(
+            at: claudeDir,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            log("Cannot list project directories for session recovery", level: .debug, component: "ClaudeInvoker")
+            return nil
+        }
+
+        var sessionFile: URL?
+        for dir in projectDirs {
+            let candidate = dir.appendingPathComponent("\(sessionId).jsonl")
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                sessionFile = candidate
+                break
+            }
+        }
+
+        guard let file = sessionFile else {
+            log("Session file not found for \(sessionId)", level: .debug, component: "ClaudeInvoker")
+            return nil
+        }
+
+        // Read the JSONL file and look for StructuredOutput tool calls
+        guard let data = try? Data(contentsOf: file),
+              let content = String(data: data, encoding: .utf8) else {
+            log("Cannot read session file for recovery", level: .debug, component: "ClaudeInvoker")
+            return nil
+        }
+
+        // Parse lines in reverse (the StructuredOutput call is near the end)
+        let lines = content.components(separatedBy: "\n").reversed()
+        for line in lines {
+            guard !line.isEmpty,
+                  let lineData = line.data(using: .utf8),
+                  let entry = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                continue
+            }
+
+            // Look for assistant messages with StructuredOutput tool calls
+            guard entry["type"] as? String == "assistant",
+                  let message = entry["message"] as? [String: Any],
+                  let contentArray = message["content"] as? [[String: Any]] else {
+                continue
+            }
+
+            for block in contentArray {
+                guard block["type"] as? String == "tool_use",
+                      block["name"] as? String == "StructuredOutput",
+                      let input = block["input"] as? [String: Any],
+                      let message = input["message"] as? String else {
+                    continue
+                }
+
+                log("Found StructuredOutput in session JSONL: \(message.prefix(80))...", level: .info, component: "ClaudeInvoker")
+                return message
+            }
+        }
+
+        log("No StructuredOutput found in session JSONL for \(sessionId)", level: .debug, component: "ClaudeInvoker")
+        return nil
     }
 }
 
