@@ -1,37 +1,60 @@
 #!/bin/bash
 #
-# wake-adaptive - Adaptive wake cycle dispatcher
+# wake-adaptive - Adaptive wake cycle dispatcher (KeepAlive mode)
 #
 # Checks the wake scheduler and dispatches to appropriate wake type:
 # - full: Full wake cycle (scripts/wake)
 # - light: Quick check-in (scripts/wake-light)
 # - none: No wake needed
 #
-# This script is designed to be run by launchd every 15 minutes.
+# This script runs continuously with launchd KeepAlive, sleeping 900 seconds
+# between checks. This ensures crash recovery - if the process dies, launchd
+# restarts it immediately rather than waiting for the next interval.
 #
 # Usage:
-#   wake-adaptive [--force TYPE]
+#   wake-adaptive [--force TYPE] [--once]
 #
 
 set -e
 
 MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 LOG_FILE="${MIND_PATH}/system/logs/wake-adaptive.log"
+HEARTBEAT_FILE="${MIND_PATH}/state/last-heartbeat.txt"
+SLEEP_INTERVAL=900  # 15 minutes
 
-# Ensure log directory exists
+# Ensure directories exist
 mkdir -p "$(dirname "$LOG_FILE")"
+mkdir -p "$(dirname "$HEARTBEAT_FILE")"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
 }
 
+# Write heartbeat timestamp (used by boot-recovery to detect gaps)
+write_heartbeat() {
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$HEARTBEAT_FILE"
+}
+
+# Graceful shutdown handler
+RUNNING=true
+cleanup() {
+    log "Received shutdown signal, exiting gracefully..."
+    RUNNING=false
+}
+trap cleanup SIGTERM SIGINT SIGHUP
+
 # Parse arguments
 FORCE_TYPE=""
+RUN_ONCE=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --force)
             FORCE_TYPE="$2"
             shift 2
+            ;;
+        --once)
+            RUN_ONCE=true
+            shift
             ;;
         *)
             shift
@@ -39,54 +62,81 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-log "Adaptive wake check starting..."
+# Main wake check function
+do_wake_check() {
+    log "Adaptive wake check starting..."
 
-# Check scheduler
-SCHEDULER_RESULT=$("$MIND_PATH/system/bin/wake-scheduler" check 2>/dev/null || echo '{"should_wake": false, "type": "none", "reason": "scheduler unavailable"}')
+    # Write heartbeat at start of each cycle
+    write_heartbeat
 
-SHOULD_WAKE=$(echo "$SCHEDULER_RESULT" | jq -r '.should_wake // false')
-WAKE_TYPE=$(echo "$SCHEDULER_RESULT" | jq -r '.type // "none"')
-REASON=$(echo "$SCHEDULER_RESULT" | jq -r '.reason // "unknown"')
+    # Check scheduler
+    local SCHEDULER_RESULT
+    SCHEDULER_RESULT=$("$MIND_PATH/system/bin/wake-scheduler" check 2>/dev/null || echo '{"should_wake": false, "type": "none", "reason": "scheduler unavailable"}')
 
-# Override with force if specified
-if [ -n "$FORCE_TYPE" ]; then
-    SHOULD_WAKE="true"
-    WAKE_TYPE="$FORCE_TYPE"
-    REASON="Forced: $FORCE_TYPE"
-fi
+    local SHOULD_WAKE WAKE_TYPE REASON
+    SHOULD_WAKE=$(echo "$SCHEDULER_RESULT" | jq -r '.should_wake // false')
+    WAKE_TYPE=$(echo "$SCHEDULER_RESULT" | jq -r '.type // "none"')
+    REASON=$(echo "$SCHEDULER_RESULT" | jq -r '.reason // "unknown"')
 
-log "Decision: should_wake=$SHOULD_WAKE, type=$WAKE_TYPE, reason=$REASON"
+    # Override with force if specified
+    if [ -n "$FORCE_TYPE" ]; then
+        SHOULD_WAKE="true"
+        WAKE_TYPE="$FORCE_TYPE"
+        REASON="Forced: $FORCE_TYPE"
+    fi
 
-# Evaluate triggers for proactive messaging (only if service is enabled)
-PROACTIVE_ENABLED=$(jq -r '.services.proactive // true' "$MIND_PATH/system/config.json" 2>/dev/null || echo "true")
+    log "Decision: should_wake=$SHOULD_WAKE, type=$WAKE_TYPE, reason=$REASON"
 
-if [ "$PROACTIVE_ENABLED" = "true" ]; then
-    log "Evaluating triggers for proactive engagement..."
-    TRIGGER_RESULT=$("$MIND_PATH/system/bin/check-triggers" 2>&1) || true
-    log "Trigger evaluation complete"
+    # Evaluate triggers for proactive messaging (only if service is enabled)
+    local PROACTIVE_ENABLED
+    PROACTIVE_ENABLED=$(jq -r '.services.proactive // true' "$MIND_PATH/system/config.json" 2>/dev/null || echo "true")
+
+    if [ "$PROACTIVE_ENABLED" = "true" ]; then
+        log "Evaluating triggers for proactive engagement..."
+        "$MIND_PATH/system/bin/check-triggers" 2>&1 || true
+        log "Trigger evaluation complete"
+    else
+        log "Proactive messaging disabled, skipping trigger evaluation"
+    fi
+
+    if [ "$SHOULD_WAKE" = "true" ]; then
+        case "$WAKE_TYPE" in
+            full)
+                log "Dispatching to full wake cycle"
+                "$MIND_PATH/system/bin/wake" &
+                ;;
+            light)
+                log "Dispatching to light wake cycle"
+                "$MIND_PATH/system/bin/wake-light" --reason "$REASON" &
+                ;;
+            emergency)
+                log "Dispatching to emergency wake (using light with urgency)"
+                "$MIND_PATH/system/bin/wake-light" --reason "EMERGENCY: $REASON" &
+                ;;
+            *)
+                log "Unknown wake type: $WAKE_TYPE, using light"
+                "$MIND_PATH/system/bin/wake-light" --reason "$REASON" &
+                ;;
+        esac
+    else
+        log "No wake needed: $REASON"
+    fi
+}
+
+# Main loop (or single execution with --once)
+if [ "$RUN_ONCE" = "true" ]; then
+    do_wake_check
 else
-    log "Proactive messaging disabled, skipping trigger evaluation"
-fi
+    log "Starting wake-adaptive in KeepAlive mode (interval: ${SLEEP_INTERVAL}s)"
+    while $RUNNING; do
+        do_wake_check
 
-if [ "$SHOULD_WAKE" = "true" ]; then
-    case "$WAKE_TYPE" in
-        full)
-            log "Dispatching to full wake cycle"
-            exec "$MIND_PATH/system/bin/wake"
-            ;;
-        light)
-            log "Dispatching to light wake cycle"
-            exec "$MIND_PATH/system/bin/wake-light" --reason "$REASON"
-            ;;
-        emergency)
-            log "Dispatching to emergency wake (using light with urgency)"
-            exec "$MIND_PATH/system/bin/wake-light" --reason "EMERGENCY: $REASON"
-            ;;
-        *)
-            log "Unknown wake type: $WAKE_TYPE, using light"
-            exec "$MIND_PATH/system/bin/wake-light" --reason "$REASON"
-            ;;
-    esac
-else
-    log "No wake needed: $REASON"
+        # Sleep in small increments to respond quickly to signals
+        SLEPT=0
+        while $RUNNING && [ $SLEPT -lt $SLEEP_INTERVAL ]; do
+            sleep 10
+            SLEPT=$((SLEPT + 10))
+        done
+    done
+    log "Wake-adaptive exiting"
 fi

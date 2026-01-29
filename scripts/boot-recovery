@@ -1,0 +1,127 @@
+#!/bin/bash
+#
+# boot-recovery - Boot recovery notification and logging
+#
+# Runs once at login to detect if this is a recovery from power loss
+# or unexpected shutdown. If so, logs the event and sends a notification.
+#
+# Recovery detection: Compare current time vs last heartbeat timestamp.
+# If gap > 5 minutes, consider it a recovery event.
+#
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+LOG_FILE="${MIND_PATH}/system/logs/boot-recovery.log"
+HEARTBEAT_FILE="${MIND_PATH}/state/last-heartbeat.txt"
+COOLDOWN_FILE="${MIND_PATH}/state/last-boot-notification.txt"
+RECOVERY_THRESHOLD_SECONDS=300  # 5 minutes
+NOTIFICATION_COOLDOWN_SECONDS=300  # Don't notify more than once per 5 minutes
+
+mkdir -p "$(dirname "$LOG_FILE")"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
+
+log "Boot recovery check starting..."
+
+# Get current time as Unix timestamp
+CURRENT_TIME=$(date +%s)
+
+# Check if heartbeat file exists
+if [ ! -f "$HEARTBEAT_FILE" ]; then
+    log "No heartbeat file found - this may be first boot or fresh install"
+    # Write initial heartbeat so future runs have a reference
+    echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$HEARTBEAT_FILE"
+    exit 0
+fi
+
+# Read last heartbeat and convert to Unix timestamp
+LAST_HEARTBEAT=$(cat "$HEARTBEAT_FILE")
+# Handle both ISO format (with T and Z) and simple format
+if [[ "$LAST_HEARTBEAT" == *"T"* ]]; then
+    # ISO format: 2026-01-29T12:00:00Z
+    LAST_HEARTBEAT_TS=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$LAST_HEARTBEAT" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%S" "${LAST_HEARTBEAT%Z}" +%s 2>/dev/null || echo "0")
+else
+    LAST_HEARTBEAT_TS=$(date -j -f "%Y-%m-%d %H:%M:%S" "$LAST_HEARTBEAT" +%s 2>/dev/null || echo "0")
+fi
+
+if [ "$LAST_HEARTBEAT_TS" = "0" ]; then
+    log "Could not parse heartbeat timestamp: $LAST_HEARTBEAT"
+    exit 0
+fi
+
+# Calculate gap
+GAP=$((CURRENT_TIME - LAST_HEARTBEAT_TS))
+log "Time since last heartbeat: ${GAP}s (threshold: ${RECOVERY_THRESHOLD_SECONDS}s)"
+
+# Check if this is a recovery event
+if [ $GAP -gt $RECOVERY_THRESHOLD_SECONDS ]; then
+    log "RECOVERY DETECTED: System was down for ${GAP} seconds"
+
+    # Check cooldown to prevent notification spam on rapid reboots
+    SHOULD_NOTIFY=true
+    if [ -f "$COOLDOWN_FILE" ]; then
+        LAST_NOTIFICATION=$(cat "$COOLDOWN_FILE")
+        LAST_NOTIFICATION_TS=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$LAST_NOTIFICATION" +%s 2>/dev/null || echo "0")
+        NOTIFICATION_GAP=$((CURRENT_TIME - LAST_NOTIFICATION_TS))
+        if [ $NOTIFICATION_GAP -lt $NOTIFICATION_COOLDOWN_SECONDS ]; then
+            log "Skipping notification - cooldown active (${NOTIFICATION_GAP}s since last)"
+            SHOULD_NOTIFY=false
+        fi
+    fi
+
+    # Log to today's episode
+    EPISODE_DIR="${MIND_PATH}/memory/episodes"
+    TODAY=$(date +%Y-%m-%d)
+    EPISODE_FILE="${EPISODE_DIR}/${TODAY}.md"
+    mkdir -p "$EPISODE_DIR"
+
+    # Calculate downtime in human-readable format
+    if [ $GAP -ge 3600 ]; then
+        DOWNTIME="$(($GAP / 3600))h $(($GAP % 3600 / 60))m"
+    elif [ $GAP -ge 60 ]; then
+        DOWNTIME="$(($GAP / 60))m"
+    else
+        DOWNTIME="${GAP}s"
+    fi
+
+    TIMESTAMP=$(date '+%H:%M')
+    {
+        echo ""
+        echo "## $TIMESTAMP [System Recovery]"
+        echo ""
+        echo "System recovered after ${DOWNTIME} downtime."
+        echo "- Last heartbeat: $LAST_HEARTBEAT"
+        echo "- Recovery time: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo ""
+    } >> "$EPISODE_FILE"
+
+    log "Logged recovery to episode: $EPISODE_FILE"
+
+    # Send notification if not in cooldown
+    if [ "$SHOULD_NOTIFY" = "true" ]; then
+        log "Sending recovery notification..."
+
+        # Update cooldown timestamp
+        echo "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$COOLDOWN_FILE"
+
+        # Try to send iMessage notification
+        if [ -x "$MIND_PATH/system/bin/send-message" ]; then
+            "$MIND_PATH/system/bin/send-message" "System recovered - I'm back online after ${DOWNTIME} downtime." 2>&1 || log "Failed to send notification via send-message"
+        else
+            log "send-message not available, skipping notification"
+        fi
+    fi
+else
+    log "Normal boot - no recovery needed (gap: ${GAP}s)"
+fi
+
+# Run startup health check if available
+if [ -x "$MIND_PATH/system/bin/startup-health-check" ]; then
+    log "Running startup health check..."
+    "$MIND_PATH/system/bin/startup-health-check" 2>&1 || log "Health check reported issues"
+fi
+
+log "Boot recovery check complete"

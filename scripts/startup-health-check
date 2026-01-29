@@ -1,0 +1,153 @@
+#!/bin/bash
+#
+# startup-health-check - Verify system health after boot
+#
+# Checks that all critical services are running and healthy.
+# Called by boot-recovery after detecting a recovery event.
+#
+# Exit codes:
+#   0 - All checks passed
+#   1 - One or more checks failed (details in log)
+#
+
+set -e
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+LOG_FILE="${MIND_PATH}/system/logs/startup-health.log"
+CHECK_TIMEOUT=30  # seconds per check
+
+mkdir -p "$(dirname "$LOG_FILE")"
+
+# Truncate log on each run (keep only current boot's results)
+: > "$LOG_FILE"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
+
+FAILURES=0
+WARNINGS=0
+
+check_pass() {
+    log "[PASS] $1"
+}
+
+check_fail() {
+    log "[FAIL] $1"
+    FAILURES=$((FAILURES + 1))
+}
+
+check_warn() {
+    log "[WARN] $1"
+    WARNINGS=$((WARNINGS + 1))
+}
+
+log "=== Startup Health Check ==="
+log "Starting health checks..."
+
+# 1. Check Samara.app process
+if pgrep -x "Samara" > /dev/null; then
+    check_pass "Samara.app is running"
+else
+    check_fail "Samara.app is not running"
+fi
+
+# 2. Check memory-bridge (port 8765)
+if curl -s --max-time $CHECK_TIMEOUT "http://localhost:8765/health" > /dev/null 2>&1; then
+    check_pass "memory-bridge responding on port 8765"
+else
+    # Try just connecting to the port
+    if nc -z localhost 8765 2>/dev/null; then
+        check_warn "memory-bridge port open but health endpoint not responding"
+    else
+        check_fail "memory-bridge not responding on port 8765"
+    fi
+fi
+
+# 3. Check webhook-receiver (port 8082)
+if curl -s --max-time $CHECK_TIMEOUT "http://localhost:8082/health" > /dev/null 2>&1; then
+    check_pass "webhook-receiver responding on port 8082"
+else
+    if nc -z localhost 8082 2>/dev/null; then
+        check_warn "webhook-receiver port open but health endpoint not responding"
+    else
+        check_fail "webhook-receiver not responding on port 8082"
+    fi
+fi
+
+# 4. Check cloudflared tunnel
+if pgrep -f "cloudflared.*tunnel" > /dev/null; then
+    check_pass "cloudflared tunnel process running"
+else
+    check_warn "cloudflared tunnel not running (external access may be unavailable)"
+fi
+
+# 5. Check ollama (local model fallback)
+if pgrep -x "ollama" > /dev/null || curl -s --max-time 5 "http://localhost:11434/api/tags" > /dev/null 2>&1; then
+    check_pass "ollama available for local model fallback"
+else
+    check_warn "ollama not running (local model fallback unavailable)"
+fi
+
+# 6. SQLite integrity check on memory.db
+MEMORY_DB="${MIND_PATH}/memory/memory.db"
+if [ -f "$MEMORY_DB" ]; then
+    INTEGRITY=$(sqlite3 "$MEMORY_DB" "PRAGMA integrity_check;" 2>&1 || echo "error")
+    if [ "$INTEGRITY" = "ok" ]; then
+        check_pass "memory.db integrity check passed"
+    else
+        check_fail "memory.db integrity check failed: $INTEGRITY"
+    fi
+else
+    check_warn "memory.db not found at $MEMORY_DB"
+fi
+
+# 7. Check for stale locks (older than 30 min)
+LOCK_DIR="${MIND_PATH}/state/locks"
+if [ -d "$LOCK_DIR" ]; then
+    STALE_LOCKS=$(find "$LOCK_DIR" -type f -mmin +30 2>/dev/null || true)
+    if [ -n "$STALE_LOCKS" ]; then
+        check_warn "Found stale lock files (older than 30 min):"
+        echo "$STALE_LOCKS" | while read -r lock; do
+            log "  - $lock"
+        done
+        # Auto-cleanup stale locks
+        find "$LOCK_DIR" -type f -mmin +30 -delete 2>/dev/null || true
+        log "  (auto-cleaned stale locks)"
+    else
+        check_pass "No stale lock files found"
+    fi
+else
+    check_pass "Lock directory clean (doesn't exist)"
+fi
+
+# 8. Check wake-adaptive process
+if pgrep -f "wake-adaptive" > /dev/null; then
+    check_pass "wake-adaptive scheduler is running"
+else
+    check_warn "wake-adaptive not running (will be started by launchd)"
+fi
+
+# 9. Check location-receiver
+if pgrep -f "location-receiver" > /dev/null; then
+    check_pass "location-receiver is running"
+else
+    check_warn "location-receiver not running"
+fi
+
+# Summary
+log ""
+log "=== Health Check Summary ==="
+log "Failures: $FAILURES"
+log "Warnings: $WARNINGS"
+
+if [ $FAILURES -gt 0 ]; then
+    log "Status: UNHEALTHY - $FAILURES critical failures detected"
+    exit 1
+elif [ $WARNINGS -gt 0 ]; then
+    log "Status: DEGRADED - $WARNINGS warnings detected"
+    exit 0
+else
+    log "Status: HEALTHY - All checks passed"
+    exit 0
+fi
