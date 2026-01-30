@@ -1,43 +1,29 @@
 import Foundation
 import EventKit
 import Contacts
-import CoreLocation
-import Photos
-import AVFoundation
-import CoreBluetooth
 
 /// Requests system permissions on daemon startup
 /// No GUI - macOS shows native permission dialogs automatically
+///
+/// Removed permissions (and why):
+/// - Location: Uses file from Overland (LocationFileWatcher), not CoreLocation
+/// - Camera: On-demand request in CameraCapture.swift (lines 42-55)
+/// - Microphone: Not used in Samara.app
+/// - Photos: Not used in Samara.app
+/// - Bluetooth: Not used in Samara.app
 final class PermissionRequester: NSObject {
-
-    // Keep strong references to managers that need to persist
-    private static var locationManager: CLLocationManager?
-    private static var bluetoothManager: CBCentralManager?
-    private static var permissionRequester: PermissionRequester?
 
     /// Request all permissions. Call once at startup.
     static func requestAllPermissions() {
         log("Checking and requesting permissions...", level: .info, component: "Permissions")
 
-        // Keep a strong reference to self for delegate callbacks
-        permissionRequester = PermissionRequester()
-
-        // PIM (Personal Information Management)
+        // PIM (Personal Information Management) - these have no on-demand alternative
         requestCalendarPermission()
         requestRemindersPermission()
         requestContactsPermission()
 
-        // Location
-        requestLocationPermission()
-
-        // Media
-        requestPhotosPermission()
+        // Music (deferred - will be requested on first library access)
         requestMusicPermission()
-        requestCameraPermission()
-        requestMicrophonePermission()
-
-        // Devices
-        requestBluetoothPermission()
 
         // HomeKit requires app bundle with entitlements, skipped for daemon
         log("HomeKit: requires app entitlements, must be granted manually", level: .info, component: "Permissions")
@@ -47,6 +33,9 @@ final class PermissionRequester: NSObject {
 
         // Local network permission is triggered by actual network activity
         log("Local Network: will be triggered on first network discovery", level: .info, component: "Permissions")
+
+        // Camera permission is requested on-demand in CameraCapture.swift
+        log("Camera: will be requested on-demand when capture is needed", level: .info, component: "Permissions")
     }
 
     // MARK: - Calendar
@@ -150,48 +139,6 @@ final class PermissionRequester: NSObject {
         }
     }
 
-    // MARK: - Location
-
-    private static func requestLocationPermission() {
-        let status = CLLocationManager.authorizationStatus()
-
-        switch status {
-        case .notDetermined:
-            log("Location: not determined, requesting...", level: .info, component: "Permissions")
-            locationManager = CLLocationManager()
-            locationManager?.delegate = permissionRequester
-            locationManager?.requestAlwaysAuthorization()
-        case .authorized, .authorizedAlways:
-            log("Location: already authorized", level: .info, component: "Permissions")
-        case .denied, .restricted:
-            log("Location: denied/restricted - user must grant in System Settings", level: .warn, component: "Permissions")
-        @unknown default:
-            log("Location: unknown status", level: .warn, component: "Permissions")
-        }
-    }
-
-    // MARK: - Photos
-
-    private static func requestPhotosPermission() {
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-
-        switch status {
-        case .notDetermined:
-            log("Photos: not determined, requesting...", level: .info, component: "Permissions")
-            PHPhotoLibrary.requestAuthorization(for: .readWrite) { newStatus in
-                log("Photos: \(newStatus == .authorized ? "granted" : "denied/limited")", level: .info, component: "Permissions")
-            }
-        case .authorized:
-            log("Photos: already authorized", level: .info, component: "Permissions")
-        case .limited:
-            log("Photos: limited access", level: .info, component: "Permissions")
-        case .denied, .restricted:
-            log("Photos: denied/restricted - user must grant in System Settings", level: .warn, component: "Permissions")
-        @unknown default:
-            log("Photos: unknown status", level: .warn, component: "Permissions")
-        }
-    }
-
     // MARK: - Apple Music
 
     private static func requestMusicPermission() {
@@ -199,94 +146,5 @@ final class PermissionRequester: NSObject {
         // On macOS, this is typically granted via the usage description
         // The actual permission prompt appears when first accessing the library
         log("Music: will be requested on first library access", level: .info, component: "Permissions")
-    }
-
-    // MARK: - Camera
-
-    private static func requestCameraPermission() {
-        let status = AVCaptureDevice.authorizationStatus(for: .video)
-
-        switch status {
-        case .notDetermined:
-            log("Camera: not determined, requesting...", level: .info, component: "Permissions")
-            AVCaptureDevice.requestAccess(for: .video) { granted in
-                log("Camera: \(granted ? "granted" : "denied")", level: .info, component: "Permissions")
-            }
-        case .authorized:
-            log("Camera: already authorized", level: .info, component: "Permissions")
-        case .denied, .restricted:
-            log("Camera: denied/restricted - user must grant in System Settings", level: .warn, component: "Permissions")
-        @unknown default:
-            log("Camera: unknown status", level: .warn, component: "Permissions")
-        }
-    }
-
-    // MARK: - Microphone
-
-    private static func requestMicrophonePermission() {
-        let status = AVCaptureDevice.authorizationStatus(for: .audio)
-
-        switch status {
-        case .notDetermined:
-            log("Microphone: not determined, requesting...", level: .info, component: "Permissions")
-            AVCaptureDevice.requestAccess(for: .audio) { granted in
-                log("Microphone: \(granted ? "granted" : "denied")", level: .info, component: "Permissions")
-            }
-        case .authorized:
-            log("Microphone: already authorized", level: .info, component: "Permissions")
-        case .denied, .restricted:
-            log("Microphone: denied/restricted - user must grant in System Settings", level: .warn, component: "Permissions")
-        @unknown default:
-            log("Microphone: unknown status", level: .warn, component: "Permissions")
-        }
-    }
-
-    // MARK: - Bluetooth
-
-    private static func requestBluetoothPermission() {
-        log("Bluetooth: initializing...", level: .info, component: "Permissions")
-        // CBCentralManager prompts when created
-        bluetoothManager = CBCentralManager(delegate: permissionRequester, queue: nil)
-    }
-}
-
-// MARK: - CLLocationManagerDelegate
-
-extension PermissionRequester: CLLocationManagerDelegate {
-    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        let status = manager.authorizationStatus
-        switch status {
-        case .authorized, .authorizedAlways:
-            log("Location: granted", level: .info, component: "Permissions")
-        case .denied, .restricted:
-            log("Location: denied", level: .warn, component: "Permissions")
-        case .notDetermined:
-            break // Still waiting
-        @unknown default:
-            log("Location: unknown status change", level: .warn, component: "Permissions")
-        }
-    }
-}
-
-// MARK: - CBCentralManagerDelegate
-
-extension PermissionRequester: CBCentralManagerDelegate {
-    func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        switch central.state {
-        case .poweredOn:
-            log("Bluetooth: powered on and authorized", level: .info, component: "Permissions")
-        case .poweredOff:
-            log("Bluetooth: powered off", level: .info, component: "Permissions")
-        case .unauthorized:
-            log("Bluetooth: unauthorized - user must grant in System Settings", level: .warn, component: "Permissions")
-        case .unsupported:
-            log("Bluetooth: unsupported on this device", level: .info, component: "Permissions")
-        case .resetting:
-            log("Bluetooth: resetting", level: .info, component: "Permissions")
-        case .unknown:
-            log("Bluetooth: unknown state", level: .debug, component: "Permissions")
-        @unknown default:
-            log("Bluetooth: unknown state", level: .debug, component: "Permissions")
-        }
     }
 }

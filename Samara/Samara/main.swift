@@ -343,48 +343,62 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
                 targetHandles: Set([targetPhone, targetEmail]),
                 chatInfo: chatInfo
             )
-            log("[Main] Got response: \(result.response.prefix(100))...")
+            log("[Main] Got response: \(result.response.prefix(100))..., shouldRespond=\(result.shouldRespond)")
 
-            // Send response to appropriate destination
-            // All messages in batch are from the same chat, so check the first one
-            if let firstMessage = messages.first {
-                log("[Main] Routing decision: chatIdentifier=\(firstMessage.chatIdentifier), isGroupChat=\(firstMessage.isGroupChat), sender=\(firstMessage.handleId)")
-
-                // Sanity check: group chat identifiers are 32-char hex, but isGroupChat should be true
-                let looksLikeGroupChat = firstMessage.chatIdentifier.count == 32 &&
-                    firstMessage.chatIdentifier.allSatisfy { $0.isHexDigit }
-                if looksLikeGroupChat && !firstMessage.isGroupChat {
-                    log("[Main] WARNING: chatIdentifier looks like group chat but isGroupChat=false! This is a bug.")
-                }
-
-                // Route through MessageBus (skip episode log - we'll call logExchange below for full context)
-                try messageBus.send(result.response, type: .conversationResponse, chatIdentifier: firstMessage.chatIdentifier, isGroupChat: firstMessage.isGroupChat, skipEpisodeLog: true)
-                if firstMessage.isGroupChat {
-                    log("[Main] Response sent to group chat \(firstMessage.chatIdentifier)")
-                } else {
-                    log("[Main] Response sent to \(collaboratorName) directly")
-                }
-            } else {
-                log("[Main] ERROR: No messages in batch!")
-            }
-
-            // Get the ROWID of the response we just sent (for read tracking)
-            // Use chat-specific lookup to avoid race condition with concurrent sessions
-            let responseRowId: Int64?
-            if let firstMessage = messages.first {
-                responseRowId = store.getLastOutgoingMessageRowId(forChat: firstMessage.chatIdentifier)
-            } else {
-                responseRowId = store.getLastOutgoingMessageRowId()  // Fallback (shouldn't happen)
-            }
-
-            // Update session state with new session ID and response ROWID
-            if let sessionId = result.sessionId, let firstMessage = messages.first {
-                sessionManager.recordResponse(sessionId: sessionId, responseRowId: responseRowId, forChat: firstMessage.chatIdentifier)
-            }
-
-            // Log the exchange to today's episode
             let combinedMessage = messages.map { $0.fullDescription }.joined(separator: "\n---\n")
-            episodeLogger.logExchange(from: collaboratorName, message: combinedMessage, response: result.response)
+
+            if result.shouldRespond && !result.response.isEmpty {
+                // Send response to appropriate destination
+                // All messages in batch are from the same chat, so check the first one
+                if let firstMessage = messages.first {
+                    log("[Main] Routing decision: chatIdentifier=\(firstMessage.chatIdentifier), isGroupChat=\(firstMessage.isGroupChat), sender=\(firstMessage.handleId)")
+
+                    // Sanity check: group chat identifiers are 32-char hex, but isGroupChat should be true
+                    let looksLikeGroupChat = firstMessage.chatIdentifier.count == 32 &&
+                        firstMessage.chatIdentifier.allSatisfy { $0.isHexDigit }
+                    if looksLikeGroupChat && !firstMessage.isGroupChat {
+                        log("[Main] WARNING: chatIdentifier looks like group chat but isGroupChat=false! This is a bug.")
+                    }
+
+                    // Route through MessageBus (skip episode log - we'll call logExchange below for full context)
+                    try messageBus.send(result.response, type: .conversationResponse, chatIdentifier: firstMessage.chatIdentifier, isGroupChat: firstMessage.isGroupChat, skipEpisodeLog: true)
+                    if firstMessage.isGroupChat {
+                        log("[Main] Response sent to group chat \(firstMessage.chatIdentifier)")
+                    } else {
+                        log("[Main] Response sent to \(collaboratorName) directly")
+                    }
+                } else {
+                    log("[Main] ERROR: No messages in batch!")
+                }
+
+                // Get the ROWID of the response we just sent (for read tracking)
+                // Use chat-specific lookup to avoid race condition with concurrent sessions
+                let responseRowId: Int64?
+                if let firstMessage = messages.first {
+                    responseRowId = store.getLastOutgoingMessageRowId(forChat: firstMessage.chatIdentifier)
+                } else {
+                    responseRowId = store.getLastOutgoingMessageRowId()  // Fallback (shouldn't happen)
+                }
+
+                // Update session state with new session ID and response ROWID
+                if let sessionId = result.sessionId, let firstMessage = messages.first {
+                    sessionManager.recordResponse(sessionId: sessionId, responseRowId: responseRowId, forChat: firstMessage.chatIdentifier)
+                }
+
+                // Log the exchange to today's episode
+                episodeLogger.logExchange(from: collaboratorName, message: combinedMessage, response: result.response)
+            } else {
+                // Silent acknowledgment - log as observation, don't send message
+                log("[Main] Silent response - acknowledged without sending")
+                episodeLogger.logNote(
+                    "Silently acknowledged: \(combinedMessage.prefix(200))...",
+                    source: "reaction"
+                )
+                // Still record session for continuity
+                if let sessionId = result.sessionId, let firstMessage = messages.first {
+                    sessionManager.recordResponse(sessionId: sessionId, responseRowId: nil, forChat: firstMessage.chatIdentifier)
+                }
+            }
 
         } catch {
             log("[Main] Error processing batch: \(error)")

@@ -14,9 +14,14 @@ final class MessageStoreFixture {
     let reactionRowId: Int64 = 12
     let attachmentMessageRowId: Int64 = 13
     let outgoingMessageRowId: Int64 = 14
+    let replyMessageRowId: Int64 = 15
+    let replyToAttachmentRowId: Int64 = 16
     let groupMessageGuid = "GUID-GROUP-1"
     let directMessageGuid = "GUID-DIRECT-1"
     let reactionGuid = "GUID-REACTION-1"
+    let replyGuid = "GUID-REPLY-1"
+    let attachmentMessageGuid = "GUID-ATTACH-1"
+    let replyToAttachmentGuid = "GUID-REPLY-ATTACH-1"
     let attachmentFilePath = "~/Pictures/test.png"
     let attachmentTransferName = "photo.png"
 
@@ -25,6 +30,8 @@ final class MessageStoreFixture {
     let reactionDate = Date(timeIntervalSinceReferenceDate: 44)
     let attachmentDate = Date(timeIntervalSinceReferenceDate: 45)
     let outgoingReadDate = Date(timeIntervalSinceReferenceDate: 46)
+    let replyDate = Date(timeIntervalSinceReferenceDate: 47)
+    let replyToAttachmentDate = Date(timeIntervalSinceReferenceDate: 48)
 
     private let tempDir: URL
     private var db: OpaquePointer?
@@ -76,7 +83,9 @@ final class MessageStoreFixture {
                 cache_has_attachments INTEGER,
                 guid TEXT,
                 is_read INTEGER,
-                date_read INTEGER
+                date_read INTEGER,
+                thread_originator_guid TEXT,
+                attributedBody BLOB
             );
             CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
             CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER);
@@ -91,6 +100,8 @@ final class MessageStoreFixture {
         let reactionTimestamp = appleTimestamp(reactionDate)
         let attachmentTimestamp = appleTimestamp(attachmentDate)
         let outgoingTimestamp = appleTimestamp(outgoingReadDate)
+        let replyTimestamp = appleTimestamp(replyDate)
+        let replyToAttachmentTimestamp = appleTimestamp(replyToAttachmentDate)
 
         try exec("""
             INSERT INTO handle (ROWID, id) VALUES
@@ -106,19 +117,23 @@ final class MessageStoreFixture {
                 (\(groupChatId), 1),
                 (\(groupChatId), 2);
 
-            INSERT INTO message (ROWID, text, date, is_from_me, handle_id, associated_message_type, associated_message_guid, cache_has_attachments, guid, is_read, date_read) VALUES
-                (\(directMessageRowId), 'Hello from E', \(directTimestamp), 0, 1, 0, NULL, 0, '\(directMessageGuid)', 0, NULL),
-                (\(groupMessageRowId), 'Group hello', \(groupTimestamp), 0, 2, 0, NULL, 0, '\(groupMessageGuid)', 0, NULL),
-                (\(reactionRowId), NULL, \(reactionTimestamp), 0, 1, 2001, 'p:0/\(groupMessageGuid)', 0, '\(reactionGuid)', 0, NULL),
-                (\(attachmentMessageRowId), NULL, \(attachmentTimestamp), 0, 1, 0, NULL, 1, 'GUID-ATTACH-1', 0, NULL),
-                (\(outgoingMessageRowId), 'Outbound reply', \(outgoingTimestamp), 1, 1, 0, NULL, 0, 'GUID-OUT-1', 1, \(outgoingTimestamp));
+            INSERT INTO message (ROWID, text, date, is_from_me, handle_id, associated_message_type, associated_message_guid, cache_has_attachments, guid, is_read, date_read, thread_originator_guid) VALUES
+                (\(directMessageRowId), 'Hello from E', \(directTimestamp), 0, 1, 0, NULL, 0, '\(directMessageGuid)', 0, NULL, NULL),
+                (\(groupMessageRowId), 'Group hello', \(groupTimestamp), 0, 2, 0, NULL, 0, '\(groupMessageGuid)', 0, NULL, NULL),
+                (\(reactionRowId), NULL, \(reactionTimestamp), 0, 1, 2001, 'p:0/\(groupMessageGuid)', 0, '\(reactionGuid)', 0, NULL, NULL),
+                (\(attachmentMessageRowId), NULL, \(attachmentTimestamp), 0, 1, 0, NULL, 1, '\(attachmentMessageGuid)', 0, NULL, NULL),
+                (\(outgoingMessageRowId), 'Outbound reply', \(outgoingTimestamp), 1, 1, 0, NULL, 0, 'GUID-OUT-1', 1, \(outgoingTimestamp), NULL),
+                (\(replyMessageRowId), 'This is my reply', \(replyTimestamp), 0, 1, 0, NULL, 0, '\(replyGuid)', 0, NULL, '\(directMessageGuid)'),
+                (\(replyToAttachmentRowId), 'Nice photo!', \(replyToAttachmentTimestamp), 0, 1, 0, NULL, 0, '\(replyToAttachmentGuid)', 0, NULL, '\(attachmentMessageGuid)');
 
             INSERT INTO chat_message_join (chat_id, message_id) VALUES
                 (\(directChatId), \(directMessageRowId)),
                 (\(groupChatId), \(groupMessageRowId)),
                 (\(groupChatId), \(reactionRowId)),
                 (\(directChatId), \(attachmentMessageRowId)),
-                (\(directChatId), \(outgoingMessageRowId));
+                (\(directChatId), \(outgoingMessageRowId)),
+                (\(directChatId), \(replyMessageRowId)),
+                (\(directChatId), \(replyToAttachmentRowId));
 
             INSERT INTO attachment (ROWID, filename, mime_type, transfer_name, is_sticker) VALUES
                 (1, '\(attachmentFilePath)', 'image/png', '\(attachmentTransferName)', 0);

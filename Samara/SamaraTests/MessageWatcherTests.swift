@@ -26,11 +26,13 @@ final class MessageWatcherTests: SamaraTestCase {
             fixture.directMessageRowId,
             fixture.groupMessageRowId,
             fixture.reactionRowId,
-            fixture.attachmentMessageRowId
+            fixture.attachmentMessageRowId,
+            fixture.replyMessageRowId,
+            fixture.replyToAttachmentRowId
         ])
 
         watcher.checkNow()
-        XCTAssertEqual(receivedRowIds.count, 4)
+        XCTAssertEqual(receivedRowIds.count, 6)
     }
 
     func testConcurrentCheckNowDoesNotDuplicate() throws {

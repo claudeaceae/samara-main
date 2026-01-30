@@ -296,16 +296,20 @@ install_runtime_claude_config() {
         log_success "Runtime .claude symlinked: $claude_dst → $claude_src"
     fi
 
-    # Symlink CLAUDE.md
+    # CLAUDE.md: Only symlink for NEW organisms.
+    # Existing organisms may have a standalone organism-native file — don't overwrite.
+    # (CLAUDE.md Scope Principle: repo = dev/infra, runtime = identity/selfhood)
     local claudemd_src="$SCRIPT_DIR/CLAUDE.md"
     local claudemd_dst="$TARGET_DIR/CLAUDE.md"
 
-    if [ -f "$claudemd_src" ]; then
-        # Remove existing if present
-        if [ -L "$claudemd_dst" ] || [ -f "$claudemd_dst" ]; then
+    if [ -f "$claudemd_dst" ] && [ ! -L "$claudemd_dst" ]; then
+        # Standalone file exists — this is an existing organism, preserve it
+        log_info "Runtime CLAUDE.md exists as standalone file (organism-native) — preserving"
+    elif [ -f "$claudemd_src" ]; then
+        # Fresh install or symlinked — create/update symlink
+        if [ -L "$claudemd_dst" ]; then
             rm -f "$claudemd_dst"
         fi
-
         ln -s "$claudemd_src" "$claudemd_dst"
         log_success "Runtime CLAUDE.md symlinked: $claudemd_dst → $claudemd_src"
     fi

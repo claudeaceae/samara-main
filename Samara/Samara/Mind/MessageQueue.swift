@@ -16,6 +16,7 @@ struct SerializableMessage: Codable {
     let attachmentIsSticker: [Bool]
     let reactionTypeRaw: Int?
     let reactedToText: String?
+    let replyToText: String?
 
     init(from message: Message) {
         self.rowId = message.rowId
@@ -32,6 +33,7 @@ struct SerializableMessage: Codable {
         self.attachmentIsSticker = message.attachments.map { $0.isSticker }
         self.reactionTypeRaw = message.reactionType?.rawValue
         self.reactedToText = message.reactedToText
+        self.replyToText = message.replyToText
     }
 
     func toMessage() -> Message {
@@ -57,7 +59,8 @@ struct SerializableMessage: Codable {
             chatIdentifier: chatIdentifier,
             attachments: attachments,
             reactionType: reactionTypeRaw.flatMap { ReactionType(rawValue: $0) },
-            reactedToText: reactedToText
+            reactedToText: reactedToText,
+            replyToText: replyToText
         )
     }
 }

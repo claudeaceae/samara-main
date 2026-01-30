@@ -34,7 +34,8 @@ final class QueueProcessorTests: SamaraTestCase {
             chatIdentifier: chatId,
             attachments: [],
             reactionType: nil,
-            reactedToText: nil
+            reactedToText: nil,
+            replyToText: nil
         )
         MessageQueue.enqueue(message)
 

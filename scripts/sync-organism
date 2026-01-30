@@ -130,19 +130,19 @@ else
     ((DRIFT_COUNT++))
 fi
 
-# Check runtime CLAUDE.md symlink
-CLAUDEMD_SRC="$REPO_DIR/CLAUDE.md"
+# Note: Runtime CLAUDE.md is intentionally NOT symlinked.
+# The runtime has its own organism-native CLAUDE.md focused on identity/selfhood,
+# while the repo CLAUDE.md is for development/infrastructure.
+# See: memory/episodes/2026-01-25.md (CLAUDE.md Scope Principle decision)
 CLAUDEMD_DST="$RUNTIME_DIR/CLAUDE.md"
-if [ -L "$CLAUDEMD_DST" ]; then
-    target=$(readlink "$CLAUDEMD_DST")
-    if [ "$target" = "$CLAUDEMD_SRC" ]; then
-        log_ok "Runtime CLAUDE.md symlinked correctly"
+if [ -f "$CLAUDEMD_DST" ]; then
+    if [ -L "$CLAUDEMD_DST" ]; then
+        log_warn "Runtime CLAUDE.md is symlinked (should be standalone organism-native file)"
     else
-        log_warn "Runtime CLAUDE.md points to wrong target: $target (expected $CLAUDEMD_SRC)"
-        ((DRIFT_COUNT++))
+        log_ok "Runtime CLAUDE.md is standalone (organism-native)"
     fi
 else
-    log_error "Runtime CLAUDE.md not symlinked: $CLAUDEMD_DST"
+    log_error "Runtime CLAUDE.md missing: $CLAUDEMD_DST"
     ((DRIFT_COUNT++))
 fi
 echo
@@ -233,6 +233,23 @@ if [ -d "$SAMARA_SRC" ]; then
 fi
 echo
 
+# 5. Check skill index freshness
+echo "## Skill Index Freshness"
+SKILLS_REF="$REPO_DIR/docs/skills-reference.md"
+if [ -f "$SKILLS_REF" ]; then
+    NEWEST_SKILL=$(find "$REPO_DIR/.claude/skills" -name "SKILL.md" -newer "$SKILLS_REF" 2>/dev/null | head -1)
+    if [ -n "$NEWEST_SKILL" ]; then
+        log_warn "Skill index may be stale - SKILL.md files modified after skills-reference.md"
+        log_warn "  Newest: $(basename $(dirname "$NEWEST_SKILL"))/SKILL.md"
+        log_warn "  Regenerate: scripts/generate-skills-manifest --markdown docs/skills-reference.md"
+    else
+        log_ok "Skill index is up to date"
+    fi
+else
+    log_warn "skills-reference.md not found at $SKILLS_REF"
+fi
+echo
+
 # Summary
 echo "========================================"
 echo "  SUMMARY"
@@ -289,12 +306,13 @@ if [ "$MODE" = "--fix" ]; then
         log_ok "Created symlink: runtime .claude"
     fi
 
-    # Fix runtime CLAUDE.md symlink
-    if [ ! -L "$CLAUDEMD_DST" ] || [ "$(readlink "$CLAUDEMD_DST")" != "$CLAUDEMD_SRC" ]; then
-        echo "Fixing runtime CLAUDE.md symlink..."
-        rm -f "$CLAUDEMD_DST"
-        ln -s "$CLAUDEMD_SRC" "$CLAUDEMD_DST"
-        log_ok "Created symlink: runtime CLAUDE.md"
+    # Note: Runtime CLAUDE.md should be standalone (organism-native), not symlinked.
+    # Only warn if it's currently a symlink (wrong state).
+    if [ -L "$CLAUDEMD_DST" ]; then
+        log_warn "Runtime CLAUDE.md is symlinked but should be standalone."
+        log_warn "To fix: remove symlink and restore from archive:"
+        log_warn "  rm ~/.claude-mind/CLAUDE.md"
+        log_warn "  cp ~/.claude-mind/memory/archive/claude-md/2026-01-26.md ~/.claude-mind/CLAUDE.md"
     fi
 
     # For differing scripts, show diff and ask

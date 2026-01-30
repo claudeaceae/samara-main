@@ -13,7 +13,8 @@ final class ContextRouterTests: SamaraTestCase {
             chatIdentifier: "+15555550123",
             attachments: [],
             reactionType: nil,
-            reactedToText: nil
+            reactedToText: nil,
+            replyToText: nil
         )
     }
 

@@ -49,6 +49,14 @@ struct FallbackChainResult {
     let response: String
     let tier: ModelTier
     let sessionId: String?
+    let shouldRespond: Bool
+
+    init(response: String, tier: ModelTier, sessionId: String?, shouldRespond: Bool = true) {
+        self.response = response
+        self.tier = tier
+        self.sessionId = sessionId
+        self.shouldRespond = shouldRespond
+    }
 
     /// Whether this was handled by a local model (no Claude API used)
     var usedLocalModel: Bool {
@@ -225,11 +233,12 @@ final class ModelFallbackChain {
                 case .claudePrimary, .claudeFallback:
                     log("Trying tier: \(currentTier.description)", level: .info, component: "FallbackChain")
                     let result = try await primaryInvoker(prompt, sessionId)
-                    log("Success from tier: \(currentTier.description)", level: .info, component: "FallbackChain")
+                    log("Success from tier: \(currentTier.description), shouldRespond=\(result.shouldRespond)", level: .info, component: "FallbackChain")
                     return FallbackChainResult(
                         response: result.response,
                         tier: currentTier,
-                        sessionId: result.sessionId
+                        sessionId: result.sessionId,
+                        shouldRespond: result.shouldRespond
                     )
 
                 case .localOllama:

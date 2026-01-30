@@ -54,7 +54,8 @@ final class ContextSelectorTests: SamaraTestCase {
             chatIdentifier: "chat-1",
             attachments: [],
             reactionType: nil,
-            reactedToText: nil
+            reactedToText: nil,
+            replyToText: nil
         )
 
         let context = selector.context(for: [message], isCollaboratorChat: true)

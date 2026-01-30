@@ -43,7 +43,8 @@ final class ContextSelector {
             chatIdentifier: chatValue,
             attachments: [],
             reactionType: nil,
-            reactedToText: nil
+            reactedToText: nil,
+            replyToText: nil
         )
         return context(for: [syntheticMessage], isCollaboratorChat: isCollaboratorChat)
     }

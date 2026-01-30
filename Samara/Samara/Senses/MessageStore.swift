@@ -76,10 +76,16 @@ struct Message {
     let attachments: [Attachment]
     let reactionType: ReactionType?
     let reactedToText: String?    // Preview of what was reacted to
+    let replyToText: String?      // Text of message being replied to (inline reply)
 
     /// Returns true if this is a reaction rather than a regular message
     var isReaction: Bool {
         return reactionType != nil
+    }
+
+    /// Returns true if this is an inline reply to another message
+    var isReply: Bool {
+        return replyToText != nil
     }
 
     /// Returns true if this message has attachments
@@ -104,6 +110,12 @@ struct Message {
                 reactionDesc += " to: \"\(truncated)\""
             }
             return reactionDesc
+        }
+
+        // Handle inline reply context
+        if let replyText = replyToText, !replyText.isEmpty {
+            let truncated = replyText.count > 100 ? String(replyText.prefix(100)) + "..." : replyText
+            parts.append("[Replying to: \"\(truncated)\"]")
         }
 
         // Handle text
@@ -300,7 +312,8 @@ final class MessageStore {
                 CASE WHEN (SELECT COUNT(*) FROM chat_handle_join WHERE chat_id = c.ROWID) > 1 THEN 1 ELSE 0 END as is_group,
                 m.associated_message_type,
                 m.associated_message_guid,
-                m.cache_has_attachments
+                m.cache_has_attachments,
+                m.thread_originator_guid
             FROM message m
             JOIN handle sender_handle ON m.handle_id = sender_handle.ROWID
             JOIN chat_message_join cmj ON m.ROWID = cmj.message_id
@@ -385,6 +398,15 @@ final class MessageStore {
                 attachments = (try? fetchAttachments(forMessageId: msgRowId)) ?? []
             }
 
+            // Get reply context (inline replies)
+            var replyToText: String? = nil
+            if let replyGuidPtr = sqlite3_column_text(statement, 11) {
+                let replyGuid = String(cString: replyGuidPtr)
+                if !replyGuid.isEmpty {
+                    replyToText = try? getMessageTextByGuid(replyGuid)
+                }
+            }
+
             // Skip empty messages (no text, no attachments, not a reaction)
             if text.isEmpty && attachments.isEmpty && reactionType == nil {
                 continue
@@ -404,7 +426,8 @@ final class MessageStore {
                 chatIdentifier: chatIdentifier,
                 attachments: attachments,
                 reactionType: reactionType,
-                reactedToText: reactedToText
+                reactedToText: reactedToText,
+                replyToText: replyToText
             ))
         }
 
@@ -471,7 +494,8 @@ final class MessageStore {
         return attachments
     }
 
-    /// Gets the text of a message by its GUID (for reaction context)
+    /// Gets a description of a message by its GUID (for reaction/reply context)
+    /// Returns the text if available, or describes attachments if the message has no text
     private func getMessageTextByGuid(_ guid: String) throws -> String? {
         guard let db = db else {
             throw MessageStoreError.notConnected
@@ -488,7 +512,7 @@ final class MessageStore {
             cleanGuid = guid
         }
 
-        let query = "SELECT text FROM message WHERE guid = ? LIMIT 1"
+        let query = "SELECT text, cache_has_attachments, ROWID, attributedBody FROM message WHERE guid = ? LIMIT 1"
 
         var statement: OpaquePointer?
         defer { sqlite3_finalize(statement) }
@@ -501,12 +525,105 @@ final class MessageStore {
         sqlite3_bind_text(statement, 1, cleanGuid, -1, SQLITE_TRANSIENT)
 
         if sqlite3_step(statement) == SQLITE_ROW {
+            // Get text from text column
+            var text: String? = nil
             if let textPtr = sqlite3_column_text(statement, 0) {
-                return String(cString: textPtr)
+                let rawText = String(cString: textPtr)
+                // Filter out object replacement characters (used for attachments)
+                let cleanText = rawText.replacingOccurrences(of: "￼", with: "").trimmingCharacters(in: .whitespaces)
+                if !cleanText.isEmpty {
+                    text = cleanText
+                }
+            }
+
+            // If text column is empty, try to extract from attributedBody
+            // (macOS sometimes stores text only in attributedBody for outgoing messages)
+            if text == nil {
+                let blobBytes = sqlite3_column_blob(statement, 3)
+                let blobLength = sqlite3_column_bytes(statement, 3)
+                if blobLength > 0, let blobBytes = blobBytes {
+                    let data = Data(bytes: blobBytes, count: Int(blobLength))
+                    text = extractTextFromAttributedBody(data)
+                }
+            }
+
+            // If we have text, return it
+            if let text = text {
+                return text
+            }
+
+            // No text - check for attachments
+            let hasAttachments = sqlite3_column_int(statement, 1) != 0
+            if hasAttachments {
+                let messageRowId = sqlite3_column_int64(statement, 2)
+                return getAttachmentDescription(forMessageId: messageRowId)
             }
         }
 
         return nil
+    }
+
+    /// Extracts plain text from an NSAttributedString stored as NSKeyedArchiver data
+    private func extractTextFromAttributedBody(_ data: Data) -> String? {
+        // Try to unarchive as NSAttributedString
+        if let attributedString = try? NSKeyedUnarchiver.unarchivedObject(
+            ofClass: NSAttributedString.self,
+            from: data
+        ) {
+            let text = attributedString.string.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty {
+                return text
+            }
+        }
+        return nil
+    }
+
+    /// Gets a brief description of attachments for a message (e.g., "[Image]", "[Video]")
+    private func getAttachmentDescription(forMessageId messageId: Int64) -> String? {
+        guard let db = db else {
+            return nil
+        }
+
+        let query = """
+            SELECT a.mime_type, a.transfer_name
+            FROM attachment a
+            JOIN message_attachment_join maj ON a.ROWID = maj.attachment_id
+            WHERE maj.message_id = ?
+            LIMIT 1
+            """
+
+        var statement: OpaquePointer?
+        defer { sqlite3_finalize(statement) }
+
+        guard sqlite3_prepare_v2(db, query, -1, &statement, nil) == SQLITE_OK else {
+            return "[Attachment]"
+        }
+
+        sqlite3_bind_int64(statement, 1, messageId)
+
+        if sqlite3_step(statement) == SQLITE_ROW {
+            if let mimePtr = sqlite3_column_text(statement, 0) {
+                let mimeType = String(cString: mimePtr)
+                let type = mimeType.split(separator: "/").first ?? "file"
+
+                switch type {
+                case "image":
+                    return "[Image]"
+                case "video":
+                    return "[Video]"
+                case "audio":
+                    return "[Audio]"
+                default:
+                    if let namePtr = sqlite3_column_text(statement, 1) {
+                        let fileName = String(cString: namePtr)
+                        return "[File: \(fileName)]"
+                    }
+                    return "[Attachment]"
+                }
+            }
+        }
+
+        return "[Attachment]"
     }
 
     /// Converts Apple's timestamp format to Date

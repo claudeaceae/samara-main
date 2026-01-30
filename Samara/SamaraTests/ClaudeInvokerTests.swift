@@ -23,7 +23,8 @@ final class ClaudeInvokerTests: SamaraTestCase {
             chatIdentifier: chatIdentifier,
             attachments: [],
             reactionType: nil,
-            reactedToText: nil
+            reactedToText: nil,
+            replyToText: nil
         )
     }
 

@@ -4,6 +4,13 @@ import Foundation
 struct ClaudeInvocationResult {
     let response: String
     let sessionId: String?
+    let shouldRespond: Bool
+
+    init(response: String, sessionId: String? = nil, shouldRespond: Bool = true) {
+        self.response = response
+        self.sessionId = sessionId
+        self.shouldRespond = shouldRespond
+    }
 }
 
 /// Invokes the Claude Code CLI to process messages
@@ -43,11 +50,15 @@ final class ClaudeInvoker {
       "properties": {
         "message": {
           "type": "string",
-          "description": "The EXACT text to send as an iMessage. Write ONLY the message content - no meta-commentary, no descriptions of actions, no analysis of context."
+          "description": "The EXACT text to send as an iMessage. Write ONLY the message content - no meta-commentary, no descriptions of actions, no analysis of context. Leave empty if no message should be sent."
         },
         "reasoning": {
           "type": "string",
           "description": "Internal thinking and reasoning about the response (this field is NOT sent to the user)"
+        },
+        "should_respond": {
+          "type": "boolean",
+          "description": "Set to false when no message should be sent (e.g., for reactions that are acknowledgments, not questions). Defaults to true if omitted."
         }
       },
       "required": ["message"],
@@ -134,7 +145,8 @@ final class ClaudeInvoker {
 
                 result = ClaudeInvocationResult(
                     response: fallbackResult.response,
-                    sessionId: fallbackResult.sessionId
+                    sessionId: fallbackResult.sessionId,
+                    shouldRespond: fallbackResult.shouldRespond
                 )
             } catch {
                 thrownError = error
@@ -459,13 +471,13 @@ final class ClaudeInvoker {
                 let range = NSRange(result.startIndex..., in: result)
                 if regex.firstMatch(in: result, options: [], range: range) != nil {
                     // This is pure meta-commentary - the ENTIRE response is describing an action
-                    // without containing the actual content. Flag it and return error placeholder.
+                    // without containing the actual content. Treat as silent acknowledgment.
                     filtered.append("PURE_META_COMMENTARY: \(result)")
-                    log("CRITICAL: Pure meta-commentary detected - response describes action without content: \(result.prefix(100))...",
-                        level: .error, component: "ClaudeInvoker")
-                    // Return error placeholder - we can't extract actual content from this
-                    result = "[Message not delivered - please try again]"
-                    break  // Don't continue processing, this response is invalid
+                    log("Pure meta-commentary detected - treating as silent acknowledgment: \(result.prefix(100))...",
+                        level: .info, component: "ClaudeInvoker")
+                    // Return empty string - will be treated as silent response (shouldRespond=false)
+                    result = ""
+                    break  // Don't continue processing
                 }
             }
         }
@@ -554,10 +566,14 @@ final class ClaudeInvoker {
                    let message = structuredOutput["message"] as? String {
                     // Direct extraction - the API schema enforcement guarantees this is the user-facing message
                     // No sanitization needed because the schema structurally separates message from reasoning
-                    log("Extracted message from structured_output (deterministic path)", level: .debug, component: "ClaudeInvoker")
+                    let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+                    // Determine shouldRespond: explicit false, or implicit false for empty message
+                    let shouldRespond = trimmedMessage.isEmpty ? false : (structuredOutput["should_respond"] as? Bool ?? true)
+                    log("Extracted message from structured_output (deterministic path), shouldRespond=\(shouldRespond)", level: .debug, component: "ClaudeInvoker")
                     return ClaudeInvocationResult(
-                        response: message.trimmingCharacters(in: .whitespacesAndNewlines),
-                        sessionId: sessionId
+                        response: trimmedMessage,
+                        sessionId: sessionId,
+                        shouldRespond: shouldRespond
                     )
                 }
 
@@ -576,10 +592,13 @@ final class ClaudeInvoker {
                     if useStructuredOutput,
                        let structuredOutput = json["structured_output"] as? [String: Any],
                        let message = structuredOutput["message"] as? String {
-                        log("Recovered message from structured_output despite error_during_execution", level: .info, component: "ClaudeInvoker")
+                        let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let shouldRespond = trimmedMessage.isEmpty ? false : (structuredOutput["should_respond"] as? Bool ?? true)
+                        log("Recovered message from structured_output despite error_during_execution, shouldRespond=\(shouldRespond)", level: .info, component: "ClaudeInvoker")
                         return ClaudeInvocationResult(
-                            response: message.trimmingCharacters(in: .whitespacesAndNewlines),
-                            sessionId: sessionId
+                            response: trimmedMessage,
+                            sessionId: sessionId,
+                            shouldRespond: shouldRespond
                         )
                     }
 
@@ -589,7 +608,8 @@ final class ClaudeInvoker {
                         if let filteredContent = filtered {
                             log("Filtered from error response:\n\(filteredContent)", level: .debug, component: "ClaudeInvoker")
                         }
-                        return ClaudeInvocationResult(response: sanitized, sessionId: sessionId)
+                        let shouldRespond = !sanitized.isEmpty
+                        return ClaudeInvocationResult(response: sanitized, sessionId: sessionId, shouldRespond: shouldRespond)
                     }
 
                     // THIRD: Recover from session JSONL (last resort)
@@ -631,9 +651,12 @@ final class ClaudeInvoker {
                         log("Filtered from response (fallback path):\n\(filteredContent)", level: .debug, component: "ClaudeInvoker")
                     }
 
+                    // Empty sanitized response = meta-commentary was stripped, treat as silent
+                    let shouldRespond = !sanitized.isEmpty
                     return ClaudeInvocationResult(
                         response: sanitized,
-                        sessionId: sessionId
+                        sessionId: sessionId,
+                        shouldRespond: shouldRespond
                     )
                 }
             }
@@ -939,7 +962,14 @@ final class ClaudeInvoker {
             Respond naturally as yourself. You have continuity through your memory files. Be genuine, helpful, and conversational. Keep your response concise - this is a text message, not an essay.
 
             ## Reactions
-            If \(collaboratorName) reacted to one of your messages (❤️ liked, 👍 thumbs up, 😂 laughed, etc.), acknowledge it naturally but briefly. You don't need to write a long response to a reaction - a simple acknowledgment or continuing the conversation is fine.
+            When \(collaboratorName) reacts to your messages (❤️, 👍, 😂, etc.):
+            - Set should_respond to false in the structured output - reactions are acknowledgments, not questions
+            - Leave the message field empty (or write a brief internal note)
+            - Use the "reasoning" field to note what the reaction tells you about tone/content
+
+            Example: If \(collaboratorName) ❤️ a message where you were warm, note in reasoning: "The warmth landed well - continue this tone"
+
+            Do NOT send a message back for simple reactions unless there's clearly something to respond to.
 
             ## Asynchronous Messaging
             If \(collaboratorName) asks you to work on something that might involve decision points or forks in the road, you can send follow-up iMessages later by running: ~/.claude-mind/bin/message "Your message"

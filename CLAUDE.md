@@ -101,23 +101,48 @@ Work is tracked across three levels:
 
 ## Skills (Slash Commands)
 
-Most-used skills (by invocation data from Dec 2025 - Jan 2026):
+Invoke with `/skillname` or let trigger words guide natural invocation.
 
-| Skill | Purpose |
-|-------|---------|
-| `/memory` | Search learnings, decisions, observations |
-| `/samara` | Debug/restart Samara, view logs |
-| `/sync` | Check for drift between repo and runtime |
-| `/capability` | Check if action is possible |
-| `/morning` | Morning briefing (calendar, location, context) |
-| `/maintenance` | Organism maintenance (drift, symlinks, services) |
-| `/wallet` | Check crypto wallet balances, addresses, history |
-| `/status` | System health check (Samara, wake cycles, FDA) |
-| `/services` | Toggle services on/off (X, Bluesky, GitHub, etc.) |
-| `/email` | Check and respond to email |
-| `/generate-image` | Generate images; **primary tool for visual self-expression** |
+<!-- Trigger index format: skill|purpose|triggers -->
 
-For full skill catalog, see **[Skills Reference](docs/skills-reference.md)**.
+### System & Debugging
+```
+status|system health check|status health running broken check
+samara|debug/restart Samara|samara messages not working restart logs
+sync|repo/runtime drift check|sync drift system out of sync
+maintenance|organism health|maintenance health check drift
+capability|check if action possible|can I able to permission possible
+services|toggle services on/off|services enable disable toggle
+```
+
+### Memory & Recall
+```
+memory|search learnings decisions|memory remember recall search find past "what did I learn"
+recall|semantic search (FTS5+Chroma)|"when did we" "last time" history previous before
+episode|today's log|episode today log what happened
+reflect|quick observation capture|reflect noticed realized insight
+decide|document a decision|decide decision chose choice why did we
+learning|access learnings|learning learned insights
+```
+
+### Context & Awareness
+```
+morning|morning briefing|morning briefing what's up today overview
+location|current location context|location where am I nearby
+look|webcam capture|look see webcam camera what's around
+generate-image|visual self-expression|draw selfie create image express react
+invites|calendar invitations|invites calendar meeting accept decline
+email|check and manage email|email inbox mail unread
+```
+
+### People & Artifacts
+```
+person|view/create person profile|person who is profile about
+note|quick observation about person|note about noticed jot down
+artifact|add files to person profile|artifact save image add photo attach
+```
+
+For full catalog: **[Skills Reference](docs/skills-reference.md)**
 
 ---
 

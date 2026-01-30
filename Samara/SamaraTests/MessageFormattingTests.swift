@@ -15,7 +15,8 @@ final class MessageFormattingTests: SamaraTestCase {
             chatIdentifier: "+15555550123",
             attachments: [],
             reactionType: nil,
-            reactedToText: nil
+            reactedToText: nil,
+            replyToText: nil
         )
 
         let description = message.fullDescription
@@ -37,7 +38,8 @@ final class MessageFormattingTests: SamaraTestCase {
             chatIdentifier: "+15555550123",
             attachments: [],
             reactionType: nil,
-            reactedToText: nil
+            reactedToText: nil,
+            replyToText: nil
         )
 
         XCTAssertEqual(message.fullDescription, "")
@@ -57,7 +59,8 @@ final class MessageFormattingTests: SamaraTestCase {
             chatIdentifier: "ABCDEF1234567890ABCDEF1234567890",
             attachments: [],
             reactionType: nil,
-            reactedToText: nil
+            reactedToText: nil,
+            replyToText: nil
         )
 
         let fromCollaborator = baseMessage.fullDescriptionWithSender(targetHandles: [collaborator])
@@ -74,10 +77,91 @@ final class MessageFormattingTests: SamaraTestCase {
             chatIdentifier: "ABCDEF1234567890ABCDEF1234567890",
             attachments: [],
             reactionType: nil,
-            reactedToText: nil
+            reactedToText: nil,
+            replyToText: nil
         )
 
         let fromOther = otherMessage.fullDescriptionWithSender(targetHandles: [collaborator])
         XCTAssertTrue(fromOther.hasPrefix("[\(otherHandle)]:"))
+    }
+
+    func testFullDescriptionIncludesReplyContext() {
+        let message = Message(
+            rowId: 5,
+            text: "This is my reply",
+            date: Date(),
+            isFromMe: false,
+            handleId: "+15555550123",
+            chatId: 1,
+            isGroupChat: false,
+            chatIdentifier: "+15555550123",
+            attachments: [],
+            reactionType: nil,
+            reactedToText: nil,
+            replyToText: "Original message here"
+        )
+
+        let description = message.fullDescription
+        XCTAssertTrue(description.contains("[Replying to: \"Original message here\"]"))
+        XCTAssertTrue(description.contains("This is my reply"))
+    }
+
+    func testFullDescriptionTruncatesLongReplyContext() {
+        let longOriginal = String(repeating: "x", count: 120)
+        let message = Message(
+            rowId: 6,
+            text: "Short reply",
+            date: Date(),
+            isFromMe: false,
+            handleId: "+15555550123",
+            chatId: 1,
+            isGroupChat: false,
+            chatIdentifier: "+15555550123",
+            attachments: [],
+            reactionType: nil,
+            reactedToText: nil,
+            replyToText: longOriginal
+        )
+
+        let description = message.fullDescription
+        // Should truncate to 100 chars + "..."
+        XCTAssertTrue(description.contains("..."))
+        XCTAssertFalse(description.contains(longOriginal))
+        let expectedTruncated = String(repeating: "x", count: 100)
+        XCTAssertTrue(description.contains(expectedTruncated))
+    }
+
+    func testIsReplyProperty() {
+        let replyMessage = Message(
+            rowId: 7,
+            text: "Reply text",
+            date: Date(),
+            isFromMe: false,
+            handleId: "+15555550123",
+            chatId: 1,
+            isGroupChat: false,
+            chatIdentifier: "+15555550123",
+            attachments: [],
+            reactionType: nil,
+            reactedToText: nil,
+            replyToText: "Original"
+        )
+        XCTAssertTrue(replyMessage.isReply)
+
+        let regularMessage = Message(
+            rowId: 8,
+            text: "Regular text",
+            date: Date(),
+            isFromMe: false,
+            handleId: "+15555550123",
+            chatId: 1,
+            isGroupChat: false,
+            chatIdentifier: "+15555550123",
+            attachments: [],
+            reactionType: nil,
+            reactedToText: nil,
+            replyToText: nil
+        )
+        XCTAssertFalse(regularMessage.isReply)
     }
 }
