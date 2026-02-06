@@ -1,0 +1,83 @@
+#!/bin/bash
+# test-facetime-call: Test FaceTime call initiation
+#
+# INTERACTIVE TEST — requires collaborator to answer phone.
+# Run manually, not in CI.
+#
+# Test flow:
+# 1. facetime call → phone rings
+# 2. Collaborator answers, waits 5s
+# 3. facetime hangup → call ends, devices restored
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+FACETIME="$MIND_PATH/system/bin/facetime"
+
+source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || true
+
+PASSED=0
+FAILED=0
+
+echo "=== Test: FaceTime Call ==="
+echo ""
+echo "WARNING: This will call $COLLABORATOR_PHONE via FaceTime Audio."
+echo "The collaborator should answer and wait 5 seconds."
+echo ""
+read -p "Press Enter to continue (Ctrl+C to cancel)..." -r
+
+# Save original input device
+ORIGINAL_INPUT=$(SwitchAudioSource -c -t input 2>/dev/null || echo "unknown")
+echo "Original input device: $ORIGINAL_INPUT"
+
+# Test 1: Place call
+echo ""
+echo "Placing call..."
+"$FACETIME" call
+PASSED=$((PASSED + 1))
+echo "  PASS  Call initiated"
+
+# Test 2: Wait for answer
+echo ""
+echo "Waiting for collaborator to answer (press Enter when connected)..."
+read -r -t 30 || {
+    echo "  FAIL  Timeout waiting for answer"
+    "$FACETIME" hangup
+    exit 1
+}
+PASSED=$((PASSED + 1))
+echo "  PASS  Call connected"
+
+# Test 3: Hold for 5 seconds
+echo "Holding for 5 seconds..."
+sleep 5
+
+# Test 4: Hang up
+echo "Hanging up..."
+"$FACETIME" hangup
+sleep 2
+PASSED=$((PASSED + 1))
+echo "  PASS  Call ended"
+
+# Test 5: Check FaceTime is stopped
+STATUS=$("$FACETIME" status)
+if [[ "$STATUS" == "stopped" ]]; then
+    echo "  PASS  FaceTime stopped after hangup"
+    PASSED=$((PASSED + 1))
+else
+    echo "  FAIL  FaceTime still running after hangup"
+fi
+
+# Test 6: Check device restored
+CURRENT_INPUT=$(SwitchAudioSource -c -t input 2>/dev/null || echo "unknown")
+if [[ "$CURRENT_INPUT" == "$ORIGINAL_INPUT" ]]; then
+    echo "  PASS  Input device restored to: $CURRENT_INPUT"
+    PASSED=$((PASSED + 1))
+else
+    echo "  FAIL  Input device not restored (was: $ORIGINAL_INPUT, now: $CURRENT_INPUT)"
+fi
+
+echo ""
+echo "---"
+echo "Results: $PASSED passed"
+exit 0

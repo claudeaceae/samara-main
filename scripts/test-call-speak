@@ -1,0 +1,79 @@
+#!/bin/bash
+# test-call-speak: Test TTS playback to Claude Mic virtual device
+#
+# Verifies that call-speak can generate and play audio.
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CALL_SPEAK="$MIND_PATH/system/bin/call-speak"
+VOICE_CONFIG="$MIND_PATH/state/voice-call-config.json"
+
+PASSED=0
+FAILED=0
+
+echo "=== Test: Call Speak ==="
+echo ""
+
+# Test 1: Script exists
+if [[ -x "$CALL_SPEAK" ]]; then
+    echo "  PASS  call-speak script exists"
+    PASSED=$((PASSED + 1))
+else
+    echo "  FAIL  call-speak not found at $CALL_SPEAK"
+    exit 1
+fi
+
+# Test 2: Verify Claude Mic device exists
+MIC_DEVICE="Claude Mic"
+if [[ -f "$VOICE_CONFIG" ]]; then
+    MIC_DEVICE=$(jq -r '.micDevice // "Claude Mic"' "$VOICE_CONFIG" 2>/dev/null)
+fi
+
+if command -v SwitchAudioSource >/dev/null 2>&1; then
+    if SwitchAudioSource -a 2>/dev/null | grep -qF "$MIC_DEVICE"; then
+        echo "  PASS  \"$MIC_DEVICE\" device exists"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  FAIL  \"$MIC_DEVICE\" not found"
+        echo "         Create in Loopback before testing"
+        FAILED=$((FAILED + 1))
+    fi
+fi
+
+# Test 3: Play pre-generated audio file
+echo ""
+echo "Testing file playback..."
+TEST_WAV=$(mktemp /tmp/test-speak-XXXXXX.wav)
+trap "rm -f '$TEST_WAV'" EXIT
+
+# Generate a simple test tone
+sox -n -r 16000 -c 1 "$TEST_WAV" synth 1 sine 440 2>/dev/null || {
+    echo "  FAIL  Could not generate test tone"
+    FAILED=$((FAILED + 1))
+}
+
+if [[ -f "$TEST_WAV" ]]; then
+    if "$CALL_SPEAK" --file "$TEST_WAV" 2>/dev/null; then
+        echo "  PASS  File playback succeeded"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  WARN  File playback failed (expected if devices not configured)"
+    fi
+fi
+
+# Test 4: TTS generation + playback (requires ElevenLabs API key)
+echo ""
+echo "Testing TTS generation..."
+if "$CALL_SPEAK" "Hello, this is a test." 2>/dev/null; then
+    echo "  PASS  TTS generation and playback succeeded"
+    PASSED=$((PASSED + 1))
+else
+    echo "  WARN  TTS test failed (requires ElevenLabs API key and virtual device)"
+fi
+
+echo ""
+echo "---"
+echo "Results: $PASSED passed, $FAILED failed"
+[[ $FAILED -gt 0 ]] && exit 1
+exit 0

@@ -1,0 +1,107 @@
+#!/bin/bash
+# test-audio-setup: Verify all voice call audio prerequisites
+#
+# Tests: sox, SwitchAudioSource, whisper-cli, Loopback, virtual devices, whisper model
+# Optionally plays test tone through Claude Mic and records from Call Capture
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+AUDIO_SETUP="$MIND_PATH/system/bin/audio-setup"
+VOICE_CONFIG="$MIND_PATH/state/voice-call-config.json"
+
+PASSED=0
+FAILED=0
+
+check() {
+    local name="$1"
+    local cmd="$2"
+    if eval "$cmd" >/dev/null 2>&1; then
+        echo "  PASS  $name"
+        PASSED=$((PASSED + 1))
+        return 0
+    else
+        echo "  FAIL  $name"
+        FAILED=$((FAILED + 1))
+        return 1
+    fi
+}
+
+echo "=== Test: Audio Setup ==="
+echo ""
+
+# Test 1: audio-setup script exists and runs
+check "audio-setup script exists" "test -x '$AUDIO_SETUP'"
+check "audio-setup --check runs" "'$AUDIO_SETUP' --check"
+
+# Test 2: Individual tool checks
+echo ""
+echo "Tool verification:"
+check "sox binary" "command -v sox"
+check "SwitchAudioSource binary" "command -v SwitchAudioSource"
+check "whisper-cli binary" "command -v whisper-cli"
+
+# Test 3: Whisper model
+echo ""
+echo "Whisper model:"
+check "Model file exists" "test -f '$MIND_PATH/system/models/ggml-base.en.bin'"
+
+# Test 4: Virtual devices
+echo ""
+echo "Virtual devices:"
+if command -v SwitchAudioSource >/dev/null 2>&1; then
+    # Load device names from config
+    MIC_DEVICE="Claude Mic"
+    CAPTURE_DEVICE="Call Capture"
+    if [[ -f "$VOICE_CONFIG" ]]; then
+        MIC_DEVICE=$(jq -r '.micDevice // "Claude Mic"' "$VOICE_CONFIG" 2>/dev/null)
+        CAPTURE_DEVICE=$(jq -r '.captureDevice // "Call Capture"' "$VOICE_CONFIG" 2>/dev/null)
+    fi
+
+    ALL_DEVICES=$(SwitchAudioSource -a 2>/dev/null || true)
+    check "\"$MIC_DEVICE\" device exists" "echo '$ALL_DEVICES' | grep -qF '$MIC_DEVICE'"
+    check "\"$CAPTURE_DEVICE\" device exists" "echo '$ALL_DEVICES' | grep -qF '$CAPTURE_DEVICE'"
+
+    # Test 5: Audio routing (optional - only if devices exist)
+    if echo "$ALL_DEVICES" | grep -qF "$MIC_DEVICE" && echo "$ALL_DEVICES" | grep -qF "$CAPTURE_DEVICE"; then
+        echo ""
+        echo "Audio routing test:"
+
+        # Play a brief test tone to Claude Mic
+        TEMP_WAV=$(mktemp /tmp/test-tone-XXXXXX.wav)
+        trap "rm -f '$TEMP_WAV'" EXIT
+
+        # Generate 0.5s 440Hz test tone
+        sox -n -r 16000 -c 1 "$TEMP_WAV" synth 0.5 sine 440 2>/dev/null && \
+            echo "  PASS  Generated test tone" && PASSED=$((PASSED + 1)) || \
+            { echo "  FAIL  Generate test tone"; FAILED=$((FAILED + 1)); }
+
+        # Try playing to Claude Mic (non-blocking, brief)
+        if AUDIODEV="$MIC_DEVICE" play "$TEMP_WAV" 2>/dev/null; then
+            echo "  PASS  Played tone to \"$MIC_DEVICE\" (AUDIODEV)"
+            PASSED=$((PASSED + 1))
+        else
+            # Fallback test
+            echo "  WARN  AUDIODEV play failed (will use SwitchAudioSource fallback at runtime)"
+        fi
+    fi
+else
+    echo "  SKIP  Cannot test devices without SwitchAudioSource"
+fi
+
+# Test 6: Configure mode
+echo ""
+echo "Configuration:"
+check "audio-setup --configure runs" "'$AUDIO_SETUP' --configure"
+check "Config file created" "test -f '$VOICE_CONFIG'"
+if [[ -f "$VOICE_CONFIG" ]]; then
+    check "Config has micDevice" "jq -e '.micDevice' '$VOICE_CONFIG'"
+    check "Config has captureDevice" "jq -e '.captureDevice' '$VOICE_CONFIG'"
+    check "Config has configured=true" "jq -e '.configured == true' '$VOICE_CONFIG'"
+fi
+
+echo ""
+echo "---"
+echo "Results: $PASSED passed, $FAILED failed"
+[[ $FAILED -gt 0 ]] && exit 1
+exit 0

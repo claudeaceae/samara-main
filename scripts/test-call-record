@@ -1,0 +1,101 @@
+#!/bin/bash
+# test-call-record: Test audio recording from virtual device
+#
+# Tests start/stop/status and verifies WAV output format.
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CALL_RECORD="$MIND_PATH/system/bin/call-record"
+
+PASSED=0
+FAILED=0
+TEST_DIR=$(mktemp -d /tmp/test-call-record-XXXXXX)
+trap "rm -rf '$TEST_DIR'" EXIT
+
+check() {
+    local name="$1"
+    local cmd="$2"
+    if eval "$cmd" >/dev/null 2>&1; then
+        echo "  PASS  $name"
+        PASSED=$((PASSED + 1))
+        return 0
+    else
+        echo "  FAIL  $name"
+        FAILED=$((FAILED + 1))
+        return 1
+    fi
+}
+
+echo "=== Test: Call Record ==="
+echo ""
+
+# Test 1: Script exists
+check "call-record script exists" "test -x '$CALL_RECORD'"
+
+# Test 2: Status when not recording
+STATUS=$("$CALL_RECORD" status 2>/dev/null)
+if [[ "$STATUS" == "stopped" ]]; then
+    echo "  PASS  Initial status: stopped"
+    PASSED=$((PASSED + 1))
+else
+    echo "  FAIL  Initial status should be stopped (got: $STATUS)"
+    FAILED=$((FAILED + 1))
+fi
+
+# Test 3: Start recording (will use default device or fail gracefully)
+echo ""
+echo "Starting recording for 3 seconds..."
+"$CALL_RECORD" start --output "$TEST_DIR" --silence 2 2>/dev/null &
+sleep 1
+
+# Test 4: Status while recording
+STATUS=$("$CALL_RECORD" status 2>/dev/null)
+if [[ "$STATUS" == *"recording"* ]]; then
+    echo "  PASS  Status during recording: recording"
+    PASSED=$((PASSED + 1))
+else
+    echo "  WARN  Recording may not have started (status: $STATUS)"
+    echo "         This is expected if virtual devices aren't configured"
+fi
+
+sleep 2
+
+# Test 5: Stop recording
+"$CALL_RECORD" stop 2>/dev/null || true
+sleep 1
+
+# Test 6: Status after stop
+STATUS=$("$CALL_RECORD" status 2>/dev/null)
+if [[ "$STATUS" == "stopped" ]]; then
+    echo "  PASS  Status after stop: stopped"
+    PASSED=$((PASSED + 1))
+else
+    echo "  FAIL  Status after stop should be stopped (got: $STATUS)"
+    FAILED=$((FAILED + 1))
+fi
+
+# Test 7: Check output directory
+echo ""
+echo "Output files:"
+WAV_COUNT=$(find "$TEST_DIR" -name "*.wav" 2>/dev/null | wc -l | tr -d ' ')
+echo "  Found $WAV_COUNT WAV files in $TEST_DIR"
+
+if [[ "$WAV_COUNT" -gt 0 ]]; then
+    # Check first WAV format with soxi
+    FIRST_WAV=$(find "$TEST_DIR" -name "*.wav" | head -1)
+    if command -v soxi >/dev/null 2>&1 && [[ -n "$FIRST_WAV" ]]; then
+        RATE=$(soxi -r "$FIRST_WAV" 2>/dev/null || echo "unknown")
+        CHANNELS=$(soxi -c "$FIRST_WAV" 2>/dev/null || echo "unknown")
+        echo "  Sample rate: $RATE Hz"
+        echo "  Channels: $CHANNELS"
+        [[ "$RATE" == "16000" ]] && check "Sample rate is 16kHz" "true" || check "Sample rate is 16kHz" "false"
+        [[ "$CHANNELS" == "1" ]] && check "Mono channel" "true" || check "Mono channel" "false"
+    fi
+fi
+
+echo ""
+echo "---"
+echo "Results: $PASSED passed, $FAILED failed"
+[[ $FAILED -gt 0 ]] && exit 1
+exit 0

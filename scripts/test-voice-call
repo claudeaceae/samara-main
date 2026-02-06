@@ -1,0 +1,56 @@
+#!/bin/bash
+# test-voice-call: Full integration test for voice calling
+#
+# INTERACTIVE TEST — full end-to-end:
+# 1. Calls collaborator's phone
+# 2. Claude greets
+# 3. Collaborator speaks
+# 4. Claude responds vocally
+# 5. Collaborator says goodbye
+# 6. Call ends cleanly
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+VOICE_CALL="$MIND_PATH/system/bin/voice-call"
+
+source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || true
+
+echo "=== Test: Full Voice Call Integration ==="
+echo ""
+echo "This will:"
+echo "  1. Call $COLLABORATOR_PHONE via FaceTime Audio"
+echo "  2. Greet with 'Hey, it's Claude. Testing voice call.'"
+echo "  3. Listen and respond to 2-3 turns of conversation"
+echo "  4. End when you say 'goodbye'"
+echo ""
+echo "Conversation timeout: 120 seconds"
+echo ""
+read -p "Press Enter to start (Ctrl+C to cancel)..." -r
+
+echo ""
+"$VOICE_CALL" --voice-response --greeting "Hey, it's Claude. Testing voice call." --timeout 120
+
+echo ""
+echo "=== Integration Test Complete ==="
+echo ""
+
+# Check logs
+LOG_FILE="$MIND_PATH/system/logs/voice-call.log"
+TRANSCRIPT_LOG="$MIND_PATH/system/logs/voice-transcription.log"
+
+echo "Recent voice call log:"
+tail -10 "$LOG_FILE" 2>/dev/null || echo "(no log)"
+
+echo ""
+echo "Recent transcriptions:"
+tail -10 "$TRANSCRIPT_LOG" 2>/dev/null || echo "(no transcription log)"
+
+echo ""
+echo "Manual verification checklist:"
+echo "  [ ] Phone rang and call connected"
+echo "  [ ] Claude's greeting was audible through FaceTime"
+echo "  [ ] Collaborator's speech was transcribed"
+echo "  [ ] Claude responded with voice"
+echo "  [ ] Saying 'goodbye' ended the call"
+echo "  [ ] Audio devices restored to original"

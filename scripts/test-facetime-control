@@ -1,0 +1,73 @@
+#!/bin/bash
+# test-facetime-control: Test FaceTime open/close/status
+#
+# Non-destructive test that verifies FaceTime app lifecycle.
+# Does NOT place calls.
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+FACETIME="$MIND_PATH/system/bin/facetime"
+
+PASSED=0
+FAILED=0
+
+check() {
+    local name="$1"
+    local expected="$2"
+    local actual="$3"
+    if [[ "$actual" == *"$expected"* ]]; then
+        echo "  PASS  $name"
+        PASSED=$((PASSED + 1))
+        return 0
+    else
+        echo "  FAIL  $name (expected: '$expected', got: '$actual')"
+        FAILED=$((FAILED + 1))
+        return 1
+    fi
+}
+
+echo "=== Test: FaceTime Control ==="
+echo ""
+
+# Test 1: Script exists
+if [[ ! -x "$FACETIME" ]]; then
+    echo "  FAIL  facetime script not found at $FACETIME"
+    exit 1
+fi
+echo "  PASS  facetime script exists"
+PASSED=$((PASSED + 1))
+
+# Test 2: Ensure FaceTime is stopped first
+"$FACETIME" close 2>/dev/null || true
+sleep 1
+
+# Test 3: Status should be stopped
+STATUS=$("$FACETIME" status)
+check "Initial status is stopped" "stopped" "$STATUS"
+
+# Test 4: Open FaceTime
+"$FACETIME" open
+sleep 2
+
+# Test 5: Status should be running
+STATUS=$("$FACETIME" status)
+check "Status after open is running" "running" "$STATUS"
+
+# Test 6: Close FaceTime
+"$FACETIME" close
+sleep 2
+
+# Test 7: Status should be stopped again
+STATUS=$("$FACETIME" status)
+check "Status after close is stopped" "stopped" "$STATUS"
+
+# Test 8: Usage/help
+HELP=$("$FACETIME" 2>&1 || true)
+check "Help text mentions 'call'" "call" "$HELP"
+
+echo ""
+echo "---"
+echo "Results: $PASSED passed, $FAILED failed"
+[[ $FAILED -gt 0 ]] && exit 1
+exit 0

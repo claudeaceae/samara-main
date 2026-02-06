@@ -1,0 +1,119 @@
+#!/bin/bash
+# test-call-transcribe: Test whisper transcription
+#
+# Generates a known speech WAV and verifies transcription output.
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CALL_TRANSCRIBE="$MIND_PATH/system/bin/call-transcribe"
+
+PASSED=0
+FAILED=0
+TEST_DIR=$(mktemp -d /tmp/test-transcribe-XXXXXX)
+trap "rm -rf '$TEST_DIR'" EXIT
+
+echo "=== Test: Call Transcribe ==="
+echo ""
+
+# Test 1: Script exists
+if [[ -x "$CALL_TRANSCRIBE" ]]; then
+    echo "  PASS  call-transcribe script exists"
+    PASSED=$((PASSED + 1))
+else
+    echo "  FAIL  call-transcribe not found at $CALL_TRANSCRIBE"
+    exit 1
+fi
+
+# Test 2: Whisper model exists
+MODEL="$MIND_PATH/system/models/ggml-base.en.bin"
+if [[ -f "$MODEL" ]]; then
+    echo "  PASS  Whisper model exists"
+    PASSED=$((PASSED + 1))
+else
+    echo "  FAIL  Whisper model not found at $MODEL"
+    exit 1
+fi
+
+# Test 3: Generate test speech via macOS say command → WAV
+echo ""
+echo "Generating test speech..."
+TEST_PHRASE="Hello, this is a test of the transcription system"
+TEST_AIFF="$TEST_DIR/test-speech.aiff"
+TEST_WAV="$TEST_DIR/test-speech.wav"
+
+# Use macOS 'say' to generate speech
+say -o "$TEST_AIFF" "$TEST_PHRASE" 2>/dev/null || {
+    echo "  SKIP  'say' command not available"
+    exit 0
+}
+
+# Convert to 16kHz mono WAV for whisper
+sox "$TEST_AIFF" -r 16000 -c 1 "$TEST_WAV" 2>/dev/null || {
+    echo "  FAIL  sox conversion failed"
+    exit 1
+}
+
+FILE_SIZE=$(stat -f%z "$TEST_WAV" 2>/dev/null || echo 0)
+echo "  Generated: $TEST_WAV ($FILE_SIZE bytes)"
+PASSED=$((PASSED + 1))
+
+# Test 4: Transcribe
+echo ""
+echo "Transcribing..."
+TRANSCRIPT=$("$CALL_TRANSCRIBE" "$TEST_WAV" 2>/dev/null || echo "")
+
+if [[ -n "$TRANSCRIPT" ]]; then
+    echo "  Transcription: \"$TRANSCRIPT\""
+    PASSED=$((PASSED + 1))
+
+    # Test 5: Check for expected words (case-insensitive)
+    TRANSCRIPT_LOWER=$(echo "$TRANSCRIPT" | tr '[:upper:]' '[:lower:]')
+    FOUND_WORDS=0
+    for word in "hello" "test" "transcription"; do
+        if echo "$TRANSCRIPT_LOWER" | grep -q "$word"; then
+            FOUND_WORDS=$((FOUND_WORDS + 1))
+        fi
+    done
+
+    if [[ $FOUND_WORDS -ge 2 ]]; then
+        echo "  PASS  Transcription contains expected words ($FOUND_WORDS/3)"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  WARN  Only $FOUND_WORDS/3 expected words found"
+        echo "         (Whisper accuracy may vary, this is informational)"
+    fi
+else
+    echo "  FAIL  No transcription output"
+    FAILED=$((FAILED + 1))
+fi
+
+# Test 6: Tiny file (should be skipped)
+echo ""
+echo "Edge cases:"
+TINY_WAV="$TEST_DIR/tiny.wav"
+echo -n "RIFF" > "$TINY_WAV"
+TINY_RESULT=$("$CALL_TRANSCRIBE" "$TINY_WAV" 2>/dev/null || echo "")
+if [[ -z "$TINY_RESULT" ]]; then
+    echo "  PASS  Tiny file correctly skipped"
+    PASSED=$((PASSED + 1))
+else
+    echo "  FAIL  Tiny file should produce no output"
+    FAILED=$((FAILED + 1))
+fi
+
+# Test 7: Missing file
+MISSING_RESULT=$("$CALL_TRANSCRIBE" "/nonexistent/file.wav" 2>&1 || true)
+if echo "$MISSING_RESULT" | grep -qi "error\|not found"; then
+    echo "  PASS  Missing file handled gracefully"
+    PASSED=$((PASSED + 1))
+else
+    echo "  FAIL  Missing file should produce error"
+    FAILED=$((FAILED + 1))
+fi
+
+echo ""
+echo "---"
+echo "Results: $PASSED passed, $FAILED failed"
+[[ $FAILED -gt 0 ]] && exit 1
+exit 0

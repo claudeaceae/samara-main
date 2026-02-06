@@ -1,0 +1,57 @@
+#!/bin/bash
+# test-call-listen: Test the listen pipeline (record + transcribe)
+#
+# INTERACTIVE TEST — requires active FaceTime call with collaborator.
+# Collaborator says a known phrase, verify transcription appears.
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CALL_LISTEN="$MIND_PATH/system/bin/call-listen"
+
+echo "=== Test: Call Listen ==="
+echo ""
+echo "INTERACTIVE TEST"
+echo "Prerequisites:"
+echo "  1. FaceTime call must be active with collaborator"
+echo "  2. Virtual audio devices must be configured"
+echo ""
+echo "Test steps:"
+echo "  1. Start call-listen"
+echo "  2. Ask collaborator to say: 'Hello Claude, this is a test'"
+echo "  3. Verify transcription appears"
+echo "  4. Press Ctrl+C to stop"
+echo ""
+read -p "Press Enter when ready (Ctrl+C to cancel)..." -r
+
+TEST_DIR=$(mktemp -d /tmp/test-listen-XXXXXX)
+trap "rm -rf '$TEST_DIR'" EXIT
+
+echo ""
+echo "Starting listener (Ctrl+C to stop)..."
+echo "Ask collaborator to speak now."
+echo ""
+
+# Run for up to 30 seconds
+timeout 30 "$CALL_LISTEN" --output "$TEST_DIR" 2>&1 || {
+    exit_code=$?
+    if [[ $exit_code -eq 124 ]]; then
+        echo ""
+        echo "Test timeout (30s)"
+    fi
+}
+
+# Check results
+echo ""
+echo "--- Results ---"
+WAV_COUNT=$(find "$TEST_DIR" -name "*.wav" 2>/dev/null | wc -l | tr -d ' ')
+echo "WAV chunks captured: $WAV_COUNT"
+
+TRANSCRIPT_LOG="$MIND_PATH/system/logs/voice-transcription.log"
+if [[ -f "$TRANSCRIPT_LOG" ]]; then
+    echo "Recent transcriptions:"
+    tail -5 "$TRANSCRIPT_LOG"
+fi
+
+echo ""
+echo "Manual verification required. Check output above for transcribed speech."
