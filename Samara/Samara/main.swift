@@ -885,6 +885,7 @@ if services.isEnabled("voiceCall") {
                 data: eventData,
                 context: SenseEvent.Context(
                     suggestedPrompt: "You answered an incoming FaceTime call from \(caller).",
+                    relatedFiles: nil,
                     suppressResponse: true
                 )
             )
