@@ -55,7 +55,7 @@ osascript -e 'tell application "Reminders" to get name of reminders whose comple
 
 ### System Status
 ```bash
-pgrep -q Samara && echo "Samara: Running" || echo "Samara: NOT RUNNING"
+launchctl list co.organelle.Samara 2>/dev/null | grep -q 'PID' && echo "Samara: Running" || echo "Samara: NOT RUNNING"
 ```
 
 ## What to Notice

@@ -27,7 +27,7 @@ Run these checks in sequence:
 
 ### 1. Samara.app Status (CRITICAL)
 ```bash
-pgrep -x Samara > /dev/null && echo "OK" || echo "CRITICAL: Samara not running"
+launchctl list co.organelle.Samara 2>/dev/null | grep -q 'PID' && echo "OK" || echo "CRITICAL: Samara not running"
 ```
 
 ### 2. FDA Status (CRITICAL)

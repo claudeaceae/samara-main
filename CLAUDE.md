@@ -133,6 +133,7 @@ look|webcam capture|look see webcam camera what's around
 generate-image|visual self-expression|draw selfie create image express react
 invites|calendar invitations|invites calendar meeting accept decline
 email|check and manage email|email inbox mail unread
+voice-call|FaceTime audio calls|call me FaceTime let's talk phone voice call
 ```
 
 ### People & Artifacts

@@ -53,7 +53,7 @@ grep "^## " ~/.claude-mind/self/inventory.md
 
 ### Messaging
 ```bash
-pgrep -q Samara && echo "Samara: OK" || echo "Samara: Not running"
+launchctl list co.organelle.Samara 2>/dev/null | grep -q 'PID' && echo "Samara: OK" || echo "Samara: Not running"
 ~/.claude-mind/system/bin/message "test" --dry-run 2>/dev/null
 ```
 

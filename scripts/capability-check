@@ -163,7 +163,7 @@ check "Claude API reachable" "curl -s --max-time 5 -o /dev/null -w '%{http_code}
 log "--- Samara ---"
 
 check "Samara app exists" "test -d /Applications/Samara.app"
-critical_check "Samara running" "pgrep -x Samara > /dev/null"
+critical_check "Samara running" "launchctl list co.organelle.Samara 2>/dev/null | grep -q 'PID'"
 check "Messages DB exists" "test -f ~/Library/Messages/chat.db"
 
 # Check FDA by looking at Samara logs for database access

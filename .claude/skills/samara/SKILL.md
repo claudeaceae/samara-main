@@ -25,7 +25,7 @@ Diagnose and manage Samara.app, the message broker that connects iMessage to Cla
 
 ### Check if Running
 ```bash
-pgrep -fl Samara
+launchctl list co.organelle.Samara 2>/dev/null | grep -E "PID|Label"
 ps aux | grep -i [S]amara
 ```
 

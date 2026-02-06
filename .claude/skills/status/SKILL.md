@@ -16,9 +16,9 @@ Perform a comprehensive health check of the Samara organism infrastructure.
 
 ### 1. Samara.app Status
 ```bash
-pgrep -fl Samara
+launchctl list co.organelle.Samara 2>/dev/null | grep -E "PID|Label|LastExitStatus"
 ```
-- If not running, note this as critical
+- If PID not present, Samara is not running (critical)
 - If running, check how long it's been up
 
 ### 2. Recent Message Detection

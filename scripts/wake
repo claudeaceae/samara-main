@@ -783,6 +783,13 @@ if [ -n "$IMAGE_EXPRESSION" ] && [ "$IMAGE_EXPRESSION" != "NONE" ] && [ "$IMAGE_
         IFS='|' read -r action image_path description prompt_used <<< "$IMAGE_EXPRESSION"
 
         if [ -f "$image_path" ]; then
+            # Send the image to É
+            if "$MIND_PATH/system/bin/send-image" "$image_path" >> "$LOG_FILE" 2>&1; then
+                log "Sent image expression: $image_path"
+            else
+                log "Failed to send image expression: $image_path"
+            fi
+
             # Record the expression
             "$MIND_PATH/system/bin/expression-tracker" record image "$description" "$prompt_used" >> "$LOG_FILE" 2>&1 && \
                 log "Recorded image expression: $description" || \
@@ -790,7 +797,7 @@ if [ -n "$IMAGE_EXPRESSION" ] && [ "$IMAGE_EXPRESSION" != "NONE" ] && [ "$IMAGE_
 
             # Log to episode
             echo "
-### [Expression] Image generated
+### [Expression] Image generated and sent
 $description
 Prompt: $prompt_used
 " >> "$EPISODE_FILE"

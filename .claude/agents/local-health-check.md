@@ -26,7 +26,7 @@ Run these checks in sequence using Bash:
 
 ### 1. Samara.app Status
 ```bash
-pgrep -x Samara > /dev/null && echo "running" || echo "stopped"
+launchctl list co.organelle.Samara 2>/dev/null | grep -q 'PID' && echo "running" || echo "stopped"
 ```
 
 ### 2. FDA Status (check for denial errors)

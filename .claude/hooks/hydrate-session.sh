@@ -161,8 +161,8 @@ fi
 # 4. System health check
 HEALTH_ISSUES=""
 
-# Check if Samara is running
-if ! pgrep -q "Samara"; then
+# Check if Samara is running (via launchctl - more reliable than pgrep)
+if ! launchctl list co.organelle.Samara 2>/dev/null | grep -q 'PID'; then
     HEALTH_ISSUES+="- Samara.app not running\n"
 fi
 

@@ -45,8 +45,8 @@ check_warn() {
 log "=== Startup Health Check ==="
 log "Starting health checks..."
 
-# 1. Check Samara.app process
-if pgrep -x "Samara" > /dev/null; then
+# 1. Check Samara.app process (via launchctl - more reliable than pgrep)
+if launchctl list co.organelle.Samara 2>/dev/null | grep -q 'PID'; then
     check_pass "Samara.app is running"
 else
     check_fail "Samara.app is not running"

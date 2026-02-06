@@ -131,7 +131,7 @@ python3 /Users/claude/Developer/samara-main/services/github-watcher/server.py
 ### Events Not Processing
 ```bash
 # Check if Samara is running
-pgrep -fl Samara || echo "Samara not running - start it: open /Applications/Samara.app"
+launchctl list co.organelle.Samara 2>/dev/null | grep -q 'PID' || echo "Samara not running - start it: open /Applications/Samara.app"
 
 # Check SenseDirectoryWatcher status
 grep "SenseDirectoryWatcher" ~/.claude-mind/system/logs/samara.log | tail -5

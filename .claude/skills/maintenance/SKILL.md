@@ -44,7 +44,7 @@ launchctl load ~/Library/LaunchAgents/com.claude.*.plist
 
 ### 3. Samara.app Status
 ```bash
-pgrep -x Samara && echo "Running" || echo "Not running"
+launchctl list co.organelle.Samara 2>/dev/null | grep -q 'PID' && echo "Running" || echo "Not running"
 ```
 If not running:
 ```bash

@@ -1,5 +1,5 @@
 {
-  "cleanupPeriodDays": 36500,
+  "cleanupPeriodDays": 365000,
   "permissions": {
     "additionalDirectories": [
       "~/.claude-mind"
