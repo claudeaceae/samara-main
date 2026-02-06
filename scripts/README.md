@@ -17,6 +17,7 @@ All scripts are symlinked to `~/.claude-mind/system/bin/` at runtime.
 | `generate-image` | Expression | Generate images via Gemini |
 | `bluesky-post` | Social | Post to Bluesky |
 | `x-post` | Social | Post to X/Twitter |
+| `voice-call` | Communication | FaceTime Audio voice conversations |
 | `update-samara` | Dev | Rebuild Samara.app |
 
 ---
@@ -251,7 +252,93 @@ knowledge-thread migrate                  # Migrate from research-queue
 
 ---
 
-## Voice Scripts
+## Voice Call Scripts
+
+FaceTime Audio calling system — call the collaborator (or any Apple device) and have a live voice conversation with transcription and AI responses.
+
+| Script | Purpose |
+|--------|---------|
+| `voice-call` | High-level orchestrator (setup → call → listen → respond → teardown) |
+| `facetime` | FaceTime control (open/close/status/call/hangup) |
+| `call-record` | Aggregate device management + sox recording with silence detection |
+| `call-listen` | Recording + transcription + response conversation loop |
+| `call-speak` | Play TTS audio to "Claude Mic" for FaceTime transmission |
+| `call-transcribe` | Whisper transcription (48kHz stereo → 16kHz mono → text) |
+| `audio-setup` | Verify/configure audio prerequisites |
+| `aggregate-device` | Create/destroy CoreAudio multi-output aggregate devices |
+
+### Architecture
+
+```
+                 ┌─────────────────────────────────┐
+                 │         voice-call               │
+                 │  (orchestrator: lifecycle mgmt)   │
+                 └──┬──────────┬──────────┬─────────┘
+                    │          │          │
+              ┌─────▼──┐  ┌───▼────┐  ┌──▼──────────┐
+              │facetime │  │call-   │  │call-listen   │
+              │call/    │  │record  │  │(conversation │
+              │hangup   │  │setup/  │  │ loop)        │
+              └─────────┘  │start/  │  └──┬─────┬─────┘
+                           │stop/   │     │     │
+                           │teardown│  ┌──▼──┐ ┌▼────────┐
+                           └────────┘  │call-│ │call-     │
+                                       │tran-│ │speak     │
+                                       │scri-│ │(TTS →    │
+                                       │be   │ │Claude Mic│
+                                       └─────┘ └──────────┘
+```
+
+### Audio Routing
+
+On macOS 26, FaceTime call audio is handled by system daemons (`callservicesd`, `avconferenced`) that route through the system default output. A CoreAudio aggregate device ("Call Monitor") combines physical speakers + Loopback's "Call Capture" virtual device, so call audio reaches both the speakers and the recording pipeline.
+
+```
+Caller's voice → callservicesd → system default output → "Call Monitor" aggregate
+                                                          ├→ Mac mini Speakers (audible)
+                                                          └→ Call Capture (recording)
+
+Claude's voice → ElevenLabs TTS → afplay → Loopback Terminal capture → Claude Mic → FaceTime
+```
+
+**Critical constraint:** The aggregate device must be set as system output BEFORE the FaceTime call connects. Audio routing is locked at connection time.
+
+### `voice-call`
+
+Full conversation lifecycle.
+
+```bash
+voice-call --voice-response                    # Voice conversation (default target)
+voice-call +15551234567 --text-response        # Respond via iMessage
+voice-call --greeting "Hi, it's Claude" --timeout 300
+```
+
+### `call-record`
+
+Four-phase lifecycle separating audio routing from recording:
+
+```bash
+call-record setup      # Create aggregate device, set system output
+call-record start      # Begin sox recording with silence detection
+call-record stop       # Stop recording (aggregate stays alive)
+call-record teardown   # Destroy aggregate, restore audio devices
+```
+
+Recording uses 35dB gain amplification before silence detection (call audio from aggregate is very low amplitude). Configurable via `~/.claude-mind/state/voice-call-config.json`.
+
+### `facetime`
+
+```bash
+facetime call [+1XXXXXXXXXX]   # UI automation: New → type number → Audio → dial
+facetime hangup                # Click NotificationCenter "End" button
+facetime status                # "running" or "stopped"
+```
+
+**Dependencies:** Loopback.app (running), sox, SwitchAudioSource, whisper-cli, ElevenLabs API key
+
+---
+
+## Voice Style Scripts
 
 | Script | Purpose |
 |--------|---------|
@@ -368,7 +455,7 @@ Rebuild and deploy Samara.app using proper Xcode workflow.
 | `service-toggle <svc> status` | Check service status |
 | `webhook-receiver` | Start/stop/status webhook receiver |
 
-**Available services:** `x`, `bluesky`, `github`, `wallet`, `meeting`, `webhook`, `location`
+**Available services:** `x`, `bluesky`, `github`, `wallet`, `meeting`, `webhook`, `location`, `browserHistory`, `proactive`, `voiceCall`
 
 ---
 

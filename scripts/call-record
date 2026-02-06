@@ -1,0 +1,275 @@
+#!/bin/bash
+# call-record: Record audio from "Call Capture" virtual device
+#
+# Uses sox rec with silence detection to split on pauses.
+# Records at device native rate (Loopback runs 48kHz stereo);
+# call-transcribe handles conversion to 16kHz mono for whisper.
+#
+# Audio routing uses a multi-output aggregate device (speakers + Call Capture)
+# so FaceTime call audio reaches both the physical output and the recording
+# device. On macOS 26, system-level calls only route audio through the system
+# default output at connection time.
+#
+# IMPORTANT: Run `setup` before the FaceTime call connects, and `teardown`
+# after hanging up. The `start`/`stop` commands control recording only.
+#
+# Usage:
+#   call-record setup                     Create aggregate device, set output
+#   call-record start [--output DIR] ...  Start sox recording
+#   call-record stop                      Stop sox recording
+#   call-record teardown                  Destroy aggregate, restore devices
+#   call-record status
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+VOICE_CONFIG="$MIND_PATH/state/voice-call-config.json"
+PID_FILE="$MIND_PATH/state/locks/call-record.pid"
+SETUP_FILE="$MIND_PATH/state/locks/call-record.setup"
+LOG_FILE="$MIND_PATH/system/logs/voice-call.log"
+AGGREGATE_BIN="$MIND_PATH/system/bin/aggregate-device"
+AGGREGATE_NAME="Call Monitor"
+
+# Defaults
+OUTPUT_DIR=""
+SILENCE_DURATION="1.0"
+SILENCE_LEVEL="0.1%"
+CALL_GAIN="35"
+CAPTURE_DEVICE=""
+CHUNK_PREFIX=""
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] call-record: $1" >> "$LOG_FILE"
+}
+
+# Load config
+load_config() {
+    if [[ -f "$VOICE_CONFIG" ]]; then
+        CAPTURE_DEVICE=$(jq -r '.captureDevice // "Call Capture"' "$VOICE_CONFIG" 2>/dev/null)
+        SILENCE_DURATION=$(jq -r '.silenceThreshold // 1.5' "$VOICE_CONFIG" 2>/dev/null)
+        SILENCE_LEVEL=$(jq -r '.silenceLevel // "0.1%"' "$VOICE_CONFIG" 2>/dev/null)
+        CALL_GAIN=$(jq -r '.callGain // 25' "$VOICE_CONFIG" 2>/dev/null)
+    else
+        CAPTURE_DEVICE="Call Capture"
+    fi
+}
+
+# --- Setup: create aggregate device and configure audio routing ---
+cmd_setup() {
+    load_config
+
+    local original_input original_output
+    original_input=$(SwitchAudioSource -c -t input 2>/dev/null || echo "")
+    original_output=$(SwitchAudioSource -c -t output 2>/dev/null || echo "")
+
+    # Create multi-output aggregate: speakers + Call Capture.
+    # FaceTime call audio (from callservicesd) routes through the system
+    # default output. A pure virtual device receives silence, but an
+    # aggregate containing physical speakers gets the call audio on
+    # both sub-devices.
+    local created_aggregate=false
+    if [[ -x "$AGGREGATE_BIN" ]]; then
+        "$AGGREGATE_BIN" destroy --name "$AGGREGATE_NAME" 2>/dev/null || true
+
+        local agg_result
+        agg_result=$("$AGGREGATE_BIN" create --name "$AGGREGATE_NAME" \
+            --devices "$original_output" "$CAPTURE_DEVICE" 2>/dev/null) || true
+        if echo "$agg_result" | jq -e '.status == "created"' >/dev/null 2>&1; then
+            SwitchAudioSource -s "$AGGREGATE_NAME" -t output 2>/dev/null && {
+                created_aggregate=true
+                log "Created aggregate device '$AGGREGATE_NAME' ($original_output + $CAPTURE_DEVICE)"
+            }
+        fi
+    fi
+
+    if [[ "$created_aggregate" != "true" ]]; then
+        log "Warning: aggregate device not available, falling back to direct output"
+        SwitchAudioSource -s "$CAPTURE_DEVICE" -t output 2>/dev/null || {
+            echo "Error: Cannot set output to '$CAPTURE_DEVICE'" >&2
+            exit 1
+        }
+    fi
+
+    # Save setup state
+    mkdir -p "$(dirname "$SETUP_FILE")"
+    cat > "$SETUP_FILE" <<EOJSON
+{
+  "originalInput": "$original_input",
+  "originalOutput": "$original_output",
+  "aggregate": $created_aggregate,
+  "captureDevice": "$CAPTURE_DEVICE"
+}
+EOJSON
+
+    log "Setup complete (aggregate: $created_aggregate)"
+    echo "Audio routing configured"
+    echo "  Output: $AGGREGATE_NAME (aggregate: $created_aggregate)"
+    echo "  Original output: $original_output"
+}
+
+# --- Start: begin sox recording ---
+cmd_start() {
+    # Check if already recording
+    if [[ -f "$PID_FILE" ]]; then
+        local existing_pid
+        existing_pid=$(cat "$PID_FILE" 2>/dev/null)
+        if kill -0 "$existing_pid" 2>/dev/null; then
+            echo "Already recording (PID: $existing_pid)"
+            exit 1
+        fi
+        rm -f "$PID_FILE"
+    fi
+
+    load_config
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --output)  OUTPUT_DIR="$2"; shift 2 ;;
+            --silence) SILENCE_DURATION="$2"; shift 2 ;;
+            --level)   SILENCE_LEVEL="$2"; shift 2 ;;
+            --gain)    CALL_GAIN="$2"; shift 2 ;;
+            --device)  CAPTURE_DEVICE="$2"; shift 2 ;;
+            --prefix)  CHUNK_PREFIX="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+
+    # Default output directory
+    if [[ -z "$OUTPUT_DIR" ]]; then
+        OUTPUT_DIR="$MIND_PATH/state/media/call-chunks-$(date +%Y%m%d-%H%M%S)"
+    fi
+    mkdir -p "$OUTPUT_DIR"
+
+    log "Starting recording from '$CAPTURE_DEVICE' -> $OUTPUT_DIR (silence: ${SILENCE_DURATION}s, level: $SILENCE_LEVEL, gain: ${CALL_GAIN}dB)"
+
+    # If setup hasn't been run, do it now (for standalone usage)
+    if [[ ! -f "$SETUP_FILE" ]]; then
+        log "Setup not run, running inline setup"
+        cmd_setup
+    fi
+
+    # Record from Call Capture using AUDIODEV env var instead of changing
+    # the system default input. This keeps the system input on Claude Mic
+    # so FaceTime continues using it as its microphone throughout the call.
+    #
+    # Gain boost is needed because call audio from the aggregate device
+    # has very low amplitude. Without gain, silence detection (even at
+    # 0.1%) treats all call audio as silence.
+    AUDIODEV="$CAPTURE_DEVICE" rec "$OUTPUT_DIR/${CHUNK_PREFIX}chunk.wav" \
+        gain "$CALL_GAIN" \
+        silence 1 0.1 "$SILENCE_LEVEL" 1 "$SILENCE_DURATION" "$SILENCE_LEVEL" \
+        : newfile : restart &
+    local rec_pid=$!
+
+    # Store PID
+    mkdir -p "$(dirname "$PID_FILE")"
+    echo "$rec_pid" > "$PID_FILE"
+    echo "$OUTPUT_DIR" > "${PID_FILE}.output-dir"
+
+    log "Recording started (PID: $rec_pid)"
+    echo "Recording started"
+    echo "  PID: $rec_pid"
+    echo "  Output: $OUTPUT_DIR"
+    echo "  Gain: ${CALL_GAIN}dB"
+    echo "  Silence: ${SILENCE_DURATION}s @ ${SILENCE_LEVEL}"
+}
+
+# --- Stop: stop sox recording (does NOT tear down audio routing) ---
+cmd_stop() {
+    if [[ ! -f "$PID_FILE" ]]; then
+        echo "Not recording"
+        return 0
+    fi
+
+    local rec_pid
+    rec_pid=$(cat "$PID_FILE" 2>/dev/null)
+
+    if [[ -n "$rec_pid" ]] && kill -0 "$rec_pid" 2>/dev/null; then
+        kill "$rec_pid" 2>/dev/null || true
+        sleep 0.5
+        kill -9 "$rec_pid" 2>/dev/null || true
+        log "Stopped recording (PID: $rec_pid)"
+    fi
+
+    rm -f "$PID_FILE" "${PID_FILE}.output-dir"
+    echo "Recording stopped"
+}
+
+# --- Teardown: destroy aggregate device, restore audio devices ---
+cmd_teardown() {
+    # Stop recording first if still running
+    cmd_stop 2>/dev/null || true
+
+    if [[ ! -f "$SETUP_FILE" ]]; then
+        log "No setup state to tear down"
+        return 0
+    fi
+
+    # Read setup state
+    local original_output original_input had_aggregate capture_device
+    original_output=$(jq -r '.originalOutput // ""' "$SETUP_FILE" 2>/dev/null)
+    original_input=$(jq -r '.originalInput // ""' "$SETUP_FILE" 2>/dev/null)
+    had_aggregate=$(jq -r '.aggregate // false' "$SETUP_FILE" 2>/dev/null)
+    capture_device=$(jq -r '.captureDevice // "Call Capture"' "$SETUP_FILE" 2>/dev/null)
+
+    # Restore original output device first
+    if [[ -n "$original_output" ]]; then
+        SwitchAudioSource -s "$original_output" -t output 2>/dev/null || true
+        log "Restored output to: $original_output"
+    fi
+
+    # Destroy aggregate device
+    if [[ "$had_aggregate" == "true" ]] && [[ -x "$AGGREGATE_BIN" ]]; then
+        "$AGGREGATE_BIN" destroy --name "$AGGREGATE_NAME" 2>/dev/null || true
+        log "Destroyed aggregate device '$AGGREGATE_NAME'"
+    fi
+
+    # Restore original input device
+    if [[ -n "$original_input" ]]; then
+        SwitchAudioSource -s "$original_input" -t input 2>/dev/null || true
+        log "Restored input to: $original_input"
+    fi
+
+    rm -f "$SETUP_FILE"
+    log "Teardown complete"
+    echo "Audio routing restored"
+}
+
+cmd_status() {
+    if [[ -f "$PID_FILE" ]]; then
+        local rec_pid
+        rec_pid=$(cat "$PID_FILE" 2>/dev/null)
+        if kill -0 "$rec_pid" 2>/dev/null; then
+            echo "recording (PID: $rec_pid)"
+            return 0
+        else
+            rm -f "$PID_FILE"
+        fi
+    fi
+    echo "stopped"
+}
+
+# --- Main ---
+ACTION="${1:-}"
+shift 2>/dev/null || true
+
+case "$ACTION" in
+    setup)    cmd_setup ;;
+    start)    cmd_start "$@" ;;
+    stop)     cmd_stop ;;
+    teardown) cmd_teardown ;;
+    status)   cmd_status ;;
+    *)
+        echo "Usage: call-record <setup|start|stop|teardown|status> [options]"
+        echo ""
+        echo "Commands:"
+        echo "  setup                                   Create aggregate device"
+        echo "  start [--output DIR] [--silence SECS]   Start recording"
+        echo "  stop                                    Stop recording"
+        echo "  teardown                                Destroy aggregate, restore audio"
+        echo "  status"
+        exit 1
+        ;;
+esac

@@ -253,6 +253,40 @@ final class PermissionDialogMonitor {
         return nil
     }
 
+    /// Extract a clean summary of what the dialog is asking for
+    private func extractDialogSummary(from fullText: String) -> String {
+        // Try to extract the meaningful part of the dialog
+        // Dialogs typically say "X wants to access Y" or "X would like to Y"
+
+        // Clean up the text - remove excessive whitespace
+        let cleanedText = fullText.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+
+        // Look for common patterns and extract them
+        let patterns = [
+            #""(.+)" wants to (.+?)\."#,     // "App" wants to access X.
+            #""(.+)" would like to (.+?)\."#, // "App" would like to X.
+            #"(.+) wants access to (.+?)\."#,  // App wants access to X.
+            #"(.+) is trying to (.+?)\."#      // App is trying to X.
+        ]
+
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+               let match = regex.firstMatch(in: cleanedText, range: NSRange(cleanedText.startIndex..., in: cleanedText)) {
+                // Return the whole matched sentence
+                if let range = Range(match.range, in: cleanedText) {
+                    return String(cleanedText[range])
+                }
+            }
+        }
+
+        // If no pattern matched, return a truncated version of the text
+        let maxLength = 150
+        if cleanedText.count > maxLength {
+            return String(cleanedText.prefix(maxLength)) + "..."
+        }
+        return cleanedText
+    }
+
     /// Identify the type of permission from dialog text
     private func identifyPermissionType(from text: String) -> PermissionType {
         if text.contains("contacts") {
@@ -295,7 +329,10 @@ final class PermissionDialogMonitor {
             }
         }
 
+        // Log the full dialog text for debugging/visibility
         log("Detected permission dialog: \(dialogInfo.permissionType.rawValue) from \(dialogInfo.processName)",
+            level: .info, component: "PermissionDialogMonitor")
+        log("Dialog text: \(dialogInfo.fullText.prefix(500))",
             level: .info, component: "PermissionDialogMonitor")
 
         // Attempt auto-approve if enabled and we found the Allow button
@@ -304,8 +341,9 @@ final class PermissionDialogMonitor {
             if approved {
                 log("Auto-approved \(dialogInfo.permissionType.rawValue) permission",
                     level: .info, component: "PermissionDialogMonitor")
-                // Still notify but with success message
-                sendMessage("Heads up: auto-approved a \(dialogInfo.permissionType.displayName) permission dialog (from Claude Code update)")
+                // Still notify but with success message - include what the dialog said
+                let dialogSummary = extractDialogSummary(from: dialogInfo.fullText)
+                sendMessage("Heads up: auto-approved permission dialog from \(dialogInfo.processName): \(dialogSummary)")
                 lastNotificationTime[dialogKey] = Date()
                 return
             }
@@ -344,8 +382,9 @@ final class PermissionDialogMonitor {
     /// Build a user-friendly notification message
     private func buildNotificationMessage(_ dialogInfo: DialogInfo) -> String {
         let currentTask = TaskLock.taskDescription()
+        let dialogSummary = extractDialogSummary(from: dialogInfo.fullText)
 
-        var baseMessage = "Need your help! There's a \(dialogInfo.permissionType.displayName) permission dialog on the Mac"
+        var baseMessage = "Need your help! Permission dialog on the Mac: \(dialogSummary)"
 
         if dialogInfo.allowButton == nil {
             baseMessage += " (couldn't find Allow button to auto-approve)"

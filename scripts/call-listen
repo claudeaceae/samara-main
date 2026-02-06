@@ -1,0 +1,185 @@
+#!/bin/bash
+# call-listen: Recording + transcription orchestrator
+#
+# Combines call-record and call-transcribe to:
+# 1. Record from "Call Capture" device
+# 2. Watch for new WAV chunks
+# 3. Transcribe each chunk
+# 4. Optionally send transcription to Claude for response
+#
+# Usage:
+#   call-listen [--output DIR] [--respond] [--voice]
+#
+# Options:
+#   --output DIR    Directory for WAV chunks
+#   --respond       Send transcriptions to Claude CLI for response
+#   --voice         Respond with voice (via call-speak) instead of iMessage
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+LOG_FILE="$MIND_PATH/system/logs/voice-call.log"
+TRANSCRIPT_LOG="$MIND_PATH/system/logs/voice-transcription.log"
+CLAUDE_PATH="${CLAUDE_PATH:-$HOME/.local/bin/claude}"
+
+CALL_RECORD="$MIND_PATH/system/bin/call-record"
+CALL_TRANSCRIBE="$MIND_PATH/system/bin/call-transcribe"
+CALL_SPEAK="$MIND_PATH/system/bin/call-speak"
+MESSAGE_BIN="$MIND_PATH/system/bin/message-e"
+
+# Load config
+source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || true
+
+# Defaults
+OUTPUT_DIR=""
+RESPOND=false
+VOICE_RESPOND=false
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] call-listen: $1" >> "$LOG_FILE"
+}
+
+cleanup() {
+    log "Cleaning up..."
+    "$CALL_RECORD" stop 2>/dev/null || true
+    exit 0
+}
+trap cleanup EXIT INT TERM
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --output)   OUTPUT_DIR="$2"; shift 2 ;;
+        --respond)  RESPOND=true; shift ;;
+        --voice)    VOICE_RESPOND=true; RESPOND=true; shift ;;
+        *) shift ;;
+    esac
+done
+
+# Default output directory
+if [[ -z "$OUTPUT_DIR" ]]; then
+    OUTPUT_DIR="$MIND_PATH/state/media/call-chunks-$(date +%Y%m%d-%H%M%S)"
+fi
+mkdir -p "$OUTPUT_DIR"
+
+# Segment counter for recording restarts (avoids filename collisions)
+SEGMENT=0
+
+start_recording() {
+    SEGMENT=$((SEGMENT + 1))
+    "$CALL_RECORD" start --output "$OUTPUT_DIR" --prefix "s${SEGMENT}-" 2>/dev/null || true
+}
+
+# Start recording
+log "Starting call-listen (output: $OUTPUT_DIR, respond: $RESPOND, voice: $VOICE_RESPOND)"
+start_recording
+
+echo "Listening for speech..."
+echo "Output: $OUTPUT_DIR"
+[[ "$RESPOND" == "true" ]] && echo "Auto-respond: enabled (voice: $VOICE_RESPOND)"
+echo "Press Ctrl+C to stop"
+
+# Track processed files (file-based for bash 3.2 compat)
+PROCESSED_LIST="$OUTPUT_DIR/.processed"
+touch "$PROCESSED_LIST"
+
+# Build transcript for episode logging
+TRANSCRIPT_FILE="$OUTPUT_DIR/transcript.md"
+touch "$TRANSCRIPT_FILE"
+
+append_transcript() {
+    echo "$1" >> "$TRANSCRIPT_FILE"
+}
+
+is_processed() {
+    grep -qxF "$1" "$PROCESSED_LIST" 2>/dev/null
+}
+
+mark_processed() {
+    echo "$1" >> "$PROCESSED_LIST"
+}
+
+# Exit phrases
+EXIT_PHRASES="goodbye|hang up|end call|end the call|bye bye|talk to you later"
+
+while true; do
+    for wav_file in "$OUTPUT_DIR"/*.wav; do
+        [[ -f "$wav_file" ]] || continue
+        is_processed "$wav_file" && continue
+
+        # Wait for file to finish writing
+        sleep 0.1
+        local_size1=$(stat -f%z "$wav_file" 2>/dev/null || echo 0)
+        sleep 0.1
+        local_size2=$(stat -f%z "$wav_file" 2>/dev/null || echo 0)
+        [[ "$local_size1" != "$local_size2" ]] && continue
+
+        # Skip tiny files
+        if [[ "$local_size2" -lt 1000 ]]; then
+            mark_processed "$wav_file"
+            continue
+        fi
+
+        mark_processed "$wav_file"
+
+        # Transcribe
+        text=$("$CALL_TRANSCRIBE" "$wav_file" 2>/dev/null || true)
+        if [[ -z "$text" ]]; then
+            continue
+        fi
+
+        echo ""
+        echo "[Heard] $text"
+        append_transcript "**Caller:** $text"
+
+        # Check for exit phrases
+        if echo "$text" | grep -iEq "$EXIT_PHRASES"; then
+            echo "[Exit phrase detected]"
+            append_transcript ""
+            append_transcript "*Call ended: exit phrase detected*"
+            log "Exit phrase detected: $text"
+            exit 0
+        fi
+
+        # Respond if enabled
+        if [[ "$RESPOND" == "true" ]]; then
+            log "Getting Claude response for: ${text:0:100}"
+
+            # Get Claude's response
+            response=$(timeout 60 "$CLAUDE_PATH" -p "You are on a FaceTime voice call. Respond conversationally and concisely (1-3 sentences). The caller said: $text" \
+                --output-format text \
+                --model haiku \
+                --dangerously-skip-permissions 2>/dev/null || echo "")
+
+            if [[ -n "$response" ]]; then
+                echo "[Claude] $response"
+                append_transcript "**Claude:** $response"
+                append_transcript ""
+                log "Response: ${response:0:100}"
+
+                if [[ "$VOICE_RESPOND" == "true" ]]; then
+                    # Pause recording during TTS to avoid self-echo.
+                    # Aggregate device includes Call Capture, so TTS audio
+                    # played via afplay would reach the recording device.
+                    "$CALL_RECORD" stop 2>/dev/null || true
+                    sleep 0.1
+
+                    # Respond with voice
+                    "$CALL_SPEAK" "$response" 2>/dev/null || {
+                        log "Voice response failed, falling back to iMessage"
+                        "$MESSAGE_BIN" "$response" 2>/dev/null || true
+                    }
+
+                    # Resume recording with new prefix to avoid filename collisions
+                    sleep 0.1
+                    start_recording
+                else
+                    # Respond via iMessage
+                    "$MESSAGE_BIN" "$response" 2>/dev/null || true
+                fi
+            fi
+        fi
+    done
+    sleep 0.3
+done

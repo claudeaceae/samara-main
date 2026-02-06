@@ -329,7 +329,7 @@ configure_claude_code() {
     # Build the hooks configuration
     local hooks_config=$(cat << EOF
 {
-  "cleanupPeriodDays": 36500,
+  "cleanupPeriodDays": 365000,
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -607,6 +607,37 @@ EOF
         <string>$HOME</string>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin</string>
+    </dict>
+</dict>
+</plist>
+EOF
+
+    # FaceTime Incoming Watcher (every 5 seconds)
+    cat > "$plist_dir/com.claude.facetime-incoming.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.claude.facetime-incoming</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>$TARGET_DIR/bin/facetime-incoming-watcher</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>5</integer>
+    <key>StandardOutPath</key>
+    <string>$TARGET_DIR/logs/facetime-incoming.log</string>
+    <key>StandardErrorPath</key>
+    <string>$TARGET_DIR/logs/facetime-incoming.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>$HOME</string>
+        <key>MIND_PATH</key>
+        <string>$TARGET_DIR</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.local/bin</string>
     </dict>
 </dict>
 </plist>

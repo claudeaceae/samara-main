@@ -1,0 +1,293 @@
+#!/bin/bash
+# facetime: Control FaceTime for voice calls
+#
+# Usage:
+#   facetime open          Open FaceTime app
+#   facetime close         Quit FaceTime app
+#   facetime status        Check if FaceTime is running
+#   facetime call [target] Place a FaceTime Audio call (default: collaborator)
+#   facetime answer        Accept incoming call + set audio devices
+#   facetime hangup        End call by quitting FaceTime
+#
+# Call flow sets system input to "Claude Mic" before dialing and
+# restores the original device on hangup.
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+OSASCRIPT_BIN="${OSASCRIPT_BIN:-osascript}"
+VOICE_CONFIG="$MIND_PATH/state/voice-call-config.json"
+STATE_FILE="$MIND_PATH/state/voice-call-state.json"
+LOG_FILE="$MIND_PATH/system/logs/voice-call.log"
+
+# Load collaborator phone from config
+source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || true
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] facetime: $1" >> "$LOG_FILE"
+}
+
+# Load virtual device names from voice-call config
+load_device_config() {
+    if [[ -f "$VOICE_CONFIG" ]]; then
+        MIC_DEVICE=$(jq -r '.micDevice // "Claude Mic"' "$VOICE_CONFIG" 2>/dev/null)
+    else
+        MIC_DEVICE="Claude Mic"
+    fi
+}
+
+save_state() {
+    mkdir -p "$(dirname "$STATE_FILE")"
+    cat > "$STATE_FILE" <<EOJSON
+{
+  "status": "$1",
+  "target": "${2:-}",
+  "originalInputDevice": "${3:-}",
+  "startedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "pid": $$
+}
+EOJSON
+}
+
+clear_state() {
+    rm -f "$STATE_FILE"
+}
+
+get_original_input() {
+    SwitchAudioSource -c -t input 2>/dev/null || echo ""
+}
+
+cmd_open() {
+    open -a FaceTime
+    log "Opened FaceTime"
+    echo "FaceTime opened"
+}
+
+cmd_close() {
+    "$OSASCRIPT_BIN" -e 'tell application "FaceTime" to quit' 2>/dev/null || true
+    clear_state
+    log "Closed FaceTime"
+    echo "FaceTime closed"
+}
+
+cmd_status() {
+    if pgrep -x "FaceTime" >/dev/null 2>&1; then
+        echo "running"
+    else
+        echo "stopped"
+    fi
+}
+
+cmd_call() {
+    local target="${1:-$COLLABORATOR_PHONE}"
+    if [[ -z "$target" ]]; then
+        echo "Error: No target specified and COLLABORATOR_PHONE not set" >&2
+        exit 1
+    fi
+
+    load_device_config
+
+    # Save original input device for restoration
+    local original_input
+    original_input=$(get_original_input)
+    log "Original input device: $original_input"
+
+    # Set system input to Claude Mic so FaceTime uses it
+    if command -v SwitchAudioSource >/dev/null 2>&1; then
+        SwitchAudioSource -s "$MIC_DEVICE" -t input 2>/dev/null && \
+            log "Set input to: $MIC_DEVICE" || \
+            log "Warning: Could not set input to $MIC_DEVICE"
+    fi
+
+    # Save call state
+    save_state "calling" "$target" "$original_input"
+
+    # Initiate FaceTime Audio call via AppleScript UI automation.
+    # The facetime-audio:// URL scheme only shows a notification on macOS 26+
+    # and doesn't actually dial. Instead we: Cmd+N → type contact →
+    # switch dropdown to FaceTime Audio → Return to call.
+    #
+    # Audio routing relies on system-level devices (Claude Mic input,
+    # Call Monitor aggregate output) set before this call. No Video menu
+    # automation needed — AUDIODEV in call-record handles sox recording
+    # without changing the system input away from Claude Mic.
+    log "Calling: $target (via UI automation)"
+    "$OSASCRIPT_BIN" -e "
+        tell application \"FaceTime\" to activate
+        delay 1
+
+        tell application \"System Events\"
+            tell process \"FaceTime\"
+                -- Open new call via Cmd+N (avoids slow 'entire contents' scan of window)
+                keystroke \"n\" using command down
+                delay 2
+
+                -- Type the target number into the To: field
+                tell sheet 1 of window 1
+                    set tf to text field 1
+                    click tf
+                    delay 0.3
+                    set value of tf to \"$target\"
+                    delay 0.5
+                    key code 36 -- Return to resolve contact
+                    delay 1.5
+                end tell
+
+                -- Switch dropdown from Video to Audio
+                tell sheet 1 of window 1
+                    set allEls to entire contents
+                    repeat with el in allEls
+                        try
+                            if (description of el) is \"call-options-dropdown\" then
+                                perform action \"AXPress\" of el
+                                delay 0.8
+                                exit repeat
+                            end if
+                        end try
+                    end repeat
+                end tell
+
+                -- Down arrow to FaceTime Audio, Return to select and dial
+                key code 125
+                delay 0.3
+                key code 36
+                delay 1
+            end tell
+        end tell
+    " 2>&1
+
+    log "Call initiated to: $target"
+    echo "Calling $target via FaceTime Audio..."
+}
+
+cmd_answer() {
+    load_device_config
+
+    # Save original input device for restoration
+    local original_input
+    original_input=$(get_original_input)
+    log "Original input device: $original_input"
+
+    # Set system input to Claude Mic so FaceTime uses it
+    if command -v SwitchAudioSource >/dev/null 2>&1; then
+        SwitchAudioSource -s "$MIC_DEVICE" -t input 2>/dev/null && \
+            log "Set input to: $MIC_DEVICE" || \
+            log "Warning: Could not set input to $MIC_DEVICE"
+    fi
+
+    # Click Accept in NotificationCenter banner
+    log "Answering incoming call via NotificationCenter banner..."
+    local accepted
+    accepted=$("$OSASCRIPT_BIN" -e '
+        tell application "System Events"
+            try
+                tell process "NotificationCenter"
+                    repeat with w in (every window)
+                        set allEls to entire contents of w
+                        repeat with el in allEls
+                            try
+                                if (description of el) is "Accept" then
+                                    click el
+                                    return "accepted"
+                                end if
+                            end try
+                        end repeat
+                    end repeat
+                end tell
+            end try
+        end tell
+        return "not_found"
+    ' 2>/dev/null || echo "error")
+
+    if [[ "$accepted" != "accepted" ]]; then
+        log "Error: Could not find Accept button in NotificationCenter"
+        echo "Error: No incoming call banner found" >&2
+        exit 1
+    fi
+
+    log "Call accepted, waiting for connection..."
+    sleep 3
+
+    # Save call state
+    save_state "answered" "incoming" "$original_input"
+
+    # Audio routing relies on system-level devices set before answering:
+    # - System input: Claude Mic (set above via SwitchAudioSource)
+    # - System output: Call Monitor aggregate (set by call-record setup)
+    # No Video menu automation needed — AUDIODEV in call-record handles
+    # sox recording without changing the system input.
+
+    log "Incoming call answered and audio devices configured"
+    echo "Call answered"
+}
+
+cmd_hangup() {
+    # Restore original input device if we saved it
+    if [[ -f "$STATE_FILE" ]]; then
+        local original_input
+        original_input=$(jq -r '.originalInputDevice // ""' "$STATE_FILE" 2>/dev/null)
+        if [[ -n "$original_input" ]] && command -v SwitchAudioSource >/dev/null 2>&1; then
+            SwitchAudioSource -s "$original_input" -t input 2>/dev/null && \
+                log "Restored input to: $original_input" || \
+                log "Warning: Could not restore input to $original_input"
+        fi
+    fi
+
+    # End the call. On macOS 26, FaceTime calls persist as system-level calls
+    # even after quitting/killing the app. The actual End button lives in
+    # NotificationCenter's call banner, not in FaceTime's process.
+    log "Ending call via NotificationCenter banner..."
+    "$OSASCRIPT_BIN" -e '
+        tell application "System Events"
+            try
+                tell process "NotificationCenter"
+                    repeat with w in (every window)
+                        set allEls to entire contents of w
+                        repeat with el in allEls
+                            try
+                                if (description of el) is "End" then
+                                    click el
+                                    return "ended"
+                                end if
+                            end try
+                        end repeat
+                    end repeat
+                end tell
+            end try
+        end tell
+    ' 2>/dev/null || true
+
+    # Also quit FaceTime app if still open
+    "$OSASCRIPT_BIN" -e 'tell application "FaceTime" to quit' 2>/dev/null || true
+    killall FaceTime 2>/dev/null || true
+
+    clear_state
+    log "Hung up"
+    echo "Call ended"
+}
+
+# --- Main ---
+ACTION="${1:-}"
+shift 2>/dev/null || true
+
+case "$ACTION" in
+    open)    cmd_open ;;
+    close)   cmd_close ;;
+    status)  cmd_status ;;
+    call)    cmd_call "$@" ;;
+    answer)  cmd_answer ;;
+    hangup)  cmd_hangup ;;
+    *)
+        echo "Usage: facetime <open|close|status|call|answer|hangup> [args]"
+        echo ""
+        echo "Commands:"
+        echo "  open          Open FaceTime app"
+        echo "  close         Quit FaceTime app"
+        echo "  status        Check if running (prints 'running' or 'stopped')"
+        echo "  call [target] Place FaceTime Audio call (default: collaborator)"
+        echo "  answer        Accept incoming call and set up audio devices"
+        echo "  hangup        End call by quitting FaceTime"
+        exit 1
+        ;;
+esac

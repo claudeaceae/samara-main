@@ -315,6 +315,13 @@ final class SenseRouter {
                 self?.handleBrowserHistoryEvent(event)
             }
         }
+
+        // Incoming FaceTime call events (logging only — voice-call handles conversation)
+        if services.isEnabled("voiceCall") {
+            handlers["facetime_incoming"] = { [weak self] event in
+                self?.handleIncomingCallEvent(event)
+            }
+        }
     }
 
     private func handleLocationEvent(_ event: SenseEvent) {
@@ -766,6 +773,20 @@ final class SenseRouter {
     private func shouldMessageCollaboratorFromResult(_ result: String) -> Bool {
         // If Claude decided to just note it internally, don't send
         return !result.hasPrefix("[NOTED:")
+    }
+
+    // MARK: - Incoming Call Handler
+
+    private func handleIncomingCallEvent(_ event: SenseEvent) {
+        let caller = event.getString("caller") ?? "Unknown"
+        let action = event.getString("action") ?? "unknown"
+
+        log("Incoming FaceTime call: \(caller) → \(action)", level: .info, component: "SenseRouter")
+
+        // Log to episode (no Claude invocation — suppress_response is true,
+        // and voice-call --answer handles the conversation directly)
+        let eventDescription = formatEventForLogging(event)
+        episodeLogger.logSenseEvent(sense: event.sense, data: eventDescription)
     }
 
     /// Extracts searchable text from social media interactions for semantic memory lookup

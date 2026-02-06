@@ -1,0 +1,98 @@
+#!/bin/bash
+# call-speak: Play TTS audio to "Claude Mic" virtual device
+#
+# Generates speech via the existing speak script (ElevenLabs TTS)
+# and plays it through the Claude Mic device so FaceTime transmits it.
+#
+# Usage:
+#   call-speak "Text to say"
+#   call-speak --file /path/to/audio.mp3
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+VOICE_CONFIG="$MIND_PATH/state/voice-call-config.json"
+LOG_FILE="$MIND_PATH/system/logs/voice-call.log"
+SPEAK_BIN="$MIND_PATH/system/bin/speak"
+
+# Load device config
+if [[ -f "$VOICE_CONFIG" ]]; then
+    MIC_DEVICE=$(jq -r '.micDevice // "Claude Mic"' "$VOICE_CONFIG" 2>/dev/null)
+else
+    MIC_DEVICE="Claude Mic"
+fi
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] call-speak: $1" >> "$LOG_FILE"
+}
+
+play_audio() {
+    local audio_file="$1"
+
+    if [[ ! -f "$audio_file" ]]; then
+        echo "Error: Audio file not found: $audio_file" >&2
+        return 1
+    fi
+
+    log "Playing to '$MIC_DEVICE' (via Loopback Terminal capture): $audio_file"
+
+    # Loopback captures Terminal's audio output and routes it to Claude Mic.
+    # We just play normally — Loopback handles the routing. Use afplay which
+    # sends audio through CoreAudio (captured by Loopback's per-app routing).
+    afplay "$audio_file" 2>/dev/null
+    local play_result=$?
+
+    if [[ $play_result -eq 0 ]]; then
+        log "Playback complete"
+    else
+        log "Playback failed (afplay exit: $play_result)"
+    fi
+    return $play_result
+}
+
+# --- Main ---
+TEXT=""
+AUDIO_FILE=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --file)
+            AUDIO_FILE="$2"
+            shift 2
+            ;;
+        *)
+            TEXT="$1"
+            shift
+            ;;
+    esac
+done
+
+if [[ -n "$AUDIO_FILE" ]]; then
+    # Play existing audio file
+    play_audio "$AUDIO_FILE"
+elif [[ -n "$TEXT" ]]; then
+    # Generate TTS then play
+    if [[ ! -x "$SPEAK_BIN" ]]; then
+        echo "Error: speak script not found at $SPEAK_BIN" >&2
+        exit 1
+    fi
+
+    # Generate TTS to temp file
+    TEMP_AUDIO=$(mktemp /tmp/call-speak-XXXXXX.mp3)
+    trap "rm -f '$TEMP_AUDIO'" EXIT
+
+    log "Generating TTS: ${TEXT:0:80}..."
+    "$SPEAK_BIN" "$TEXT" --output "$TEMP_AUDIO" >/dev/null 2>&1 || {
+        echo "Error: TTS generation failed" >&2
+        exit 1
+    }
+
+    # Play to Claude Mic
+    play_audio "$TEMP_AUDIO"
+    echo "Spoke: ${TEXT:0:80}..."
+else
+    echo "Usage: call-speak \"Text to say\""
+    echo "       call-speak --file /path/to/audio.mp3"
+    exit 1
+fi

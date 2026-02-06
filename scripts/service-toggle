@@ -23,7 +23,7 @@ CONFIG_FILE="$MIND_PATH/system/config.json"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 
 # All known services
-SERVICES="x bluesky github wallet meeting webhook location browserHistory proactive"
+SERVICES="x bluesky github wallet meeting webhook location browserHistory proactive voiceCall"
 
 # Get launchd agents for a service
 get_agents() {
@@ -38,6 +38,7 @@ get_agents() {
         location)       echo "co.organelle.location-receiver" ;;
         browserHistory) echo "" ;;  # Client-side only (runs on É's Mac)
         proactive)      echo "" ;;  # Runs as part of wake-adaptive, no separate agent
+        voiceCall)      echo "com.claude.facetime-incoming" ;;  # Incoming call watcher
         *)              echo "" ;;
     esac
 }

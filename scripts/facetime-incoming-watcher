@@ -1,0 +1,258 @@
+#!/bin/bash
+# facetime-incoming-watcher: Detect and auto-answer incoming FaceTime calls
+#
+# Polls NotificationCenter for incoming call banners every invocation.
+# Run via launchd (every 5 seconds) as an always-on service.
+#
+# Behavior:
+#   - Detects Accept/Decline buttons in NotificationCenter
+#   - Extracts caller name from banner text
+#   - Auto-answers calls from the collaborator
+#   - Lets unknown callers ring (no decline)
+#   - Writes sense event for episode logging
+#
+# Depends on: facetime, call-record, voice-call, config.sh
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+LOG_FILE="$MIND_PATH/system/logs/facetime-incoming.log"
+LOCK_FILE="$MIND_PATH/state/locks/incoming-call.lock"
+SENSES_DIR="$MIND_PATH/senses"
+
+FACETIME="$MIND_PATH/system/bin/facetime"
+CALL_RECORD="$MIND_PATH/system/bin/call-record"
+VOICE_CALL="$MIND_PATH/system/bin/voice-call"
+
+# Load config for collaborator info
+source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || true
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] incoming-watcher: $1" >> "$LOG_FILE"
+}
+
+# Check for stale lock (older than 15 minutes)
+check_stale_lock() {
+    if [[ ! -f "$LOCK_FILE" ]]; then
+        return 1  # No lock
+    fi
+
+    local lock_pid lock_time now age
+    lock_pid=$(jq -r '.pid // ""' "$LOCK_FILE" 2>/dev/null)
+    lock_time=$(jq -r '.timestamp // ""' "$LOCK_FILE" 2>/dev/null)
+
+    # Check if PID is still alive
+    if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+        log "Stale lock: PID $lock_pid no longer running, removing"
+        rm -f "$LOCK_FILE"
+        return 1
+    fi
+
+    # Check age (15 minute timeout)
+    if [[ -n "$lock_time" ]]; then
+        now=$(date +%s)
+        age=$(( now - lock_time ))
+        if [[ $age -gt 900 ]]; then
+            log "Stale lock: $age seconds old (>900), removing"
+            rm -f "$LOCK_FILE"
+            return 1
+        fi
+    fi
+
+    return 0  # Lock is active
+}
+
+create_lock() {
+    mkdir -p "$(dirname "$LOCK_FILE")"
+    cat > "$LOCK_FILE" <<EOJSON
+{
+  "pid": $$,
+  "timestamp": $(date +%s),
+  "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOJSON
+}
+
+remove_lock() {
+    rm -f "$LOCK_FILE"
+}
+
+# Detect incoming call via NotificationCenter
+# Returns: "caller_name" if call detected, empty otherwise
+detect_incoming_call() {
+    osascript -e '
+        tell application "System Events"
+            try
+                tell process "NotificationCenter"
+                    repeat with w in (every window)
+                        set allEls to entire contents of w
+                        set hasAccept to false
+                        set hasDecline to false
+                        set callerName to ""
+
+                        repeat with el in allEls
+                            try
+                                if (description of el) is "Accept" then
+                                    set hasAccept to true
+                                end if
+                                if (description of el) is "Decline" then
+                                    set hasDecline to true
+                                end if
+                                -- Extract caller name from static text elements
+                                if (class of el) is static text then
+                                    set textVal to value of el
+                                    -- Skip labels like "FaceTime Audio" or "incoming call"
+                                    if textVal is not "FaceTime Audio" and textVal is not "FaceTime" and textVal does not contain "incoming" and textVal does not contain "Decline" and textVal does not contain "Accept" then
+                                        if length of textVal > 0 then
+                                            set callerName to textVal
+                                        end if
+                                    end if
+                                end if
+                            end try
+                        end repeat
+
+                        if hasAccept and hasDecline then
+                            return callerName
+                        end if
+                    end repeat
+                end tell
+            end try
+        end tell
+        return ""
+    ' 2>/dev/null || echo ""
+}
+
+# Check if caller matches collaborator (case-insensitive, partial match)
+is_collaborator() {
+    local caller="$1"
+    local caller_lower
+    caller_lower=$(echo "$caller" | tr '[:upper:]' '[:lower:]')
+
+    # Match against name
+    if [[ -n "$COLLABORATOR_NAME" ]]; then
+        local name_lower
+        name_lower=$(echo "$COLLABORATOR_NAME" | tr '[:upper:]' '[:lower:]')
+        if [[ "$caller_lower" == *"$name_lower"* || "$name_lower" == *"$caller_lower"* ]]; then
+            return 0
+        fi
+    fi
+
+    # Match against phone number (strip formatting for comparison)
+    if [[ -n "$COLLABORATOR_PHONE" ]]; then
+        local phone_digits caller_digits
+        phone_digits=$(echo "$COLLABORATOR_PHONE" | tr -d ' ()-+')
+        caller_digits=$(echo "$caller" | tr -d ' ()-+')
+        if [[ "$caller_digits" == *"$phone_digits"* || "$phone_digits" == *"$caller_digits"* ]]; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Write sense event for episode logging
+write_sense_event() {
+    local caller="$1"
+    local action="$2"
+    local timestamp
+    timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    local epoch
+    epoch=$(date +%s)
+
+    mkdir -p "$SENSES_DIR"
+
+    local event_file="$SENSES_DIR/facetime-incoming-${epoch}.event.json"
+    cat > "$event_file" <<EOJSON
+{
+  "sense": "facetime_incoming",
+  "timestamp": "$timestamp",
+  "priority": "normal",
+  "data": {
+    "caller": "$caller",
+    "action": "$action",
+    "detected_at": "$timestamp"
+  },
+  "context": {
+    "suggested_prompt": "You answered an incoming FaceTime call from $caller. The conversation is being handled by voice-call --answer.",
+    "suppress_response": true
+  }
+}
+EOJSON
+
+    log "Sense event written: $event_file (caller=$caller, action=$action)"
+}
+
+# Main answer flow
+answer_call() {
+    local caller="$1"
+
+    log "Auto-answering call from: $caller"
+
+    # 1. Create lock
+    create_lock
+
+    # 2. Set up aggregate device BEFORE accepting (critical for audio routing)
+    log "Setting up audio recording (pre-accept)..."
+    "$CALL_RECORD" setup 2>&1 | while read -r line; do log "call-record: $line"; done || {
+        log "Error: call-record setup failed"
+        remove_lock
+        return 1
+    }
+
+    # 3. Accept the call via facetime answer
+    log "Clicking Accept..."
+    "$FACETIME" answer 2>&1 | while read -r line; do log "facetime: $line"; done || {
+        log "Error: facetime answer failed"
+        "$CALL_RECORD" teardown 2>/dev/null || true
+        remove_lock
+        return 1
+    }
+
+    # 4. Write sense event
+    write_sense_event "$caller" "answered"
+
+    # 5. Launch voice-call --answer in background
+    log "Starting voice-call --answer..."
+    "$VOICE_CALL" --answer --voice-response --greeting "Hey, what's up?" &
+    local vc_pid=$!
+    log "voice-call running as PID $vc_pid"
+
+    # Update lock with voice-call PID
+    cat > "$LOCK_FILE" <<EOJSON
+{
+  "pid": $vc_pid,
+  "timestamp": $(date +%s),
+  "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "caller": "$caller"
+}
+EOJSON
+
+    # Don't wait — launchd will run us again, and we'll skip due to lock
+    log "Watcher returning (voice-call continues in background)"
+}
+
+# --- Main ---
+
+# Skip if a call is already active
+if check_stale_lock; then
+    exit 0
+fi
+
+# Poll for incoming call
+caller=$(detect_incoming_call)
+
+if [[ -z "$caller" ]]; then
+    # No incoming call detected
+    exit 0
+fi
+
+log "Incoming call detected from: '$caller'"
+
+# Check if caller is the collaborator
+if is_collaborator "$caller"; then
+    answer_call "$caller"
+else
+    log "Unknown caller: '$caller' — letting ring"
+    write_sense_event "$caller" "ignored"
+fi

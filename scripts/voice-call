@@ -1,0 +1,228 @@
+#!/bin/bash
+# voice-call: High-level FaceTime voice call orchestrator
+#
+# Full lifecycle: audio-setup check → setup aggregate → call → greeting →
+# listen → respond → teardown → hangup
+#
+# IMPORTANT: Audio routing (aggregate device) must be set up BEFORE the
+# FaceTime call connects. On macOS 26, call audio only routes through
+# the system default output at connection time.
+#
+# Usage:
+#   voice-call [target] [--text-response | --voice-response]
+#
+# Options:
+#   --text-response    Respond via iMessage (default)
+#   --voice-response   Respond with TTS through FaceTime
+#   --greeting TEXT    Custom greeting to speak when call connects
+#   --no-greeting      Skip initial greeting
+#   --timeout SECS     Max call duration (default: 600 = 10 minutes)
+#   --answer           Answer mode: skip dialing (call already connected)
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+LOG_FILE="$MIND_PATH/system/logs/voice-call.log"
+
+AUDIO_SETUP="$MIND_PATH/system/bin/audio-setup"
+FACETIME="$MIND_PATH/system/bin/facetime"
+CALL_RECORD="$MIND_PATH/system/bin/call-record"
+CALL_LISTEN="$MIND_PATH/system/bin/call-listen"
+CALL_SPEAK="$MIND_PATH/system/bin/call-speak"
+
+# Load config
+source "$MIND_PATH/system/lib/config.sh" 2>/dev/null || true
+
+# Defaults
+TARGET=""
+RESPONSE_MODE="--respond"
+GREETING="Hey, it's Claude."
+NO_GREETING=false
+TIMEOUT=600
+ANSWER_MODE=false
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] voice-call: $1" >> "$LOG_FILE"
+}
+
+cleanup() {
+    log "Cleaning up voice call..."
+    "$CALL_RECORD" stop 2>/dev/null || true
+    "$CALL_RECORD" teardown 2>/dev/null || true
+    "$FACETIME" hangup 2>/dev/null || true
+    # Remove incoming-call lock if present (answer mode)
+    rm -f "$MIND_PATH/state/locks/incoming-call.lock"
+    # Ensure voice-call state is reset even if facetime hangup fails
+    local state_file="$MIND_PATH/state/voice-call-state.json"
+    if [[ -f "$state_file" ]]; then
+        echo '{"status":"idle"}' > "$state_file"
+    fi
+    log "Voice call ended"
+}
+trap cleanup EXIT INT TERM
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --text-response)  RESPONSE_MODE="--respond"; shift ;;
+        --voice-response) RESPONSE_MODE="--voice"; shift ;;
+        --greeting)       GREETING="$2"; shift 2 ;;
+        --no-greeting)    NO_GREETING=true; shift ;;
+        --timeout)        TIMEOUT="$2"; shift 2 ;;
+        --answer)         ANSWER_MODE=true; shift ;;
+        --help|-h)
+            echo "Usage: voice-call [target] [options]"
+            echo ""
+            echo "Options:"
+            echo "  --text-response    Respond via iMessage (default)"
+            echo "  --voice-response   Respond with TTS through FaceTime"
+            echo "  --greeting TEXT    Custom greeting when call connects"
+            echo "  --no-greeting      Skip initial greeting"
+            echo "  --timeout SECS     Max call duration (default: 600)"
+            echo "  --answer           Answer mode (call already connected, skip dialing)"
+            exit 0
+            ;;
+        *)
+            if [[ -z "$TARGET" ]]; then TARGET="$1"; fi
+            shift
+            ;;
+    esac
+done
+
+OUTPUT_DIR="$MIND_PATH/state/media/call-$(date +%Y%m%d-%H%M%S)"
+
+if [[ "$ANSWER_MODE" == "true" ]]; then
+    # Answer mode: call already connected by facetime-incoming-watcher
+    # Audio routing (call-record setup) and call acceptance already done
+    TARGET="incoming"
+    log "Answer mode: call already connected"
+    echo "=== Voice Call (Incoming) ==="
+    echo "Mode: answering incoming call"
+    echo "Response: $RESPONSE_MODE"
+    echo "Timeout: ${TIMEOUT}s"
+    echo ""
+else
+    # Outgoing mode: full dial flow
+    TARGET="${TARGET:-$COLLABORATOR_PHONE}"
+    if [[ -z "$TARGET" ]]; then
+        echo "Error: No target specified and COLLABORATOR_PHONE not set" >&2
+        exit 1
+    fi
+
+    echo "=== Voice Call ==="
+    echo "Target: $TARGET"
+    echo "Response: $RESPONSE_MODE"
+    echo "Timeout: ${TIMEOUT}s"
+    echo ""
+
+    # Step 1: Check prerequisites
+    log "Checking audio prerequisites..."
+    echo "Checking audio setup..."
+    if ! "$AUDIO_SETUP" --check >/dev/null 2>&1; then
+        echo "Audio prerequisites not met. Running full check:"
+        "$AUDIO_SETUP" --check
+        exit 1
+    fi
+    echo "  Audio setup: OK"
+
+    # Step 2: Set up audio routing (aggregate device)
+    # MUST happen before the call connects
+    log "Setting up audio routing..."
+    echo "Setting up audio recording..."
+    "$CALL_RECORD" setup
+    echo ""
+
+    # Step 3: Initiate call (connects while aggregate is system output)
+    log "Initiating call to: $TARGET"
+    echo "Calling $TARGET..."
+    "$FACETIME" call "$TARGET"
+fi
+
+# Step 4: Wait for call to connect (outgoing) or prepare greeting (both modes).
+# Pre-generate greeting TTS in parallel to save latency.
+GREETING_AUDIO=""
+TTS_PID=""
+if [[ "$NO_GREETING" != "true" && -n "$GREETING" ]]; then
+    GREETING_AUDIO=$(mktemp /tmp/greeting-XXXXXX.mp3)
+    log "Pre-generating greeting TTS..."
+    "$MIND_PATH/system/bin/speak" "$GREETING" --output "$GREETING_AUDIO" >/dev/null 2>&1 &
+    TTS_PID=$!
+fi
+
+if [[ "$ANSWER_MODE" != "true" ]]; then
+    echo "Waiting for call to connect..."
+    sleep 6
+fi
+
+# Step 5: Play pre-generated greeting (TTS was generated during connection wait)
+if [[ -n "$GREETING_AUDIO" ]]; then
+    wait $TTS_PID 2>/dev/null || true
+    if [[ -f "$GREETING_AUDIO" && -s "$GREETING_AUDIO" ]]; then
+        echo "Speaking greeting..."
+        "$CALL_SPEAK" --file "$GREETING_AUDIO" 2>/dev/null || {
+            log "Greeting playback failed (non-fatal)"
+            echo "  (Greeting failed, continuing...)"
+        }
+    else
+        log "Greeting TTS generation failed (non-fatal)"
+    fi
+    rm -f "$GREETING_AUDIO"
+    sleep 0.5
+fi
+
+# Step 6: Start conversation loop
+log "Starting conversation loop (timeout: ${TIMEOUT}s)"
+echo ""
+echo "=== Conversation Active ==="
+echo "Listening for speech... (Ctrl+C or say 'goodbye' to end)"
+echo ""
+
+timeout "$TIMEOUT" "$CALL_LISTEN" --output "$OUTPUT_DIR" $RESPONSE_MODE 2>&1 || {
+    exit_code=$?
+    if [[ $exit_code -eq 124 ]]; then
+        echo ""
+        echo "Call timeout reached (${TIMEOUT}s)"
+        log "Call ended: timeout"
+    fi
+}
+
+echo ""
+echo "=== Call Complete ==="
+log "Voice call completed normally"
+
+# Step 7: Log call transcript to today's episode
+TRANSCRIPT_FILE="$OUTPUT_DIR/transcript.md"
+if [[ -f "$TRANSCRIPT_FILE" && -s "$TRANSCRIPT_FILE" ]]; then
+    DATE=$(date +%Y-%m-%d)
+    TIME=$(date +%H:%M)
+    EPISODE_FILE="$MIND_PATH/memory/episodes/$DATE.md"
+
+    # Create episode file if it doesn't exist
+    if [[ ! -f "$EPISODE_FILE" ]]; then
+        mkdir -p "$(dirname "$EPISODE_FILE")"
+        echo "# Episode: $DATE
+
+Daily log of conversations and observations.
+
+---
+" > "$EPISODE_FILE"
+    fi
+
+    # Append call transcript to episode
+    TRANSCRIPT_CONTENT=$(cat "$TRANSCRIPT_FILE")
+    echo "
+## $TIME [Voice Call]
+
+**Target:** $TARGET
+**Mode:** $([ "$RESPONSE_MODE" = "--voice" ] && echo "voice response" || echo "text response")
+**Duration:** call-listen active
+
+$TRANSCRIPT_CONTENT
+" >> "$EPISODE_FILE"
+
+    log "Logged call transcript to episode ($EPISODE_FILE)"
+    echo "Call transcript logged to episode"
+else
+    log "No transcript to log (no speech detected)"
+fi

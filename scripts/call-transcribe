@@ -1,0 +1,153 @@
+#!/bin/bash
+# call-transcribe: Transcribe audio using whisper-cpp
+#
+# Usage:
+#   call-transcribe <audio.wav>             Single file → stdout
+#   call-transcribe --watch <directory>     Monitor for new WAVs, transcribe each
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+VOICE_CONFIG="$MIND_PATH/state/voice-call-config.json"
+LOG_FILE="$MIND_PATH/system/logs/voice-call.log"
+TRANSCRIPT_LOG="$MIND_PATH/system/logs/voice-transcription.log"
+
+# Default model path
+WHISPER_MODEL="$MIND_PATH/system/models/ggml-base.en.bin"
+WHISPER_BIN="whisper-cli"
+
+# Load model path from config if available
+if [[ -f "$VOICE_CONFIG" ]]; then
+    MODEL_FROM_CONFIG=$(jq -r '.whisperModel // empty' "$VOICE_CONFIG" 2>/dev/null)
+    [[ -n "$MODEL_FROM_CONFIG" ]] && WHISPER_MODEL="$MODEL_FROM_CONFIG"
+fi
+
+log() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] call-transcribe: $1" >> "$LOG_FILE"
+}
+
+log_transcript() {
+    mkdir -p "$(dirname "$TRANSCRIPT_LOG")"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$TRANSCRIPT_LOG"
+}
+
+transcribe_file() {
+    local audio_file="$1"
+
+    if [[ ! -f "$audio_file" ]]; then
+        echo "Error: File not found: $audio_file" >&2
+        return 1
+    fi
+
+    # Check file size — skip tiny files (likely silence)
+    local file_size
+    file_size=$(stat -f%z "$audio_file" 2>/dev/null || stat --printf="%s" "$audio_file" 2>/dev/null || echo 0)
+    if [[ "$file_size" -lt 1000 ]]; then
+        log "Skipping tiny file ($file_size bytes): $audio_file"
+        return 0
+    fi
+
+    # Verify model exists
+    if [[ ! -f "$WHISPER_MODEL" ]]; then
+        echo "Error: Whisper model not found: $WHISPER_MODEL" >&2
+        exit 1
+    fi
+
+    # Convert to 16kHz mono WAV if needed (Loopback devices record at 48kHz stereo)
+    local whisper_input="$audio_file"
+    local sample_rate
+    sample_rate=$(soxi -r "$audio_file" 2>/dev/null || echo "0")
+    local channels
+    channels=$(soxi -c "$audio_file" 2>/dev/null || echo "0")
+
+    if [[ "$sample_rate" != "16000" || "$channels" != "1" ]]; then
+        whisper_input=$(mktemp /tmp/whisper-input-XXXXXX.wav)
+        sox "$audio_file" -r 16000 -c 1 "$whisper_input" 2>/dev/null || {
+            log "Sox conversion failed for: $audio_file"
+            rm -f "$whisper_input"
+            return 1
+        }
+    fi
+
+    # Run whisper-cli
+    local output
+    output=$("$WHISPER_BIN" -m "$WHISPER_MODEL" -f "$whisper_input" --no-timestamps -nt 2>/dev/null) || {
+        log "Whisper failed on: $audio_file"
+        [[ "$whisper_input" != "$audio_file" ]] && rm -f "$whisper_input"
+        return 1
+    }
+
+    # Clean up temp file
+    [[ "$whisper_input" != "$audio_file" ]] && rm -f "$whisper_input"
+
+    # Clean up output: trim whitespace, skip [BLANK_AUDIO] markers
+    output=$(echo "$output" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^\[BLANK_AUDIO\]$' | grep -v '^$' || true)
+
+    if [[ -n "$output" ]]; then
+        echo "$output"
+        log_transcript "[$audio_file] $output"
+        log "Transcribed: $audio_file -> ${#output} chars"
+    fi
+}
+
+watch_directory() {
+    local watch_dir="$1"
+    local poll_interval="${2:-1}"
+
+    if [[ ! -d "$watch_dir" ]]; then
+        echo "Error: Directory not found: $watch_dir" >&2
+        exit 1
+    fi
+
+    log "Watching directory: $watch_dir (poll: ${poll_interval}s)"
+    echo "Watching for new WAV files in: $watch_dir"
+    echo "Press Ctrl+C to stop"
+
+    # Track processed files
+    declare -A processed
+
+    while true; do
+        for wav_file in "$watch_dir"/*.wav; do
+            [[ -f "$wav_file" ]] || continue
+            [[ -n "${processed[$wav_file]}" ]] && continue
+
+            # Wait briefly to ensure file is fully written
+            sleep 0.3
+
+            # Check if file is still being written (size changing)
+            local size1 size2
+            size1=$(stat -f%z "$wav_file" 2>/dev/null || echo 0)
+            sleep 0.2
+            size2=$(stat -f%z "$wav_file" 2>/dev/null || echo 0)
+            [[ "$size1" != "$size2" ]] && continue
+
+            # Mark as processed before transcribing
+            processed[$wav_file]=1
+
+            local text
+            text=$(transcribe_file "$wav_file" 2>/dev/null)
+            if [[ -n "$text" ]]; then
+                echo "$text"
+            fi
+        done
+        sleep "$poll_interval"
+    done
+}
+
+# --- Main ---
+if [[ $# -lt 1 ]]; then
+    echo "Usage: call-transcribe <audio.wav>"
+    echo "       call-transcribe --watch <directory> [poll_interval]"
+    exit 1
+fi
+
+case "$1" in
+    --watch)
+        shift
+        watch_directory "$@"
+        ;;
+    *)
+        transcribe_file "$1"
+        ;;
+esac

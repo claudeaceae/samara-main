@@ -143,10 +143,35 @@ final class ClaudeInvoker {
                         level: .info, component: "ClaudeInvoker")
                 }
 
+                var response = fallbackResult.response
+                var shouldRespond = fallbackResult.shouldRespond
+
+                // Strict local sanitization for iMessage: only accept valid JSON with a message field.
+                if fallbackResult.usedLocalModel, useStructuredOutput, chatIdentifier != nil {
+                    if let parsed = parseLocalStructuredResponse(response) {
+                        let (sanitized, filtered) = sanitizeResponse(parsed.message)
+                        if let filteredContent = filtered {
+                            log("Filtered from local structured response:\n\(filteredContent)", level: .warn, component: "ClaudeInvoker")
+                        }
+                        if sanitized.isEmpty || parsed.shouldRespond == false {
+                            log("Local model response rejected for iMessage (empty or shouldRespond=false)", level: .warn, component: "ClaudeInvoker")
+                            response = ""
+                            shouldRespond = false
+                        } else {
+                            response = sanitized
+                            shouldRespond = parsed.shouldRespond
+                        }
+                    } else {
+                        log("Local model response rejected for iMessage (no valid structured message)", level: .warn, component: "ClaudeInvoker")
+                        response = ""
+                        shouldRespond = false
+                    }
+                }
+
                 result = ClaudeInvocationResult(
-                    response: fallbackResult.response,
+                    response: response,
                     sessionId: fallbackResult.sessionId,
-                    shouldRespond: fallbackResult.shouldRespond
+                    shouldRespond: shouldRespond
                 )
             } catch {
                 thrownError = error
@@ -301,6 +326,7 @@ final class ClaudeInvoker {
             }
         }
 
+        let startTime = Date()
         do {
             try process.run()
         } catch {
@@ -351,6 +377,21 @@ final class ClaudeInvoker {
         }
 
         let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
+        let duration = Date().timeIntervalSince(startTime)
+        let durationText = String(format: "%.2fs", duration)
+        let cliStatus = Int(process.terminationStatus)
+        let slowThreshold: TimeInterval = 20.0
+        let isSlow = duration >= slowThreshold
+        let logLevel: LogLevel = (cliStatus != 0) ? .warn : (isSlow ? .info : .debug)
+        let slowTag = isSlow ? " (slow)" : ""
+        log("Claude CLI finished\(slowTag) (status=\(cliStatus), duration=\(durationText), stdout=\(outputData.count)B, stderr=\(errorData.count)B)",
+            level: logLevel, component: "ClaudeInvoker")
+        if cliStatus != 0 {
+            let stderrPreview = errorOutput.trimmingCharacters(in: .whitespacesAndNewlines).prefix(400)
+            if !stderrPreview.isEmpty {
+                log("Claude CLI stderr preview: \(stderrPreview)", level: .warn, component: "ClaudeInvoker")
+            }
+        }
 
         // Check for session not found errors in both stdout and stderr
         // (Claude CLI may output this to either depending on version/context)
@@ -542,6 +583,113 @@ final class ClaudeInvoker {
         return (result.trimmingCharacters(in: .whitespacesAndNewlines), filteredContent)
     }
 
+    // MARK: - Local Model Sanitization (iMessage)
+
+    private struct LocalStructuredResponse {
+        let message: String
+        let shouldRespond: Bool
+    }
+
+    /// Parse local model output for structured iMessage response.
+    /// Only accepts valid JSON with a "message" field. All other outputs are rejected.
+    private func parseLocalStructuredResponse(_ raw: String) -> LocalStructuredResponse? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        func extract(from obj: Any) -> LocalStructuredResponse? {
+            guard let dict = obj as? [String: Any] else { return nil }
+            guard let messageValue = dict["message"] as? String else { return nil }
+            let message = messageValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !message.isEmpty else { return nil }
+            let shouldRespond = (dict["shouldRespond"] as? Bool)
+                ?? (dict["should_respond"] as? Bool)
+                ?? true
+            return LocalStructuredResponse(message: message, shouldRespond: shouldRespond)
+        }
+
+        // Attempt 1: parse full string as JSON
+        if let data = trimmed.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data),
+           let parsed = extract(from: obj) {
+            return parsed
+        }
+
+        // Attempt 2: parse fenced JSON block
+        if let fenced = extractFencedJSON(trimmed),
+           let data = fenced.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data),
+           let parsed = extract(from: obj) {
+            return parsed
+        }
+
+        // Attempt 3: extract first JSON object substring (only if likely JSON)
+        if trimmed.contains("\"message\""),
+           let candidate = extractFirstJSONObject(trimmed),
+           let data = candidate.data(using: .utf8),
+           let obj = try? JSONSerialization.jsonObject(with: data),
+           let parsed = extract(from: obj) {
+            return parsed
+        }
+
+        return nil
+    }
+
+    private func extractFencedJSON(_ text: String) -> String? {
+        let pattern = "```(?:json)?\\s*(\\{.*?\\})\\s*```"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators, .caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: range),
+              match.numberOfRanges >= 2,
+              let jsonRange = Range(match.range(at: 1), in: text) else {
+            return nil
+        }
+        return String(text[jsonRange])
+    }
+
+    private func extractFirstJSONObject(_ text: String) -> String? {
+        var depth = 0
+        var start: String.Index?
+        var inString = false
+        var escaped = false
+
+        for idx in text.indices {
+            let ch = text[idx]
+
+            if inString {
+                if escaped {
+                    escaped = false
+                } else if ch == "\\" {
+                    escaped = true
+                } else if ch == "\"" {
+                    inString = false
+                }
+                continue
+            }
+
+            if ch == "\"" {
+                inString = true
+                continue
+            }
+
+            if ch == "{" {
+                if depth == 0 {
+                    start = idx
+                }
+                depth += 1
+            } else if ch == "}" {
+                if depth > 0 {
+                    depth -= 1
+                    if depth == 0, let start = start {
+                        return String(text[start...idx])
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
     /// Parse Claude's JSON output to extract response text and session ID
     /// Uses strict validation - does NOT fall back to raw output (which may contain thinking traces)
     /// - Parameters:
@@ -559,19 +707,23 @@ final class ClaudeInvoker {
             if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
                 let sessionId = json["session_id"] as? String
 
-                // PREFERRED: Check for structured_output first (deterministic, no sanitization needed)
+                // PREFERRED: Check for structured_output first (with defense-in-depth sanitization)
                 // This is the primary path when useStructuredOutput is true
                 if useStructuredOutput,
                    let structuredOutput = json["structured_output"] as? [String: Any],
                    let message = structuredOutput["message"] as? String {
-                    // Direct extraction - the API schema enforcement guarantees this is the user-facing message
-                    // No sanitization needed because the schema structurally separates message from reasoning
+                    // Defense-in-depth: sanitize even with schema to catch edge cases
+                    // Schema separates message from reasoning, but Claude can still embed traces in message field
                     let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let (sanitized, filtered) = sanitizeResponse(trimmedMessage)
+                    if let filteredContent = filtered {
+                        log("Filtered from structured_output:\n\(filteredContent)", level: .warn, component: "ClaudeInvoker")
+                    }
                     // Determine shouldRespond: explicit false, or implicit false for empty message
-                    let shouldRespond = trimmedMessage.isEmpty ? false : (structuredOutput["should_respond"] as? Bool ?? true)
+                    let shouldRespond = sanitized.isEmpty ? false : (structuredOutput["should_respond"] as? Bool ?? true)
                     log("Extracted message from structured_output (deterministic path), shouldRespond=\(shouldRespond)", level: .debug, component: "ClaudeInvoker")
                     return ClaudeInvocationResult(
-                        response: trimmedMessage,
+                        response: sanitized,
                         sessionId: sessionId,
                         shouldRespond: shouldRespond
                     )
@@ -593,10 +745,15 @@ final class ClaudeInvoker {
                        let structuredOutput = json["structured_output"] as? [String: Any],
                        let message = structuredOutput["message"] as? String {
                         let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let shouldRespond = trimmedMessage.isEmpty ? false : (structuredOutput["should_respond"] as? Bool ?? true)
+                        // Defense-in-depth: sanitize even structured_output in case schema validation is incomplete
+                        let (sanitized, filtered) = sanitizeResponse(trimmedMessage)
+                        if let filteredContent = filtered {
+                            log("Filtered from structured_output (error recovery):\n\(filteredContent)", level: .warn, component: "ClaudeInvoker")
+                        }
+                        let shouldRespond = sanitized.isEmpty ? false : (structuredOutput["should_respond"] as? Bool ?? true)
                         log("Recovered message from structured_output despite error_during_execution, shouldRespond=\(shouldRespond)", level: .info, component: "ClaudeInvoker")
                         return ClaudeInvocationResult(
-                            response: trimmedMessage,
+                            response: sanitized,
                             sessionId: sessionId,
                             shouldRespond: shouldRespond
                         )
@@ -617,10 +774,16 @@ final class ClaudeInvoker {
                     // Read the session transcript to find the StructuredOutput tool call
                     if let sid = sessionId,
                        let recovered = recoverFromSessionJSONL(sessionId: sid) {
+                        let trimmed = recovered.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let (sanitized, filtered) = sanitizeResponse(trimmed)
+                        if let filteredContent = filtered {
+                            log("Filtered from session JSONL recovery:\n\(filteredContent)", level: .warn, component: "ClaudeInvoker")
+                        }
                         log("Recovered message from session JSONL despite error_during_execution", level: .info, component: "ClaudeInvoker")
                         return ClaudeInvocationResult(
-                            response: recovered.trimmingCharacters(in: .whitespacesAndNewlines),
-                            sessionId: sessionId
+                            response: sanitized,
+                            sessionId: sessionId,
+                            shouldRespond: !sanitized.isEmpty
                         )
                     }
 

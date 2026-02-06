@@ -1,0 +1,161 @@
+#!/bin/bash
+# audio-setup: Verify audio prerequisites for voice calling
+#
+# Checks: sox, SwitchAudioSource, whisper-cli, Loopback running,
+# virtual devices exist, whisper model present.
+# Stores confirmed device names in voice-call-config.json.
+#
+# Usage: audio-setup [--check | --configure]
+#   --check      Verify all prerequisites (default)
+#   --configure  Write device config after verification
+
+set -eo pipefail
+
+MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
+CONFIG_FILE="$MIND_PATH/state/voice-call-config.json"
+WHISPER_MODEL="$MIND_PATH/system/models/ggml-base.en.bin"
+LOG_FILE="$MIND_PATH/system/logs/voice-call.log"
+
+# Virtual device names (configurable via existing config)
+if [[ -f "$CONFIG_FILE" ]]; then
+    MIC_DEVICE=$(jq -r '.micDevice // "Claude Mic"' "$CONFIG_FILE" 2>/dev/null)
+    CAPTURE_DEVICE=$(jq -r '.captureDevice // "Call Capture"' "$CONFIG_FILE" 2>/dev/null)
+else
+    MIC_DEVICE="Claude Mic"
+    CAPTURE_DEVICE="Call Capture"
+fi
+
+MODE="check"
+[[ "$1" == "--configure" ]] && MODE="configure"
+
+PASSED=0
+FAILED=0
+WARNINGS=0
+
+log() {
+    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] audio-setup: $1"
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "$msg" >> "$LOG_FILE"
+}
+
+check() {
+    local name="$1"
+    local cmd="$2"
+    if eval "$cmd" >/dev/null 2>&1; then
+        echo "  OK  $name"
+        PASSED=$((PASSED + 1))
+        return 0
+    else
+        echo "  FAIL  $name"
+        FAILED=$((FAILED + 1))
+        return 1
+    fi
+}
+
+warn() {
+    local name="$1"
+    local msg="$2"
+    echo "  WARN  $name: $msg"
+    WARNINGS=$((WARNINGS + 1))
+}
+
+echo "=== Audio Setup Verification ==="
+echo ""
+
+# --- Tools ---
+echo "Tools:"
+check "sox installed" "command -v sox"
+check "SwitchAudioSource installed" "command -v SwitchAudioSource"
+check "whisper-cli installed" "command -v whisper-cli"
+check "jq installed" "command -v jq"
+
+echo ""
+
+# --- Whisper Model ---
+echo "Whisper Model:"
+check "ggml-base.en.bin exists" "test -f '$WHISPER_MODEL'"
+if [[ -f "$WHISPER_MODEL" ]]; then
+    SIZE=$(stat -f%z "$WHISPER_MODEL" 2>/dev/null || stat --printf="%s" "$WHISPER_MODEL" 2>/dev/null || echo 0)
+    if [[ "$SIZE" -gt 100000000 ]]; then
+        echo "  OK  Model size: $(echo "scale=0; $SIZE/1048576" | bc)MB"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  FAIL  Model too small (${SIZE} bytes), likely corrupt"
+        FAILED=$((FAILED + 1))
+    fi
+fi
+
+echo ""
+
+# --- Loopback ---
+echo "Loopback Audio:"
+if pgrep -x "Loopback" >/dev/null 2>&1; then
+    echo "  OK  Loopback is running"
+    PASSED=$((PASSED + 1))
+elif [[ -d "/Library/Audio/Plug-Ins/HAL/ARK.driver" ]]; then
+    # ARK driver present but Loopback not running — devices may still exist
+    warn "Loopback app" "not running, but ARK driver is installed"
+else
+    echo "  FAIL  Loopback not running and ARK driver not found"
+    FAILED=$((FAILED + 1))
+fi
+
+echo ""
+
+# --- Virtual Audio Devices ---
+echo "Virtual Devices:"
+if command -v SwitchAudioSource >/dev/null 2>&1; then
+    ALL_DEVICES=$(SwitchAudioSource -a 2>/dev/null || true)
+
+    if echo "$ALL_DEVICES" | grep -qF "$MIC_DEVICE"; then
+        echo "  OK  \"$MIC_DEVICE\" found"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  FAIL  \"$MIC_DEVICE\" not found"
+        echo "         Create in Loopback: virtual-only device named \"$MIC_DEVICE\""
+        FAILED=$((FAILED + 1))
+    fi
+
+    if echo "$ALL_DEVICES" | grep -qF "$CAPTURE_DEVICE"; then
+        echo "  OK  \"$CAPTURE_DEVICE\" found"
+        PASSED=$((PASSED + 1))
+    else
+        echo "  FAIL  \"$CAPTURE_DEVICE\" not found"
+        echo "         Create in Loopback: pass-through device named \"$CAPTURE_DEVICE\""
+        FAILED=$((FAILED + 1))
+    fi
+else
+    echo "  SKIP  Cannot check devices without SwitchAudioSource"
+fi
+
+echo ""
+
+# --- Summary ---
+echo "---"
+echo "Results: $PASSED passed, $FAILED failed, $WARNINGS warnings"
+
+if [[ "$MODE" == "configure" && "$FAILED" -eq 0 ]]; then
+    mkdir -p "$(dirname "$CONFIG_FILE")"
+    cat > "$CONFIG_FILE" <<EOJSON
+{
+  "micDevice": "$MIC_DEVICE",
+  "captureDevice": "$CAPTURE_DEVICE",
+  "whisperModel": "$WHISPER_MODEL",
+  "sampleRate": 16000,
+  "silenceThreshold": 1.5,
+  "configured": true,
+  "configuredAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOJSON
+    echo ""
+    echo "Config written to: $CONFIG_FILE"
+    log "Configuration written successfully"
+fi
+
+if [[ "$FAILED" -gt 0 ]]; then
+    log "Verification failed: $FAILED checks failed"
+    exit 1
+fi
+
+log "Verification passed: all checks OK"
+exit 0

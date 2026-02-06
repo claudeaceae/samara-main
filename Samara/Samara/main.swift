@@ -863,6 +863,56 @@ let mailWatcher = MailWatcher(
 )
 mailWatcher.start()
 
+// Initialize FaceTimeWatcher (only if voiceCall service enabled)
+let services = config.servicesConfig
+var facetimeWatcher: FaceTimeWatcher?
+if services.isEnabled("voiceCall") {
+    facetimeWatcher = FaceTimeWatcher(
+        collaboratorName: collaboratorName,
+        pollInterval: 5.0,  // Check every 5 seconds
+        onIncomingCall: { caller in
+            log("[Main] Auto-answering incoming call from: \(caller)", level: .info)
+
+            // Write sense event for logging
+            let eventData: [String: AnyCodable] = [
+                "caller": AnyCodable(caller),
+                "action": AnyCodable("answered"),
+                "detected_at": AnyCodable(ISO8601DateFormatter().string(from: Date()))
+            ]
+            let event = SenseEvent(
+                sense: "facetime_incoming",
+                priority: .normal,
+                data: eventData,
+                context: SenseEvent.Context(
+                    suggestedPrompt: "You answered an incoming FaceTime call from \(caller).",
+                    suppressResponse: true
+                )
+            )
+            senseRouter.route(event)
+
+            // Run answer flow via bash scripts
+            let scriptPath = MindPaths.systemPath("bin/voice-call")
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: scriptPath)
+            process.arguments = ["--answer", "--voice-response", "--greeting", "Hey, what's up?"]
+            process.environment = [
+                "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin",
+                "HOME": FileManager.default.homeDirectoryForCurrentUser.path,
+                "MIND_PATH": MindPaths.mindPath()
+            ]
+
+            do {
+                try process.run()
+                log("[Main] Launched voice-call --answer (PID: \(process.processIdentifier))", level: .info)
+            } catch {
+                log("[Main] Failed to launch voice-call: \(error)", level: .error)
+            }
+        }
+    )
+    facetimeWatcher?.start()
+    log("[Main] FaceTime watcher started (auto-answer enabled)")
+}
+
 log("[Main] Samara running. Press Ctrl+C to stop.")
 log("[Main] Watching for messages from \(targetPhone) or \(targetEmail)...")
 log("[Main] Watching notes: \(scratchpadNote.name)")
