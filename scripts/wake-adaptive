@@ -103,6 +103,9 @@ do_wake_check() {
         case "$WAKE_TYPE" in
             full)
                 log "Dispatching to full wake cycle"
+                # Regenerate voice style on full wakes (moved from session start)
+                [ -x "$MIND_PATH/system/bin/generate-voice-style" ] && \
+                    "$MIND_PATH/system/bin/generate-voice-style" --quick >> "$LOG_FILE" 2>&1 || true
                 "$MIND_PATH/system/bin/wake" &
                 ;;
             light)

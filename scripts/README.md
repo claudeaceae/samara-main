@@ -455,7 +455,7 @@ Rebuild and deploy Samara.app using proper Xcode workflow.
 | `service-toggle <svc> status` | Check service status |
 | `webhook-receiver` | Start/stop/status webhook receiver |
 
-**Available services:** `x`, `bluesky`, `github`, `wallet`, `meeting`, `webhook`, `location`, `browserHistory`, `proactive`, `voiceCall`
+**Available services:** `x`, `bluesky`, `github`, `wallet`, `meeting`, `webhook`, `location`, `browserHistory`, `proactive`, `voiceCall`, `notesWatcher` (default off)
 
 ---
 

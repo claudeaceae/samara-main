@@ -25,12 +25,12 @@ fi
 
 # Helper function to read config with fallback
 config_get() {
-    local path="$1"
+    local jq_filter="$1"
     local fallback="$2"
 
     if [ "$CONFIG_AVAILABLE" = true ]; then
         local value
-        value=$(jq -r "$path // empty" "$CONFIG_FILE" 2>/dev/null)
+        value=$(jq -r "$jq_filter // empty" "$CONFIG_FILE" 2>/dev/null)
         if [ -n "$value" ] && [ "$value" != "null" ]; then
             echo "$value"
             return

@@ -23,7 +23,7 @@ CONFIG_FILE="$MIND_PATH/system/config.json"
 LAUNCH_AGENTS_DIR="$HOME/Library/LaunchAgents"
 
 # All known services
-SERVICES="x bluesky github wallet meeting webhook location browserHistory proactive voiceCall"
+SERVICES="x bluesky github wallet meeting webhook location browserHistory proactive voiceCall notesWatcher"
 
 # Get launchd agents for a service
 get_agents() {
@@ -39,6 +39,7 @@ get_agents() {
         browserHistory) echo "" ;;  # Client-side only (runs on É's Mac)
         proactive)      echo "" ;;  # Runs as part of wake-adaptive, no separate agent
         voiceCall)      echo "com.claude.facetime-incoming" ;;  # Incoming call watcher
+        notesWatcher)   echo "" ;;  # In-app Apple Notes poller; no launchd agent
         *)              echo "" ;;
     esac
 }
@@ -53,13 +54,18 @@ usage() {
 
 get_service_status() {
     local service="$1"
+    local default_status="true"
+    if [[ "$service" == "notesWatcher" ]]; then
+        default_status="false"
+    fi
+
     if [[ ! -f "$CONFIG_FILE" ]]; then
-        echo "true"  # Default to enabled if no config
+        echo "$default_status"
         return
     fi
     local status
-    # Use 'if .services.SERVICE == null then true else .services.SERVICE end' to handle missing keys
-    status=$(jq -r "if .services.$service == null then true else .services.$service end" "$CONFIG_FILE" 2>/dev/null || echo "true")
+    # Missing keys default to true, except notesWatcher which defaults to false.
+    status=$(jq -r "if .services.$service == null then $default_status else .services.$service end" "$CONFIG_FILE" 2>/dev/null || echo "$default_status")
     echo "$status"
 }
 

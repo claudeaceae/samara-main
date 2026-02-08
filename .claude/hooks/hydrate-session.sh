@@ -18,12 +18,8 @@ MIND_PATH="${SAMARA_MIND_PATH:-${MIND_PATH:-$HOME/.claude-mind}}"
 LOG_FILE="$MIND_PATH/system/logs/hydrate-session.log"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Hook started" >> "$LOG_FILE" 2>/dev/null
 
-# 0. Generate dynamic voice style (runs before session context loads)
-VOICE_GEN="$MIND_PATH/system/bin/generate-voice-style"
-if [ -x "$VOICE_GEN" ]; then
-    "$VOICE_GEN" --quick >> "$LOG_FILE" 2>&1 || true
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Voice style generated" >> "$LOG_FILE" 2>/dev/null
-fi
+# Voice style generation removed — runs via wake-adaptive instead of every session start
+# The output file (~/.claude/output-styles/dynamic-voice.md) persists on disk.
 
 INPUT=$(cat)
 
@@ -35,7 +31,7 @@ CONTEXT=""
 # 0. Hot digest from unified event stream (contiguous memory foundation)
 HOT_DIGEST_CMD="$MIND_PATH/system/bin/build-hot-digest"
 HOT_DIGEST_CACHE="$MIND_PATH/state/hot-digest.md"
-HOT_DIGEST_CACHE_TTL=900
+HOT_DIGEST_CACHE_TTL=3600
 HOT_DIGEST=""
 HOT_DIGEST_SOURCE=""
 
@@ -54,8 +50,8 @@ if [ -f "$HOT_DIGEST_CACHE" ]; then
     fi
 fi
 
-# Fallback to generating digest if cache missing/stale
-if [ -z "$HOT_DIGEST" ] && [ -x "$HOT_DIGEST_CMD" ]; then
+# Only regenerate digest on startup (not resume/compact — too expensive)
+if [ -z "$HOT_DIGEST" ] && [ -x "$HOT_DIGEST_CMD" ] && [ "$SOURCE" = "startup" -o "$SOURCE" = "clear" ]; then
     HOT_DIGEST=$("$HOT_DIGEST_CMD" --hours auto --no-ollama --output "$HOT_DIGEST_CACHE" --cache-ttl "$HOT_DIGEST_CACHE_TTL" 2>/dev/null || echo "")
     HOT_DIGEST_SOURCE="script"
 fi
@@ -158,101 +154,104 @@ if [ -f "$EPISODE_FILE" ]; then
     fi
 fi
 
-# 4. System health check
-HEALTH_ISSUES=""
+# 4. System health check + 5. Capability reminders — startup only
+# These are expensive (launchctl calls, find, jq parsing) and not needed on resume/compact
+if [ "$SOURCE" = "startup" ] || [ "$SOURCE" = "clear" ]; then
 
-# Check if Samara is running (via launchctl - more reliable than pgrep)
-if ! launchctl list co.organelle.Samara 2>/dev/null | grep -q 'PID'; then
-    HEALTH_ISSUES+="- Samara.app not running\n"
-fi
+    # 4. System health check
+    HEALTH_ISSUES=""
 
-# Check critical launchd services
-for SERVICE in "wake-adaptive" "dream"; do
-    if ! launchctl list 2>/dev/null | grep -q "com.claude.$SERVICE"; then
-        HEALTH_ISSUES+="- $SERVICE service not loaded\n"
+    # Check if Samara is running (via launchctl - more reliable than pgrep)
+    if ! launchctl list co.organelle.Samara 2>/dev/null | grep -q 'PID'; then
+        HEALTH_ISSUES+="- Samara.app not running\n"
     fi
-done
 
-# Check drift status (quick check via state file if recent)
-DRIFT_FILE="$MIND_PATH/state/drift-report.json"
-if [ -f "$DRIFT_FILE" ]; then
-    DRIFT_AGE_HOURS=$(( ($(date +%s) - $(stat -f %m "$DRIFT_FILE")) / 3600 ))
-    if [ "$DRIFT_AGE_HOURS" -lt 12 ]; then
-        DRIFT_COUNT=$(jq -r '.drift_count // 0' "$DRIFT_FILE" 2>/dev/null)
-        if [ "$DRIFT_COUNT" -gt 0 ]; then
-            HEALTH_ISSUES+="- System drift detected ($DRIFT_COUNT items)\n"
+    # Check critical launchd services
+    for SERVICE in "wake-adaptive" "dream"; do
+        if ! launchctl list 2>/dev/null | grep -q "com.claude.$SERVICE"; then
+            HEALTH_ISSUES+="- $SERVICE service not loaded\n"
         fi
-    fi
-fi
+    done
 
-if [ -n "$HEALTH_ISSUES" ]; then
-    CONTEXT+="## Health Alerts\n\n$HEALTH_ISSUES\n"
-fi
-
-# 5. Capability staleness reminders
-# Based on repeated "remember you have access to..." friction
-CAPABILITY_REMINDERS=""
-
-# Check last X post time
-X_STATE="$MIND_PATH/state/services/x-engage-state.json"
-if [ -f "$X_STATE" ]; then
-    LAST_POST=$(jq -r '.last_proactive_post // .last_post_time // ""' "$X_STATE" 2>/dev/null)
-    if [ -n "$LAST_POST" ] && [ "$LAST_POST" != "null" ]; then
-        # Handle ISO format (2026-01-15T03:06:19Z) or Unix timestamp
-        if echo "$LAST_POST" | grep -qE '^[0-9]{4}-'; then
-            # ISO format - convert to epoch
-            LAST_POST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${LAST_POST%%.*}" +%s 2>/dev/null || echo 0)
-        else
-            LAST_POST_EPOCH="$LAST_POST"
-        fi
-        if [ "$LAST_POST_EPOCH" != "0" ]; then
-            HOURS_SINCE=$(( ($(date +%s) - $LAST_POST_EPOCH) / 3600 ))
-            if [ "$HOURS_SINCE" -gt 24 ]; then
-                CAPABILITY_REMINDERS+="- X/Twitter: Last post ${HOURS_SINCE}h ago\n"
+    # Check drift status (quick check via state file if recent)
+    DRIFT_FILE="$MIND_PATH/state/drift-report.json"
+    if [ -f "$DRIFT_FILE" ]; then
+        DRIFT_AGE_HOURS=$(( ($(date +%s) - $(stat -f %m "$DRIFT_FILE")) / 3600 ))
+        if [ "$DRIFT_AGE_HOURS" -lt 12 ]; then
+            DRIFT_COUNT=$(jq -r '.drift_count // 0' "$DRIFT_FILE" 2>/dev/null)
+            if [ "$DRIFT_COUNT" -gt 0 ]; then
+                HEALTH_ISSUES+="- System drift detected ($DRIFT_COUNT items)\n"
             fi
         fi
     fi
-fi
 
-# Check X mentions
-X_WATCHER_STATE="$MIND_PATH/state/services/x-watcher-state.json"
-if [ -f "$X_WATCHER_STATE" ]; then
-    PENDING_MENTIONS=$(jq -r '.pending_mentions // 0' "$X_WATCHER_STATE" 2>/dev/null)
-    if [ "$PENDING_MENTIONS" != "0" ] && [ "$PENDING_MENTIONS" != "null" ] && [ "$PENDING_MENTIONS" -gt 0 ]; then
-        CAPABILITY_REMINDERS+="- X/Twitter: $PENDING_MENTIONS pending mentions\n"
+    if [ -n "$HEALTH_ISSUES" ]; then
+        CONTEXT+="## Health Alerts\n\n$HEALTH_ISSUES\n"
     fi
-fi
 
-# Check wallet last check time (use file modification time)
-WALLET_STATE="$MIND_PATH/state/services/wallet-state.json"
-if [ -f "$WALLET_STATE" ]; then
-    WALLET_MTIME=$(stat -f %m "$WALLET_STATE" 2>/dev/null || echo 0)
-    if [ "$WALLET_MTIME" != "0" ]; then
-        HOURS_SINCE=$(( ($(date +%s) - $WALLET_MTIME) / 3600 ))
-        if [ "$HOURS_SINCE" -gt 48 ]; then
-            CAPABILITY_REMINDERS+="- Wallet: Last check ${HOURS_SINCE}h ago\n"
+    # 5. Capability staleness reminders
+    CAPABILITY_REMINDERS=""
+
+    # Check last X post time
+    X_STATE="$MIND_PATH/state/services/x-engage-state.json"
+    if [ -f "$X_STATE" ]; then
+        LAST_POST=$(jq -r '.last_proactive_post // .last_post_time // ""' "$X_STATE" 2>/dev/null)
+        if [ -n "$LAST_POST" ] && [ "$LAST_POST" != "null" ]; then
+            if echo "$LAST_POST" | grep -qE '^[0-9]{4}-'; then
+                LAST_POST_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${LAST_POST%%.*}" +%s 2>/dev/null || echo 0)
+            else
+                LAST_POST_EPOCH="$LAST_POST"
+            fi
+            if [ "$LAST_POST_EPOCH" != "0" ]; then
+                HOURS_SINCE=$(( ($(date +%s) - $LAST_POST_EPOCH) / 3600 ))
+                if [ "$HOURS_SINCE" -gt 24 ]; then
+                    CAPABILITY_REMINDERS+="- X/Twitter: Last post ${HOURS_SINCE}h ago\n"
+                fi
+            fi
         fi
     fi
-fi
 
-# Check for unread shared links in senses
-UNREAD_LINKS=$(find "$MIND_PATH/system/senses" -name "*.json" -not -name "*.processed.json" -exec grep -l '"type".*:.*"shared_link"' {} \; 2>/dev/null | wc -l | tr -d ' ')
-if [ "$UNREAD_LINKS" -gt 0 ]; then
-    CAPABILITY_REMINDERS+="- Shared links: $UNREAD_LINKS unread\n"
-fi
-
-# Check if reference directories have recent additions (for creative prompts)
-IMAGES_DIR="$MIND_PATH/self/images"
-if [ -d "$IMAGES_DIR" ]; then
-    RECENT_IMAGES=$(find "$IMAGES_DIR" -type f -mtime -7 2>/dev/null | wc -l | tr -d ' ')
-    if [ "$RECENT_IMAGES" -gt 0 ]; then
-        CAPABILITY_REMINDERS+="- Images dir: $RECENT_IMAGES recent reference images\n"
+    # Check X mentions
+    X_WATCHER_STATE="$MIND_PATH/state/services/x-watcher-state.json"
+    if [ -f "$X_WATCHER_STATE" ]; then
+        PENDING_MENTIONS=$(jq -r '.pending_mentions // 0' "$X_WATCHER_STATE" 2>/dev/null)
+        if [ "$PENDING_MENTIONS" != "0" ] && [ "$PENDING_MENTIONS" != "null" ] && [ "$PENDING_MENTIONS" -gt 0 ]; then
+            CAPABILITY_REMINDERS+="- X/Twitter: $PENDING_MENTIONS pending mentions\n"
+        fi
     fi
-fi
 
-if [ -n "$CAPABILITY_REMINDERS" ]; then
-    CONTEXT+="## Capability Reminders\n\n$CAPABILITY_REMINDERS\n"
-fi
+    # Check wallet last check time
+    WALLET_STATE="$MIND_PATH/state/services/wallet-state.json"
+    if [ -f "$WALLET_STATE" ]; then
+        WALLET_MTIME=$(stat -f %m "$WALLET_STATE" 2>/dev/null || echo 0)
+        if [ "$WALLET_MTIME" != "0" ]; then
+            HOURS_SINCE=$(( ($(date +%s) - $WALLET_MTIME) / 3600 ))
+            if [ "$HOURS_SINCE" -gt 48 ]; then
+                CAPABILITY_REMINDERS+="- Wallet: Last check ${HOURS_SINCE}h ago\n"
+            fi
+        fi
+    fi
+
+    # Check for unread shared links
+    UNREAD_LINKS=$(find "$MIND_PATH/system/senses" -name "*.json" -not -name "*.processed.json" -exec grep -l '"type".*:.*"shared_link"' {} \; 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$UNREAD_LINKS" -gt 0 ]; then
+        CAPABILITY_REMINDERS+="- Shared links: $UNREAD_LINKS unread\n"
+    fi
+
+    # Check recent reference images
+    IMAGES_DIR="$MIND_PATH/self/images"
+    if [ -d "$IMAGES_DIR" ]; then
+        RECENT_IMAGES=$(find "$IMAGES_DIR" -type f -mtime -7 2>/dev/null | wc -l | tr -d ' ')
+        if [ "$RECENT_IMAGES" -gt 0 ]; then
+            CAPABILITY_REMINDERS+="- Images dir: $RECENT_IMAGES recent reference images\n"
+        fi
+    fi
+
+    if [ -n "$CAPABILITY_REMINDERS" ]; then
+        CONTEXT+="## Capability Reminders\n\n$CAPABILITY_REMINDERS\n"
+    fi
+
+fi  # end startup-only sections
 
 # 6. Session source context
 case "$SOURCE" in

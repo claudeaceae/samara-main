@@ -912,6 +912,12 @@ fi
 
 log "Activity summary: $ACTIVITY"
 
+# Compute sent_message boolean before building metadata string
+SENT_MSG=false
+if [[ -n "$MESSAGE_TO_E" && "$MESSAGE_TO_E" != "NONE" ]]; then
+    SENT_MSG=true
+fi
+
 # Write wake completion event to unified stream
 "$MIND_PATH/system/bin/stream" write \
     --surface wake \
@@ -919,7 +925,7 @@ log "Activity summary: $ACTIVITY"
     --direction internal \
     --summary "Wake cycle complete: $MODE mode - $ACTIVITY" \
     --content "$EPISODE_ENTRY" \
-    --metadata "{\"mode\": \"$MODE\", \"sent_message\": $([ -n \"$MESSAGE_TO_E\" ] && [ \"$MESSAGE_TO_E\" != \"NONE\" ] && echo true || echo false)}" \
+    --metadata "{\"mode\": \"$MODE\", \"sent_message\": $SENT_MSG}" \
     >> "$LOG_FILE" 2>&1 || true
 
 log "=== Wake cycle complete ==="

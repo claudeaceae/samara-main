@@ -750,6 +750,7 @@ func handleNoteChange(_ update: NoteUpdate) {
 }
 
 // Initialize NoteWatcher (for Claude Scratchpad only - location is handled by LocationFileWatcher)
+let services = config.servicesConfig
 let scratchpadNote = NoteWatcher.WatchedNote(
     key: "scratchpad",
     name: config.notes.scratchpad,
@@ -762,7 +763,12 @@ let noteWatcher = NoteWatcher(
     noteIdStorePath: MindPaths.mindPath("state/note-watcher.json"),
     onNoteChanged: handleNoteChange
 )
-noteWatcher.start()
+if services.isEnabled("notesWatcher") {
+    noteWatcher.start()
+    log("[Main] Notes watcher started for: \(scratchpadNote.name)")
+} else {
+    log("[Main] Notes watcher disabled (services.notesWatcher=false)")
+}
 
 personProfileWatcher?.start()
 
@@ -864,7 +870,6 @@ let mailWatcher = MailWatcher(
 mailWatcher.start()
 
 // Initialize FaceTimeWatcher (only if voiceCall service enabled)
-let services = config.servicesConfig
 var facetimeWatcher: FaceTimeWatcher?
 if services.isEnabled("voiceCall") {
     facetimeWatcher = FaceTimeWatcher(
@@ -916,7 +921,9 @@ if services.isEnabled("voiceCall") {
 
 log("[Main] Samara running. Press Ctrl+C to stop.")
 log("[Main] Watching for messages from \(targetPhone) or \(targetEmail)...")
-log("[Main] Watching notes: \(scratchpadNote.name)")
+if services.isEnabled("notesWatcher") {
+    log("[Main] Watching notes: \(scratchpadNote.name)")
+}
 log("[Main] Watching location file: \(MindPaths.statePath("location.json"))")
 log("[Main] Watching email inbox for messages from \(targetEmail)")
 log("[Main] Watching sense directory: \(MindPaths.systemPath("senses"))")

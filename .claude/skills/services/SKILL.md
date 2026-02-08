@@ -24,6 +24,7 @@ Manage which services are active in the Samara organism. Services can be toggled
 | `webhook` | External webhook events | webhook-receiver |
 | `location` | Location tracking | location-receiver |
 | `browserHistory` | Browser history from É's devices | (client-side) |
+| `notesWatcher` | Apple Notes scratchpad polling in Samara.app | (in-app only, no launchd agent) |
 
 ## How It Works
 
@@ -41,7 +42,8 @@ The service toggle system has three layers:
     "meeting": true,
     "webhook": true,
     "location": true,
-    "browserHistory": true
+    "browserHistory": true,
+    "notesWatcher": false
   }
 }
 ```
@@ -103,7 +105,7 @@ Or use the update-samara script if you also have code changes.
 - **Non-destructive**: Disabling a service doesn't delete any code - it just unplugs it
 - **Restart required**: Samara.app reads config at startup, so restart after toggling for handler changes to take effect
 - **launchd is immediate**: The launchd agents are loaded/unloaded immediately
-- **Defaults to enabled**: Services not specified in config default to enabled (backward compatible)
+- **Defaults to enabled**: Services not specified in config default to enabled (backward compatible), except `notesWatcher` which defaults to `false`
 
 ## Files
 
