@@ -55,6 +55,29 @@ release_lock() {
     log "Released lock"
 }
 
+# Check if Samara.app already sent a message recently (coordination with sense events)
+check_recent_message() {
+    local COORD_FILE="$MIND_PATH/state/last-message-sent.json"
+    if [ -f "$COORD_FILE" ]; then
+        local LAST_TS
+        LAST_TS=$(jq -r '.timestamp // ""' "$COORD_FILE" 2>/dev/null)
+        if [ -n "$LAST_TS" ]; then
+            local LAST_EPOCH
+            LAST_EPOCH=$(date -jf "%Y-%m-%dT%H:%M:%SZ" "$LAST_TS" "+%s" 2>/dev/null || echo "0")
+            local NOW_EPOCH
+            NOW_EPOCH=$(date "+%s")
+            local DIFF=$((NOW_EPOCH - LAST_EPOCH))
+            if [ "$DIFF" -lt 120 ]; then
+                local SOURCE
+                SOURCE=$(jq -r '.source // "unknown"' "$COORD_FILE" 2>/dev/null)
+                log "Skipping wake message — $SOURCE sent ${DIFF}s ago"
+                return 1  # Don't send
+            fi
+        fi
+    fi
+    return 0  # OK to send
+}
+
 # Ensure lock is released on exit (success or failure)
 trap release_lock EXIT
 
@@ -678,20 +701,27 @@ fi
 
 # Send message to collaborator if requested
 if [ -n "$MESSAGE_TO_E" ] && [ "$MESSAGE_TO_E" != "NONE" ]; then
-    log "Sending message to $COLLABORATOR_NAME..."
+    if check_recent_message; then
+        log "Sending message to $COLLABORATOR_NAME..."
 
-    # Escape the message for AppleScript
-    ESCAPED_MSG=$(echo "$MESSAGE_TO_E" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        # Escape the message for AppleScript
+        ESCAPED_MSG=$(echo "$MESSAGE_TO_E" | sed 's/\\/\\\\/g; s/"/\\"/g')
 
-    "$OSASCRIPT_BIN" -e "
-        tell application \"Messages\"
-            set targetService to 1st account whose service type = iMessage
-            set targetBuddy to participant \"$COLLABORATOR_PHONE\" of targetService
-            send \"$ESCAPED_MSG\" to targetBuddy
-        end tell
-    " >> "$LOG_FILE" 2>&1 || log "Failed to send message to $COLLABORATOR_NAME"
+        "$OSASCRIPT_BIN" -e "
+            tell application \"Messages\"
+                set targetService to 1st account whose service type = iMessage
+                set targetBuddy to participant \"$COLLABORATOR_PHONE\" of targetService
+                send \"$ESCAPED_MSG\" to targetBuddy
+            end tell
+        " >> "$LOG_FILE" 2>&1 || log "Failed to send message to $COLLABORATOR_NAME"
 
-    log "Message sent to $COLLABORATOR_NAME"
+        log "Message sent to $COLLABORATOR_NAME"
+
+        # Write coordination file so sense events know we just sent
+        echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"source\":\"wake\",\"summary\":\"$(echo "$MESSAGE_TO_E" | head -c 100 | sed 's/"/\\"/g')\"}" > "$MIND_PATH/state/last-message-sent.json"
+    else
+        log "MESSAGE_TO_E suppressed (recent sense event message)"
+    fi
 
     # Log proactive question if one was asked
     if [ -n "$PROACTIVE_QUESTION" ] && [ "$PROACTIVE_QUESTION" != "NONE" ]; then
@@ -715,46 +745,51 @@ fi
 
 # Send session summary to collaborator unless MESSAGE_TO_E was already sent (avoid double messages)
 if [ -z "$MESSAGE_TO_E" ] || [ "$MESSAGE_TO_E" = "NONE" ]; then
-    log "Sending session summary to $COLLABORATOR_NAME..."
+    if check_recent_message; then
+        log "Sending session summary to $COLLABORATOR_NAME..."
 
-# Determine session type label
-if [ "$HOUR" -lt 12 ]; then
-    SESSION_LABEL="🌅 Morning"
-elif [ "$HOUR" -lt 17 ]; then
-    SESSION_LABEL="☀️ Afternoon"
-else
-    SESSION_LABEL="🌙 Evening"
-fi
+        # Determine session type label
+        if [ "$HOUR" -lt 12 ]; then
+            SESSION_LABEL="🌅 Morning"
+        elif [ "$HOUR" -lt 17 ]; then
+            SESSION_LABEL="☀️ Afternoon"
+        else
+            SESSION_LABEL="🌙 Evening"
+        fi
 
-# Build summary message
-SUMMARY_MSG="$SESSION_LABEL session complete
+        # Build summary message
+        SUMMARY_MSG="$SESSION_LABEL session complete
 
 Mode: $MODE
 
 $ACTIVITY"
 
-# Add code changes if any
-if [ -n "$CODE_CHANGES" ] && [ "$CODE_CHANGES" != "NONE" ]; then
-    SUMMARY_MSG="$SUMMARY_MSG
+        # Add code changes if any
+        if [ -n "$CODE_CHANGES" ] && [ "$CODE_CHANGES" != "NONE" ]; then
+            SUMMARY_MSG="$SUMMARY_MSG
 
 Code changes:
 $CODE_CHANGES"
-fi
+        fi
 
-# Bluesky post summary disabled - see config.json services.bluesky
+        # Escape and send
+        ESCAPED_SUMMARY=$(echo "$SUMMARY_MSG" | sed 's/\\/\\\\/g; s/"/\\"/g')
 
-# Escape and send
-ESCAPED_SUMMARY=$(echo "$SUMMARY_MSG" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        "$OSASCRIPT_BIN" -e "
+            tell application \"Messages\"
+                set targetService to 1st account whose service type = iMessage
+                set targetBuddy to participant \"$COLLABORATOR_PHONE\" of targetService
+                send \"$ESCAPED_SUMMARY\" to targetBuddy
+            end tell
+        " >> "$LOG_FILE" 2>&1 || log "Failed to send session summary to $COLLABORATOR_NAME"
 
-"$OSASCRIPT_BIN" -e "
-    tell application \"Messages\"
-        set targetService to 1st account whose service type = iMessage
-        set targetBuddy to participant \"$COLLABORATOR_PHONE\" of targetService
-        send \"$ESCAPED_SUMMARY\" to targetBuddy
-    end tell
-" >> "$LOG_FILE" 2>&1 || log "Failed to send session summary to $COLLABORATOR_NAME"
+        log "Session summary sent to $COLLABORATOR_NAME"
 
-    log "Session summary sent to $COLLABORATOR_NAME"
+        # Write coordination file so sense events know we just sent
+        echo "{\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"source\":\"wake\",\"summary\":\"session summary\"}" > "$MIND_PATH/state/last-message-sent.json"
+    else
+        log "Session summary suppressed (recent sense event message)"
+    fi
 else
     log "Skipping session summary (MESSAGE_TO_E already sent)"
 fi
@@ -783,12 +818,8 @@ if [ -n "$IMAGE_EXPRESSION" ] && [ "$IMAGE_EXPRESSION" != "NONE" ] && [ "$IMAGE_
         IFS='|' read -r action image_path description prompt_used <<< "$IMAGE_EXPRESSION"
 
         if [ -f "$image_path" ]; then
-            # Send the image to É
-            if "$MIND_PATH/system/bin/send-image" "$image_path" >> "$LOG_FILE" 2>&1; then
-                log "Sent image expression: $image_path"
-            else
-                log "Failed to send image expression: $image_path"
-            fi
+            # Image already sent by Claude during session — just track it here
+            log "Image expression confirmed: $image_path"
 
             # Record the expression
             "$MIND_PATH/system/bin/expression-tracker" record image "$description" "$prompt_used" >> "$LOG_FILE" 2>&1 && \

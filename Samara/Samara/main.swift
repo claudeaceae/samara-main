@@ -165,13 +165,8 @@ let queueProcessor = QueueProcessor()
 
 // Permission dialog monitor - alerts collaborator when manual intervention is needed
 let permissionMonitor = PermissionDialogMonitor { message in
-    // Send alert to collaborator via MessageBus (ensures logging)
-    do {
-        try messageBus.send(message, type: .alert)
-        log("[Main] Sent permission dialog alert: \(message)")
-    } catch {
-        log("[Main] Failed to send permission dialog alert: \(error)")
-    }
+    log("[Main] Permission dialog handled: \(message)")
+    episodeLogger.logNote("Permission dialog: \(message)", source: "PermissionMonitor")
 }
 
 /// Build a prompt for Claude to compose a contextual location message
@@ -401,19 +396,8 @@ func handleBatch(messages: [Message], resumeSessionId: String?) {
             }
 
         } catch {
-            log("[Main] Error processing batch: \(error)")
-
-            // Try to send error notification via MessageBus (ensures logging)
-            do {
-                let errorMsg = "Sorry, I encountered an error: \(error)"
-                if let firstMessage = messages.first {
-                    try messageBus.send(errorMsg, type: .error, chatIdentifier: firstMessage.chatIdentifier, isGroupChat: firstMessage.isGroupChat)
-                } else {
-                    try messageBus.send(errorMsg, type: .error)
-                }
-            } catch {
-                log("Failed to send error message: \(error)", level: .warn)
-            }
+            log("[Main] Error processing batch: \(error)", level: .error)
+            episodeLogger.logNote("Error processing message batch: \(error)", source: "Error")
         }
 
         // Clean up processing set

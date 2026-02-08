@@ -56,6 +56,17 @@ final class MessageBus {
                 episodeLogger.logOutbound(text, source: type.rawValue)
             }
 
+            // Record timestamp for wake cycle coordination
+            let coordPath = MindPaths.statePath("last-message-sent.json")
+            let coord: [String: String] = [
+                "timestamp": ISO8601DateFormatter().string(from: Date()),
+                "source": type.rawValue,
+                "summary": String(text.prefix(100))
+            ]
+            if let data = try? JSONSerialization.data(withJSONObject: coord) {
+                try? data.write(to: URL(fileURLWithPath: coordPath))
+            }
+
         } catch {
             log("[\(type.rawValue)] Send failed: \(error)", level: .error, component: "MessageBus")
             throw error
